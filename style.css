@@ -1,0 +1,147 @@
+body {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.firstsec, .secondsec, .thirdsec, .fourthsec {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+.firstsec {
+    margin: 0;
+    background: #1f2937;
+    color: white;
+    height: 30vh;
+    
+}
+.header {
+    display: flex;
+    justify-content: space-between;
+    width: 130vh;
+    align-items: baseline;
+}
+ul {
+    display: flex;
+    list-style: none;
+    width: 20vh;
+    justify-content: space-between;
+
+
+}
+a {
+    text-decoration: none;
+    color: white;
+
+}
+.secheader {
+    display: flex;
+    
+}
+.awesome {
+    max-width: 100vh;
+    display: flex;
+    flex-direction: column;
+    text-align: left;
+    align-items: left;
+    justify-content: space-between;
+
+    
+}
+.introducing {
+    font-size: 30px;
+    color: #f9faf8;
+    font-weight: 900;
+    padding: 0px;
+}
+
+.concluding {
+    font-size: 18px;
+    color: #e5e7eb;
+
+}
+img {
+    max-width: 50vh;
+    height: 15vh;
+    border-radius: 10px;
+    border: 3px solid #1149b0;
+}
+.randominfo {
+    font-size: 30px;
+    font: bold;
+}
+.secondsec {
+    background: white;
+    height: 40vh;
+}
+
+.thirdsec {
+    background: gray;
+    height: 30vh;
+    text-wrap: balance;
+    text-align: center;
+}
+.quote {
+    display: flex;
+    height: 50vh;
+    align-items: center;
+}
+.pictures {
+    display: flex;
+    text-wrap: balance;
+    text-align: center;
+    max-width: 120vh;
+    
+
+}
+.bathroom, .living, .kitchen {
+    margin: 30px;
+
+}
+
+.fourthsec {
+    background: white;
+    height: 50vh;
+    justify-content: center;
+    
+}
+
+.signup {
+    padding: 15px;
+    width: 70vh;
+    height: 36vh;
+    background: #1f2937;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: white;
+
+   
+  
+}
+.quotebutt {
+    width: 20vh;
+}
+.inputs {
+}
+.calculations {
+    width: 30vh;
+    height: 25vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 15px;
+    padding-bottom: 15px;
+    background: white;
+    color: black;
+}
+.footer {
+    background: #1f2937;
+    height: 10vh;
+}
+button {
+    width: 60px;
+}
