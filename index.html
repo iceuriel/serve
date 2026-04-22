@@ -1,92 +1,266 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Serve Cleaning</title>
-        <link rel="stylesheet" href="style.css">
-    </head>
-    <body>
-        <script>
-            let name = "uriel";
-            console.log(name)
-            console.log(43434*23213/3)
-            console.log("hello world")
-        </script>
-        <div class="firstsec">
-            <div class="header">
-                <div>header</div>
-                <ul>
-                    <li><a href="#">Seattle</a></li>
-                    <li><a href="#">Boston</a></li>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Serve — Professional Home Cleaning | Greater Boston</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
 
-                </ul>
+    <!-- NAV -->
+    <nav class="nav">
+        <div class="nav__inner">
+            <a href="#" class="nav__logo">Serve</a>
+            <ul class="nav__links">
+                <li><a href="#how-it-works">How It Works</a></li>
+                <li><a href="#quote" class="nav__cta">Get a Quote</a></li>
+            </ul>
+            <button class="nav__hamburger" aria-label="Open menu" aria-expanded="false">
+                <span></span><span></span><span></span>
+            </button>
+        </div>
+        <div class="nav__mobile-menu" id="mobile-menu">
+            <ul>
+                <li><a href="#how-it-works">How It Works</a></li>
+                <li><a href="#quote">Get a Quote</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- HERO -->
+    <section class="hero">
+        <div class="hero__content">
+            <h1 class="hero__headline">Greater Boston's Premier Cleaning Service.</h1>
+            <p class="hero__sub">Professional, insured, and background-checked cleaners — available for standard, deep, and move-out cleans across the Greater Boston area.</p>
+            <a href="#quote" class="btn btn--primary">Get Your Free Quote</a>
+        </div>
+        <div class="hero__image">
+            <img src="images/serve-header-img.jpg" alt="Professionally cleaned home interior">
+        </div>
+    </section>
+
+    <!-- TRUST BAR -->
+    <section class="trust-bar">
+        <div class="trust-bar__inner">
+            <div class="trust-bar__item">
+                <span class="trust-bar__icon">✓</span>
+                <span>Fully Insured</span>
             </div>
-            <div class="secheader">
-                <div class="awesome">
-                    <div class="introducing">
-                        <div>Introducing Serve cleaning, Seattle & Bostons Most Premier Home Cleaning Company</div>
+            <div class="trust-bar__item">
+                <span class="trust-bar__icon">✓</span>
+                <span>Background Checked</span>
+            </div>
+            <div class="trust-bar__item">
+                <span class="trust-bar__icon">✓</span>
+                <span>Satisfaction Guaranteed</span>
+            </div>
+            <div class="trust-bar__item">
+                <span class="trust-bar__icon">✓</span>
+                <span>Serving Greater Boston</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- HOW IT WORKS -->
+    <section class="how-it-works" id="how-it-works">
+        <div class="section-inner">
+            <h2 class="section-title">How It Works</h2>
+            <p class="section-sub">Three simple steps to a cleaner home.</p>
+            <div class="steps">
+                <div class="step">
+                    <div class="step__number">1</div>
+                    <h3>Request a Quote</h3>
+                    <p>Fill out your home details below. No commitment required — we'll follow up with a clear, honest price.</p>
+                </div>
+                <div class="step">
+                    <div class="step__number">2</div>
+                    <h3>We Schedule Your Clean</h3>
+                    <p>Pick a time that works for you. Our team shows up on time, fully equipped, and ready to work.</p>
+                </div>
+                <div class="step">
+                    <div class="step__number">3</div>
+                    <h3>Enjoy Your Space</h3>
+                    <p>Come home to a spotless space. We're not done until you're completely satisfied.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- WORK EXAMPLES -->
+    <!-- NOTE: Copy is aspirational, not claiming completed client work.
+         Update photos and copy when real before/after images are available. -->
+    <section class="work">
+        <div class="section-inner">
+            <h2 class="section-title">The Serve Standard</h2>
+            <p class="section-sub">Every clean is held to the same high bar — no shortcuts, no missed corners.</p>
+            <div class="work__grid">
+                <div class="work__item">
+                    <img src="images/serve-bathroom-img.jpg" alt="Spotlessly cleaned bathroom">
+                    <p>Bathrooms cleaned top to bottom — tiles, fixtures, mirrors, and floors.</p>
+                </div>
+                <div class="work__item">
+                    <img src="images/serve-kitchen-img.jpg" alt="Clean modern kitchen">
+                    <p>Kitchens degreased, wiped down, and left ready to cook in.</p>
+                </div>
+                <div class="work__item">
+                    <img src="images/serve-livingroom-img.jpg" alt="Clean living room">
+                    <p>Living spaces vacuumed, dusted, and reset — the way they should feel.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- TESTIMONIAL -->
+    <section class="testimonial">
+        <div class="section-inner">
+            <blockquote class="testimonial__quote">
+                "I honestly didn't think my apartment could look this good again. The team from Serve didn't just clean — they completely reset my space. It's the first time I've hired a service where I didn't feel the need to pre-clean before they arrived. They don't just provide a service; they provide peace of mind."
+            </blockquote>
+            <p class="testimonial__author">— Jordan M., Greater Boston</p>
+        </div>
+    </section>
+
+    <!-- QUOTE FORM -->
+    <section class="quote-section" id="quote">
+        <div class="section-inner">
+            <h2 class="section-title">Get Your Free Quote</h2>
+            <p class="section-sub">Tell us about your home and we'll follow up within 24 hours with a clear, no-obligation estimate.</p>
+
+            <form class="quote-form" id="quote-form" novalidate>
+
+                <div class="form-group">
+                    <h3 class="form-group__title">About Your Home</h3>
+                    <div class="form-row">
+                        <div class="field">
+                            <label for="cleaning-type">Type of Cleaning</label>
+                            <select id="cleaning-type" name="cleaning_type" required>
+                                <option value="">Select a type</option>
+                                <option value="standard">Standard Clean</option>
+                                <option value="deep">Deep Clean</option>
+                                <option value="move-in-out">Move-In / Move-Out</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label for="frequency">Frequency</label>
+                            <select id="frequency" name="frequency" required>
+                                <option value="">Select frequency</option>
+                                <option value="one-time">One-Time</option>
+                                <option value="weekly">Weekly</option>
+                                <option value="biweekly">Every Two Weeks</option>
+                                <option value="monthly">Monthly</option>
+                            </select>
+                        </div>
                     </div>
-                    <div class="concluding">
-                        <div>Sign up for a quote instantly by clicking the link below</div>
+                    <div class="form-row">
+                        <div class="field">
+                            <label for="bedrooms">Bedrooms</label>
+                            <select id="bedrooms" name="bedrooms" required>
+                                <option value="">Select</option>
+                                <option value="studio">Studio</option>
+                                <option value="1">1</option>
+                                <option value="2">2</option>
+                                <option value="3">3</option>
+                                <option value="4">4</option>
+                                <option value="5+">5+</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label for="bathrooms">Bathrooms</label>
+                            <select id="bathrooms" name="bathrooms" required>
+                                <option value="">Select</option>
+                                <option value="1">1</option>
+                                <option value="1.5">1.5</option>
+                                <option value="2">2</option>
+                                <option value="2.5">2.5</option>
+                                <option value="3">3</option>
+                                <option value="3+">3+</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label for="home-size">Home Size (approx.)</label>
+                            <select id="home-size" name="home_size">
+                                <option value="">Select range</option>
+                                <option value="under-500">Under 500 sq ft</option>
+                                <option value="500-1000">500–1,000 sq ft</option>
+                                <option value="1000-1500">1,000–1,500 sq ft</option>
+                                <option value="1500-2000">1,500–2,000 sq ft</option>
+                                <option value="2000-2500">2,000–2,500 sq ft</option>
+                                <option value="2500+">2,500+ sq ft</option>
+                            </select>
+                        </div>
                     </div>
-                    <button>signup</button>
+                    <div class="form-row form-row--narrow">
+                        <div class="field">
+                            <label for="pets">Pets in the Home?</label>
+                            <select id="pets" name="pets">
+                                <option value="no">No</option>
+                                <option value="yes">Yes</option>
+                            </select>
+                        </div>
+                    </div>
                 </div>
-                <img src="images/serve-header-img.jpg" alt="serve header image">
+
+                <div class="form-group">
+                    <h3 class="form-group__title">Your Contact Info</h3>
+                    <div class="form-row">
+                        <div class="field">
+                            <label for="name">Full Name</label>
+                            <input type="text" id="name" name="name" placeholder="Jane Smith" required>
+                        </div>
+                        <div class="field">
+                            <label for="phone">Phone Number</label>
+                            <input type="tel" id="phone" name="phone" placeholder="(617) 555-0100" required>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="field field--full">
+                            <label for="email">Email Address</label>
+                            <input type="email" id="email" name="email" placeholder="jane@example.com" required>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="field field--full">
+                            <label for="notes">Anything else we should know? <span class="optional">(optional)</span></label>
+                            <textarea id="notes" name="notes" rows="3" placeholder="e.g. we have a dog, the kitchen needs extra attention, access instructions..."></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-error" id="form-error" aria-live="polite"></div>
+                <button type="submit" class="btn btn--primary btn--full" id="submit-btn">
+                    Request My Free Quote
+                </button>
+            </form>
+
+            <div class="form-success" id="form-success" hidden>
+                <h3>We got it — thank you!</h3>
+                <p>We'll review your details and follow up within 24 hours with your estimate.</p>
             </div>
         </div>
-        <div class="secondsec">
-            <div class="randominfo">
-                Previous Cleanings...
-            </div>
-            <div class="pictures">
-                <div class="bathroom">
-                    <img src="images/serve-bathroom-img.jpg" alt="clean bathroom image">
-                    <div> An example of one of the bathrooms we cleaned for our clients, displaying a spotless job well done </div>
-                </div>
-                <div class="kitchen">
-                    <img src="images/serve-kitchen-img.jpg" alt="clean kitchen image">
-                    <div> This is kitchen that was cleaned for one of our clients, showing clean luxury at its fullest through our services</div>
-                </div>
-                <div class="living">
-                    <img src="images/serve-livingroom-img.jpg" alt="clean living room">
-                    <div>this is a living room that we cleaned, providing our services to give you a clean room and mind</div>
-                </div>
-            </div>
+    </section>
 
-        </div>
-        <div class="thirdsec">
-            <div class="quote">
-                "I honestly didn't think my apartment could look this good again. The team from Serve didn't just clean; they completely reset my space. It’s the first time I’ve hired a service where I didn't feel the need to 'pre-clean' before they arrived—they handled everything with such detail that I could finally just sit down and breathe. They don't just provide a service; they provide peace of mind." — Jordan M., Verified Customer
+    <!-- FOOTER -->
+    <footer class="footer">
+        <div class="footer__inner">
+            <div class="footer__brand">
+                <span class="footer__logo">Serve</span>
+                <p>Professional home cleaning for Greater Boston.</p>
             </div>
-
-        
-        </div>
-        <div class="fourthsec">
-            <div>Instant Quote Calculator</div>
-            <div class="signup">
-                <div class="inputs">
-                    <div>Number of Bedrooms</div>   
-                    <input type="text">
-                    <div>Number of Bathrooms</div>   
-                    <input type="text">
-                    <div>Square Feet</div>   
-                    <input type="text">
-                    <div>Number of Pets</div>   
-                    <input type="text">
-                </div>
-                <div class="calculations">
-                    <div>Price Breakdown</div>
-                    <button class="quotebutt">Click here to generate your quote!</button>
-
-                </div>
+            <div class="footer__contact">
+                <p>Questions? Reach us at:</p>
+                <!-- TODO: Replace with your real email and phone before launch -->
+                <a href="mailto:hello@servecleaning.com">hello@servecleaning.com</a>
             </div>
         </div>
-        <div class="footer">
-            footer will go here
+        <div class="footer__copy">
+            <p>&copy; 2026 Serve Cleaning. All rights reserved.</p>
         </div>
+    </footer>
 
-    </body>
-
-
+    <script src="script.js"></script>
+</body>
 </html>
