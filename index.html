@@ -11,6 +11,14 @@
 </head>
 <body>
 
+    <!-- LAUNCH BANNER (site-wide, persistent) -->
+    <div class="launch-banner" role="region" aria-label="Promotion">
+        <span class="launch-banner__text">
+            <span class="launch-banner__icon" aria-hidden="true">🎉</span>
+            <strong>Launch Special —</strong> 50% Off Your First Clean. Limited spots available.
+        </span>
+    </div>
+
     <!-- NAV -->
     <nav class="nav">
         <div class="nav__inner">
@@ -124,122 +132,165 @@
         </div>
     </section>
 
-    <!-- QUOTE FORM -->
+    <!-- QUOTE FLOW -->
     <section class="quote-section" id="quote">
         <div class="section-inner">
-            <h2 class="section-title">Get Your Free Quote</h2>
-            <p class="section-sub">Tell us about your home and we'll follow up within 24 hours with a clear, no-obligation estimate.</p>
 
-            <form class="quote-form" id="quote-form" novalidate>
-
-                <div class="form-group">
-                    <h3 class="form-group__title">About Your Home</h3>
-                    <div class="form-row">
-                        <div class="field">
-                            <label for="cleaning-type">Type of Cleaning</label>
-                            <select id="cleaning-type" name="cleaning_type" required>
-                                <option value="">Select a type</option>
-                                <option value="standard">Standard Clean</option>
-                                <option value="deep">Deep Clean</option>
-                                <option value="move-in-out">Move-In / Move-Out</option>
-                            </select>
-                        </div>
-                        <div class="field">
-                            <label for="frequency">Frequency</label>
-                            <select id="frequency" name="frequency" required>
-                                <option value="">Select frequency</option>
-                                <option value="one-time">One-Time</option>
-                                <option value="weekly">Weekly</option>
-                                <option value="biweekly">Every Two Weeks</option>
-                                <option value="monthly">Monthly</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="field">
-                            <label for="bedrooms">Bedrooms</label>
-                            <select id="bedrooms" name="bedrooms" required>
-                                <option value="">Select</option>
-                                <option value="studio">Studio</option>
-                                <option value="1">1</option>
-                                <option value="2">2</option>
-                                <option value="3">3</option>
-                                <option value="4">4</option>
-                                <option value="5+">5+</option>
-                            </select>
-                        </div>
-                        <div class="field">
-                            <label for="bathrooms">Bathrooms</label>
-                            <select id="bathrooms" name="bathrooms" required>
-                                <option value="">Select</option>
-                                <option value="1">1</option>
-                                <option value="1.5">1.5</option>
-                                <option value="2">2</option>
-                                <option value="2.5">2.5</option>
-                                <option value="3">3</option>
-                                <option value="3+">3+</option>
-                            </select>
-                        </div>
-                        <div class="field">
-                            <label for="home-size">Home Size (approx.)</label>
-                            <select id="home-size" name="home_size">
-                                <option value="">Select range</option>
-                                <option value="under-500">Under 500 sq ft</option>
-                                <option value="500-1000">500–1,000 sq ft</option>
-                                <option value="1000-1500">1,000–1,500 sq ft</option>
-                                <option value="1500-2000">1,500–2,000 sq ft</option>
-                                <option value="2000-2500">2,000–2,500 sq ft</option>
-                                <option value="2500+">2,500+ sq ft</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="form-row form-row--narrow">
-                        <div class="field">
-                            <label for="pets">Pets in the Home?</label>
-                            <select id="pets" name="pets">
-                                <option value="no">No</option>
-                                <option value="yes">Yes</option>
-                            </select>
-                        </div>
-                    </div>
+            <!-- STEP 1 — Contact Info -->
+            <div class="quote-step step-active" id="step-1">
+                <div class="quote-step__progress" aria-hidden="true">
+                    <span class="quote-step__dot is-active"></span>
+                    <span class="quote-step__dot"></span>
+                    <span class="quote-step__dot"></span>
                 </div>
+                <h2 class="section-title">Get Your Free Quote</h2>
+                <p class="section-sub">Start with your contact info — we'll build a custom quote for you in seconds.</p>
 
-                <div class="form-group">
-                    <h3 class="form-group__title">Your Contact Info</h3>
-                    <div class="form-row">
-                        <div class="field">
-                            <label for="name">Full Name</label>
-                            <input type="text" id="name" name="name" placeholder="Jane Smith" required>
+                <form class="quote-form" id="contact-form" novalidate>
+                    <div class="form-group">
+                        <h3 class="form-group__title">Your Contact Info</h3>
+                        <div class="form-row">
+                            <div class="field">
+                                <label for="name">Full Name</label>
+                                <input type="text" id="name" name="name" placeholder="Jane Smith" required>
+                            </div>
+                            <div class="field">
+                                <label for="phone">Phone Number</label>
+                                <input type="tel" id="phone" name="phone" placeholder="(617) 555-0100" required>
+                            </div>
                         </div>
-                        <div class="field">
-                            <label for="phone">Phone Number</label>
-                            <input type="tel" id="phone" name="phone" placeholder="(617) 555-0100" required>
+                        <div class="form-row">
+                            <div class="field field--full">
+                                <label for="email">Email Address</label>
+                                <input type="email" id="email" name="email" placeholder="jane@example.com" required>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="field field--full">
+                                <label for="address">Service Address</label>
+                                <input type="text" id="address" name="address" placeholder="123 Beacon St, Boston, MA" required>
+                            </div>
                         </div>
                     </div>
-                    <div class="form-row">
-                        <div class="field field--full">
-                            <label for="email">Email Address</label>
-                            <input type="email" id="email" name="email" placeholder="jane@example.com" required>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="field field--full">
-                            <label for="notes">Anything else we should know? <span class="optional">(optional)</span></label>
-                            <textarea id="notes" name="notes" rows="3" placeholder="e.g. We have a dog, neighborhood, access instructions, the kitchen needs extra attention..."></textarea>
-                        </div>
-                    </div>
-                </div>
 
-                <div class="form-error" id="form-error" aria-live="polite"></div>
-                <button type="submit" class="btn btn--primary btn--full" id="submit-btn">
-                    Request My Free Quote
-                </button>
-            </form>
-
-            <div class="form-success" id="form-success" hidden>
-                <h3>We got it — thank you!</h3>
-                <p>We'll review your details and follow up within 24 hours with your estimate.</p>
+                    <div class="form-error" id="contact-error" aria-live="polite"></div>
+                    <button type="submit" class="btn btn--primary btn--full" id="contact-submit">
+                        Continue to Quote
+                    </button>
+                </form>
             </div>
+
+            <!-- STEP 2 — Service + Unit Selection -->
+            <div class="quote-step step-hidden" id="step-2">
+                <div class="quote-step__progress" aria-hidden="true">
+                    <span class="quote-step__dot is-done"></span>
+                    <span class="quote-step__dot is-active"></span>
+                    <span class="quote-step__dot"></span>
+                </div>
+                <h2 class="section-title">Tell Us About Your Home</h2>
+                <p class="section-sub">A few quick details and we'll calculate your price instantly.</p>
+
+                <form class="quote-form" id="service-form" novalidate>
+
+                    <div class="form-group">
+                        <h3 class="form-group__title">Service Type</h3>
+                        <div class="service-cards">
+                            <label class="service-card">
+                                <input type="radio" name="service_type" value="deep" checked>
+                                <span class="service-card__inner">
+                                    <span class="service-card__title">First Visit Deep Clean</span>
+                                    <span class="service-card__desc">Top-to-bottom deep clean — fridge, oven, windows, and baseboards all included. Every first visit starts here.</span>
+                                </span>
+                            </label>
+                            <label class="service-card">
+                                <input type="radio" name="service_type" value="moveout">
+                                <span class="service-card__inner">
+                                    <span class="service-card__title">Move-In / Move-Out Clean</span>
+                                    <span class="service-card__desc">Empty unit deep clean — interior cabinets, walls, every appliance, ready for keys.</span>
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <h3 class="form-group__title">Unit Size</h3>
+                        <div class="form-row">
+                            <div class="field field--full">
+                                <label for="unit-type">Choose your unit size</label>
+                                <select id="unit-type" name="unit_type" required>
+                                    <option value="studio">Studio (&lt; 600 sqft)</option>
+                                    <option value="1br_1ba">1 BR / 1 BA (600–800 sqft)</option>
+                                    <option value="2br_1ba" selected>2 BR / 1 BA (800–1,200 sqft)</option>
+                                    <option value="2br_2ba">2 BR / 2 BA (1,000–1,400 sqft)</option>
+                                    <option value="3br_2ba">3 BR / 2 BA (1,400–2,000 sqft)</option>
+                                    <option value="4br_2ba">4 BR / 2–3 BA (2,000–2,800 sqft)</option>
+                                    <option value="5br_3ba">5 BR / 3 BA (2,800–3,500 sqft)</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <h3 class="form-group__title">Optional Add-Ons</h3>
+                        <div class="modifier-list">
+                            <label class="modifier">
+                                <input type="checkbox" name="mod_pets" value="pets">
+                                <span class="modifier__label">Heavy pet hair</span>
+                                <span class="modifier__price">+$25</span>
+                            </label>
+                            <label class="modifier">
+                                <input type="checkbox" name="mod_stairs" value="stairs">
+                                <span class="modifier__label">3+ flights, no elevator</span>
+                                <span class="modifier__price">+$20</span>
+                            </label>
+                            <label class="modifier">
+                                <input type="checkbox" name="mod_sameDay" value="sameDay">
+                                <span class="modifier__label">Same-day / next-day booking</span>
+                                <span class="modifier__price">+$35</span>
+                            </label>
+                            <label class="modifier">
+                                <input type="checkbox" name="mod_outsideCore" value="outsideCore">
+                                <span class="modifier__label">Outside Boston/Cambridge core</span>
+                                <span class="modifier__price">+$25</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="form-error" id="service-error" aria-live="polite"></div>
+                    <div class="step-actions">
+                        <button type="button" class="btn btn--ghost" id="back-to-step-1">← Back</button>
+                        <button type="submit" class="btn btn--primary" id="service-submit">Get My Quote</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- STEP 3 — Quote Display -->
+            <div class="quote-step step-hidden" id="step-3">
+                <div class="quote-step__progress" aria-hidden="true">
+                    <span class="quote-step__dot is-done"></span>
+                    <span class="quote-step__dot is-done"></span>
+                    <span class="quote-step__dot is-active"></span>
+                </div>
+                <div class="quote-display" id="quote-display">
+                    <!-- Rendered dynamically by script.js -->
+                </div>
+
+                <div class="quote-bottom-bar" id="quote-bottom-bar">
+                    <div class="quote-bottom-bar__inner">
+                        <div class="quote-bottom-bar__total">
+                            <span class="quote-bottom-bar__label">Your First Visit (50% Off)</span>
+                            <span class="quote-bottom-bar__price" id="bottom-bar-price">$0</span>
+                        </div>
+                        <button type="button" class="btn btn--primary" id="reserve-btn">Reserve This Quote</button>
+                    </div>
+                </div>
+
+                <div class="quote-confirmation" id="quote-confirmation" hidden>
+                    <h3>You're all set, <span id="confirm-name">there</span>.</h3>
+                    <p>We'll reach out within 24 hours to confirm availability and get you on the schedule.</p>
+                </div>
+            </div>
+
         </div>
     </section>
 
