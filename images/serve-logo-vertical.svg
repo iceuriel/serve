@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 320" role="img" aria-label="Serve Home Cleaning logo">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@500;700&amp;display=swap');
+    .wordmark { font-family: 'Montserrat', system-ui, sans-serif; font-weight: 700; font-size: 56px; letter-spacing: 2.8px; fill: #1E3A5F; }
+    .tagline  { font-family: 'Montserrat', system-ui, sans-serif; font-weight: 500; font-size: 18px; letter-spacing: 3.8px; fill: #6BA8D6; }
+  </style>
+  <g transform="translate(95,30) scale(0.9)">
+    <path d="M 50 8 L 92 40 Q 94 41.5 94 44 L 94 86 Q 94 92 88 92 L 12 92 Q 6 92 6 86 L 6 44 Q 6 41.5 8 40 Z" fill="#6BA8D6"/>
+  </g>
+  <text x="140" y="190" text-anchor="middle" class="wordmark">SERVE</text>
+  <text x="140" y="222" text-anchor="middle" class="tagline">HOME CLEANING</text>
+</svg>
