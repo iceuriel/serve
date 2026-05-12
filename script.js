@@ -4,21 +4,6 @@
    ============================================================ */
 
 
-/* --- Sticky Banner: keep nav offset matched to banner height --- */
-(function () {
-    const banner = document.querySelector('.launch-banner');
-    const nav    = document.querySelector('.nav');
-    if (!banner || !nav) return;
-
-    function sync() {
-        nav.style.top = banner.offsetHeight + 'px';
-    }
-    sync();
-    window.addEventListener('resize', sync);
-    window.addEventListener('load', sync);
-})();
-
-
 /* --- Mobile Nav Toggle --- */
 (function () {
     const hamburger = document.querySelector('.nav__hamburger');
@@ -160,6 +145,13 @@ function calculateQuote({ unitType, serviceType, activeModifiers = [] }) {
         serviceType: null,
         unitType: null,
         modifiers: [],
+        schedulePreference: null,
+        schedulePreferenceLabel: null,
+    };
+
+    const SCHEDULE_LABELS = {
+        early: 'Earlier in the Day (8:00 AM – 12:00 PM)',
+        late:  'Later in the Day (12:00 PM – 5:00 PM)',
     };
 
     /* --- Step navigation --- */
@@ -257,9 +249,17 @@ function calculateQuote({ unitType, serviceType, activeModifiers = [] }) {
         e.preventDefault();
         serviceError.textContent = '';
 
-        const data        = new FormData(serviceForm);
-        const serviceType = data.get('service_type');
-        const unitType    = data.get('unit_type');
+        const data         = new FormData(serviceForm);
+        const serviceType  = data.get('service_type');
+        const unitType     = data.get('unit_type');
+        const schedulePref = data.get('schedule_preference');
+
+        if (!schedulePref) {
+            serviceError.textContent = 'Please choose a scheduling preference.';
+            const firstSchedule = serviceForm.querySelector('input[name="schedule_preference"]');
+            if (firstSchedule) firstSchedule.focus();
+            return;
+        }
 
         const activeModifiers = [];
         ['pets', 'stairs', 'sameDay', 'outsideCore'].forEach(key => {
@@ -272,10 +272,12 @@ function calculateQuote({ unitType, serviceType, activeModifiers = [] }) {
             return;
         }
 
-        state.serviceType = serviceType;
-        state.unitType    = unitType;
-        state.modifiers   = activeModifiers;
-        state.quote       = quote;
+        state.serviceType             = serviceType;
+        state.unitType                = unitType;
+        state.modifiers               = activeModifiers;
+        state.quote                   = quote;
+        state.schedulePreference      = schedulePref;
+        state.schedulePreferenceLabel = SCHEDULE_LABELS[schedulePref] || schedulePref;
 
         renderQuote();
         showStep(3);
@@ -347,7 +349,6 @@ function calculateQuote({ unitType, serviceType, activeModifiers = [] }) {
             </div>
 
             <div class="quote-discount">
-                <div class="quote-discount__badge">🎉 LAUNCH SPECIAL — 50% OFF</div>
                 <div class="quote-discount__original">$${original}</div>
                 <div class="quote-discount__price">$${discount}</div>
                 <div class="quote-discount__note">Early client pricing — limited availability.</div>
@@ -364,6 +365,10 @@ function calculateQuote({ unitType, serviceType, activeModifiers = [] }) {
                 <div class="summary-row">
                     <span class="summary-row__label">Service Address</span>
                     <span class="summary-row__value">${escapeHtml(contact.address)}</span>
+                </div>
+                <div class="summary-row">
+                    <span class="summary-row__label">Scheduling Preference</span>
+                    <span class="summary-row__value">${escapeHtml(state.schedulePreferenceLabel || '—')}</span>
                 </div>
             </div>
 
@@ -402,22 +407,24 @@ function calculateQuote({ unitType, serviceType, activeModifiers = [] }) {
         const modifierLabels = q.modList.map(m => m.label);
 
         postToSheets({
-            event:                'quote_reserved',
-            timestamp:            new Date().toISOString(),
-            name:                 contact.name,
-            email:                contact.email,
-            phone:                contact.phone,
-            address:              contact.address,
-            service_type:         state.serviceType,
-            unit_type:            state.unitType,
-            unit_label:           q.unit.label,
-            modifiers_applied:    modifierLabels,
-            original_price:       Math.round(q.fullPrice),
-            discount_applied:     '50%',
-            first_visit_total:    Math.round(q.firstVisitTotal),
-            recurring_weekly:     Math.round(q.recurringPlans.find(p => p.key === 'weekly').perVisit),
-            recurring_biweekly:   Math.round(q.recurringPlans.find(p => p.key === 'biweekly').perVisit),
-            recurring_monthly:    Math.round(q.recurringPlans.find(p => p.key === 'monthly').perVisit),
+            event:                     'quote_reserved',
+            timestamp:                 new Date().toISOString(),
+            name:                      contact.name,
+            email:                     contact.email,
+            phone:                     contact.phone,
+            address:                   contact.address,
+            service_type:              state.serviceType,
+            unit_type:                 state.unitType,
+            unit_label:                q.unit.label,
+            modifiers_applied:         modifierLabels,
+            original_price:            Math.round(q.fullPrice),
+            discount_applied:          '50%',
+            first_visit_total:         Math.round(q.firstVisitTotal),
+            recurring_weekly:          Math.round(q.recurringPlans.find(p => p.key === 'weekly').perVisit),
+            recurring_biweekly:        Math.round(q.recurringPlans.find(p => p.key === 'biweekly').perVisit),
+            recurring_monthly:         Math.round(q.recurringPlans.find(p => p.key === 'monthly').perVisit),
+            schedule_preference:       state.schedulePreference,
+            schedule_preference_label: state.schedulePreferenceLabel,
         });
 
         // Brief disabled state, then swap to confirmation

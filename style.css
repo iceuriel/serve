@@ -510,6 +510,14 @@ a {
     letter-spacing: 0.04em;
 }
 
+.form-group__help {
+    font-size: 0.85rem;
+    color: var(--color-text-muted);
+    line-height: 1.6;
+    margin-top: -0.75rem;
+    margin-bottom: 1.1rem;
+}
+
 .form-row {
     display: flex;
     flex-direction: column;
@@ -655,37 +663,6 @@ a {
     color: #4b5563;
     border-top: 1px solid #374151;
     padding-top: 1.25rem;
-}
-
-
-/* ============================================================
-   LAUNCH BANNER (sticky, site-wide)
-   ============================================================ */
-.launch-banner {
-    background: var(--color-accent);
-    color: #fff;
-    text-align: center;
-    padding: 0.6rem 1rem;
-    font-size: 0.85rem;
-    font-weight: 500;
-    line-height: 1.4;
-    position: sticky;
-    top: 0;
-    z-index: 110;
-    border-bottom: 1px solid rgba(255,255,255,0.15);
-}
-
-.launch-banner strong {
-    font-weight: 700;
-}
-
-.launch-banner__icon {
-    margin-right: 0.25rem;
-}
-
-/* Push the sticky nav below the banner */
-.nav {
-    top: 38px;
 }
 
 
