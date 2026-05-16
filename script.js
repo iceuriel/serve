@@ -44,7 +44,7 @@ const PRICING_CONFIG = {
         "moveout": { multiplier: 4.00, label: "Move-In / Move-Out Clean", tagline: "Empty-unit deep clean — interior cabinets, walls, every appliance, ready for keys." },
     },
 
-    launchDiscount: 0.50,
+    launchDiscount: 0,
 
     recurringDiscounts: {
         weekly:   { label: "Weekly",   cadence: "Every 7 days",  discount: 0.25, badge: "BEST VALUE" },
@@ -290,8 +290,7 @@ function calculateQuote({ unitType, serviceType, activeModifiers = [] }) {
         if (!q || !contact) return;
 
         const firstName = (contact.name.split(/\s+/)[0]) || 'there';
-        const original  = Math.round(q.fullPrice);
-        const discount  = Math.round(q.firstVisitTotal);
+        const totalPrice = Math.round(q.firstVisitTotal);
         const isMoveout = state.serviceType === 'moveout';
         const serviceBadge = isMoveout ? 'MOVE-IN / MOVE-OUT' : 'FIRST VISIT DEEP CLEAN';
 
@@ -349,9 +348,8 @@ function calculateQuote({ unitType, serviceType, activeModifiers = [] }) {
             </div>
 
             <div class="quote-discount">
-                <div class="quote-discount__original">$${original}</div>
-                <div class="quote-discount__price">$${discount}</div>
-                <div class="quote-discount__note">Early client pricing — limited availability.</div>
+                <div class="quote-discount__price">$${totalPrice}</div>
+                <div class="quote-discount__note">Your first-visit total.</div>
             </div>
 
             <div class="quote-card">
@@ -383,7 +381,7 @@ function calculateQuote({ unitType, serviceType, activeModifiers = [] }) {
             <div class="recurring-section">
                 <div class="recurring-section__header">
                     <div class="recurring-section__title">After Your First Visit — Keep Serve on Your Schedule</div>
-                    <p class="recurring-section__sub">Your first-visit price is locked in with the 50% launch discount. After the deep clean, recurring visits are priced at the standard rate below. No commitment required today — just see what it looks like.</p>
+                    <p class="recurring-section__sub">After your first-visit deep clean, recurring visits are priced at the standard rate below. No commitment required today — just see what it looks like.</p>
                 </div>
                 <div class="plan-grid">
                     ${planCards}
@@ -391,7 +389,7 @@ function calculateQuote({ unitType, serviceType, activeModifiers = [] }) {
             </div>
         `;
 
-        bottomPriceEl.textContent = '$' + discount;
+        bottomPriceEl.textContent = '$' + totalPrice;
     }
 
     /* --- Reserve --- */
@@ -418,7 +416,7 @@ function calculateQuote({ unitType, serviceType, activeModifiers = [] }) {
             unit_label:                q.unit.label,
             modifiers_applied:         modifierLabels,
             original_price:            Math.round(q.fullPrice),
-            discount_applied:          '50%',
+            discount_applied:          'None',
             first_visit_total:         Math.round(q.firstVisitTotal),
             recurring_weekly:          Math.round(q.recurringPlans.find(p => p.key === 'weekly').perVisit),
             recurring_biweekly:        Math.round(q.recurringPlans.find(p => p.key === 'biweekly').perVisit),
