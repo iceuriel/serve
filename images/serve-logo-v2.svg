@@ -1,0 +1,5 @@
+<svg width="400" height="480" viewBox="40 10 200 240" role="img" aria-label="Serve Home Cleaning" xmlns="http://www.w3.org/2000/svg">
+    <path d="M 88 150 L 88 78 L 145 30 L 202 78 L 202 118" fill="none" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"></path>
+    <text x="140" y="196" text-anchor="middle" font-family="&#39;Times New Roman&#39;, Times, serif" font-weight="400" font-size="64" letter-spacing="1" fill="#ffffff">Serve</text>
+    <text x="140" y="228" text-anchor="middle" font-family="&#39;Times New Roman&#39;, Times, serif" font-weight="400" font-size="17" letter-spacing="4.5" fill="#6BA8D6">HOME CLEANING</text>
+</svg>
