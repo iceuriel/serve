@@ -26,145 +26,184 @@
 
 
 /* ============================================================
-   Serve Pricing Engine — edit PRICING_CONFIG to adjust rates
+   Serve Pricing Engine  (spec §3 — deterministic)
+   Edit PRICING and ZIP_TIERS to adjust rates / coverage.
    ============================================================ */
-const PRICING_CONFIG = {
-    baseRates: {
-        "studio":    { label: "Studio",          sqft: "< 600 sqft",       base: 115 },
-        "1br_1ba":   { label: "1 BR / 1 BA",     sqft: "600–800 sqft",    base: 125 },
-        "2br_1ba":   { label: "2 BR / 1 BA",     sqft: "800–1,200 sqft",  base: 145 },
-        "2br_2ba":   { label: "2 BR / 2 BA",     sqft: "1,000–1,400 sqft",base: 165 },
-        "3br_2ba":   { label: "3 BR / 2 BA",     sqft: "1,400–2,000 sqft",base: 185 },
-        "4br_2ba":   { label: "4 BR / 2–3 BA",   sqft: "2,000–2,800 sqft",base: 230 },
-        "5br_3ba":   { label: "5 BR / 3 BA",     sqft: "2,800–3,500 sqft",base: 285 },
-    },
+const PRICING = {
+    BASE: 150,
+    PER_BEDROOM: 33,
+    PER_BATHROOM: 66,
 
-    serviceMultipliers: {
-        "deep":    { multiplier: 2.75, label: "First Visit Deep Clean",  tagline: "Top-to-bottom deep clean — fridge, oven, windows, and baseboards all included." },
-        "moveout": { multiplier: 4.00, label: "Move-In / Move-Out Clean", tagline: "Empty-unit deep clean — interior cabinets, walls, every appliance, ready for keys." },
-    },
+    DEEP_MULT: 1.4,
+    DEEP_MULT_SMALL: 1.2,        // bedrooms <= 1 (studio or 1BR)
+    MOVEOUT_MULT: 2.0,
+    MOVEOUT_MULT_SMALL: 1.8,     // bedrooms <= 1
 
-    launchDiscount: 0,
+    FIRST_CLEAN_FACTOR: 0.5,     // first clean = deep price x 0.5
 
-    recurringDiscounts: {
-        weekly:   { label: "Weekly",   cadence: "Every 7 days",  discount: 0.25, badge: "BEST VALUE" },
-        biweekly: { label: "Biweekly", cadence: "Every 14 days", discount: 0.20, badge: "RECOMMENDED" },
-        monthly:  { label: "Monthly",  cadence: "Every 4 weeks", discount: 0.10, badge: null },
-    },
+    FREQ: { weekly: 0.39, biweekly: 0.43, monthly: 0.50 },  // x standard, condition 1.0
 
-    includedAddons: [
-        { label: "Inside fridge",          anchor: 60 },
-        { label: "Inside oven",            anchor: 50 },
-        { label: "Interior windows",       anchor: 40 },
-        { label: "Baseboards (all rooms)", anchor: 25 },
-    ],
+    CONDITION: { light: 0.9, standard: 1.0, heavy: 1.3 },
 
-    modifiers: {
-        pets:        { label: "Heavy pet hair",                type: "flat", value: 25 },
-        stairs:      { label: "3+ flights, no elevator",       type: "flat", value: 20 },
-        sameDay:     { label: "Same-day / next-day booking",   type: "flat", value: 35 },
-        outsideCore: { label: "Outside Boston/Cambridge core", type: "flat", value: 25 },
-    },
+    ADDONS: { fridge: 45, oven: 40 },   // First Clean only; Move-Out includes them
+
+    EXTENDED_ZIP_FEE: 25,        // per visit, all service types incl. recurring display
+    OVERFLOW_BEDROOMS: 5,        // >= 5 bedrooms -> custom quote state
+    NOSTACK_BEDROOMS: 4,         // >= 4 + heavy + first clean -> no 50% discount
+    OVERFLOW_HOURLY_RATE: 130,   // copy only, never computed
 };
 
-function calculateQuote({ unitType, serviceType, activeModifiers = [] }) {
-    const unit    = PRICING_CONFIG.baseRates[unitType];
-    const service = PRICING_CONFIG.serviceMultipliers[serviceType];
-    if (!unit || !service) return null;
+// PLACEHOLDER LISTS — the operator must edit these before deploy.
+const ZIP_TIERS = {
+    CORE: ["02108","02109","02110","02111","02113","02114","02115","02116",
+           "02118","02119","02120","02121","02122","02124","02125","02126",
+           "02127","02128","02129","02130","02131","02132","02134","02135",
+           "02138","02139","02140","02141","02142","02143","02144","02145",
+           "02445","02446","02467"],          // Boston core + Cambridge/Somerville/Brookline — EDIT ME
+    EXTENDED: ["02150","02151","02152","02149","02155","02148","02472","02474",
+               "02476","02458","02459","02460","02461","02462","02464","02465",
+               "02466","02468"],              // +$25 ring — EDIT ME
+};
 
-    const baseStandard       = unit.base;
-    const subtotalBeforeMods = baseStandard * service.multiplier;
+function zipTier(zip) {
+    if (ZIP_TIERS.CORE.includes(zip))     return 'core';
+    if (ZIP_TIERS.EXTENDED.includes(zip)) return 'extended';
+    return 'unknown';
+}
 
-    let modAdjustment = 0;
-    const modList = [];
-    activeModifiers.forEach((key) => {
-        const mod = PRICING_CONFIG.modifiers[key];
-        if (!mod) return;
-        modAdjustment += mod.value;
-        modList.push({ label: mod.label, amount: mod.value });
+/**
+ * Deterministic quote per spec §3.2 / §3.3. All price fields returned RAW
+ * (un-rounded); apply Math.ceil at display (R11). `frequency` is 'once' or a
+ * FREQ key and only affects `steadySelected`, never the one-time price.
+ */
+function computeQuote(input) {
+    const { bedrooms, bathrooms, service, condition, addonFridge, addonOven, zip, frequency } = input;
+
+    const tier   = zipTier(zip);
+    const zipFee = tier === 'extended' ? PRICING.EXTENDED_ZIP_FEE : 0;      // R8
+
+    // R1 — base formula
+    const standard = PRICING.BASE + PRICING.PER_BEDROOM * bedrooms + PRICING.PER_BATHROOM * bathrooms;
+
+    // R2 — small-unit multipliers
+    const smallUnit = bedrooms <= 1;
+    const deepMult  = smallUnit ? PRICING.DEEP_MULT_SMALL : PRICING.DEEP_MULT;
+    const moveMult  = smallUnit ? PRICING.MOVEOUT_MULT_SMALL : PRICING.MOVEOUT_MULT;
+
+    // R3 — condition applies to one-time services only
+    const condFactor   = PRICING.CONDITION[condition] != null ? PRICING.CONDITION[condition] : 1.0;
+    const condAdjusted = standard * condFactor;
+
+    const deepPrice    = condAdjusted * deepMult;
+    const moveOutPrice = condAdjusted * moveMult;
+
+    // R5 — 4BR+ no-stack rule (heavy + first clean): full deep price, no 50% off
+    const noStack = bedrooms >= PRICING.NOSTACK_BEDROOMS && condition === 'heavy' && service === 'first_clean';
+
+    // R6 — add-ons are First Clean only
+    let addons = 0;
+    if (service === 'first_clean') {
+        if (addonFridge) addons += PRICING.ADDONS.fridge;
+        if (addonOven)   addons += PRICING.ADDONS.oven;
+    }
+
+    let oneTime, deepAnchor = null, discountApplies = false;
+    if (service === 'move_out') {
+        oneTime = moveOutPrice + zipFee;
+    } else {
+        if (noStack) {
+            oneTime = deepPrice + addons + zipFee;             // full deep price, no anchor
+        } else {
+            deepAnchor = deepPrice;                            // R4 — struck-through anchor
+            discountApplies = true;
+            oneTime = deepPrice * PRICING.FIRST_CLEAN_FACTOR + addons + zipFee;
+        }
+    }
+
+    // R3 / R7 — recurring steady-state ALWAYS at condition 1.0, + zipFee
+    const freqSteady = {};
+    Object.keys(PRICING.FREQ).forEach(f => {
+        freqSteady[f] = Math.ceil(standard * PRICING.FREQ[f] + zipFee);
     });
 
-    const fullPrice       = subtotalBeforeMods + modAdjustment;
-    const firstVisitTotal = fullPrice * (1 - PRICING_CONFIG.launchDiscount);
-
-    const recurringPlans = Object.entries(PRICING_CONFIG.recurringDiscounts).map(
-        ([key, plan]) => ({
-            key,
-            label:    plan.label,
-            cadence:  plan.cadence,
-            badge:    plan.badge,
-            perVisit: baseStandard * (1 - plan.discount),
-        })
-    );
-
-    const includedValue = PRICING_CONFIG.includedAddons.reduce((sum, a) => sum + a.anchor, 0);
+    const steadySelected = (service === 'first_clean' && frequency && frequency !== 'once' && PRICING.FREQ[frequency] != null)
+        ? freqSteady[frequency]
+        : null;
 
     return {
-        unit,
-        service,
-        baseStandard,
-        subtotalBeforeMods,
-        modList,
-        modAdjustment,
-        fullPrice,
-        launchDiscount: PRICING_CONFIG.launchDiscount,
-        firstVisitTotal,
-        recurringPlans,
-        includedValue,
-        includedAddons: PRICING_CONFIG.includedAddons,
+        tier, zipFee, standard, smallUnit, noStack, discountApplies, addons,
+        displayPrice: Math.ceil(oneTime),                       // R11 — whole dollars, round up
+        deepAnchorDisplay: deepAnchor != null ? Math.ceil(deepAnchor) : null,
+        freqSteady, steadySelected,
     };
 }
 
 
 /* ============================================================
-   Quote Flow — Multi-Step State, Sheets POSTs, Step 3 Render
+   Booking Flow — Build -> Price -> Reserve
    ============================================================ */
 (function () {
     const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbwYbRsTSiZKPyfGtlFkGIXkT5Qfkfu4yefgBOBkF21uOrDz9XFEjz8lNjwAXYkLir7z/exec';
 
-    const step1 = document.getElementById('step-1');
-    const step2 = document.getElementById('step-2');
-    const step3 = document.getElementById('step-3');
-    if (!step1 || !step2 || !step3) return;
+    const $ = (id) => document.getElementById(id);
 
-    const contactForm   = document.getElementById('contact-form');
-    const serviceForm   = document.getElementById('service-form');
-    const contactError  = document.getElementById('contact-error');
-    const serviceError  = document.getElementById('service-error');
-    const backBtn       = document.getElementById('back-to-step-1');
-    const reserveBtn    = document.getElementById('reserve-btn');
-    const display       = document.getElementById('quote-display');
-    const bottomBar     = document.getElementById('quote-bottom-bar');
-    const bottomPriceEl = document.getElementById('bottom-bar-price');
-    const confirmBlock  = document.getElementById('quote-confirmation');
-    const confirmName   = document.getElementById('confirm-name');
+    const stepEls = {
+        1:          $('step-1'),
+        2:          $('step-2'),
+        3:          $('step-3'),
+        overflow:   $('state-overflow'),
+        confirmed:  $('state-confirmed'),
+    };
+    if (!stepEls[1] || !stepEls[2] || !stepEls[3]) return;
 
+    const progressEl = $('flow-progress');
+
+    /* --- Content lists (spec §5, Step 2 accordion) --- */
+    const INCLUDED_FIRST = [
+        'Dusting &amp; wiping all accessible surfaces and walls',
+        'Vacuum + mop all floors — including under and behind furniture',
+        'Blinds',
+        'Full bathroom scrub — sink, toilet, tub/shower, mirror',
+        'Kitchen — counters, sink, stovetop, appliance exteriors, cabinet fronts',
+        'Doors, frames, light switches and outlet covers',
+        'Detailed hand-scrubbing of built-up grime',
+    ];
+    const INCLUDED_MOVEOUT_EXTRA = [
+        'Windows and sills',
+        'Inside cabinets',
+        'Baseboards',
+        'Appliance interiors',
+    ];
+
+    /* --- State --- */
     const state = {
-        contact: null,
+        zip: '',
+        tier: 'unknown',
+        bedrooms: 2,
+        bathrooms: 1,
+        service: 'first_clean',
+        condition: 'standard',
+        addonFridge: false,
+        addonOven: false,
+        frequency: 'once',
+        timePreference: null,
         quote: null,
-        serviceType: null,
-        unitType: null,
-        modifiers: [],
-        schedulePreference: null,
-        schedulePreferenceLabel: null,
+        attribution: readAttribution(),
     };
 
-    const SCHEDULE_LABELS = {
-        early: 'Earlier in the Day (8:00 AM – 12:00 PM)',
-        late:  'Later in the Day (12:00 PM – 5:00 PM)',
-    };
-
-    /* --- Step navigation --- */
-    function showStep(n) {
-        [step1, step2, step3].forEach((el, i) => {
-            el.classList.toggle('step-active', i === n - 1);
-            el.classList.toggle('step-hidden', i !== n - 1);
-        });
-        const target = document.getElementById('quote');
-        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    /* --- Attribution (src / UTM) — read once, persist across steps --- */
+    function readAttribution() {
+        let saved = {};
+        try { saved = JSON.parse(sessionStorage.getItem('serve_attr') || '{}'); } catch (_) {}
+        const params = new URLSearchParams(location.search);
+        const keys = ['src', 'utm_source', 'utm_medium', 'utm_campaign'];
+        const attr = {};
+        keys.forEach(k => { attr[k] = params.get(k) || saved[k] || null; });
+        try { sessionStorage.setItem('serve_attr', JSON.stringify(attr)); } catch (_) {}
+        return attr;
     }
 
-    /* --- Sheets POST (fire-and-forget) --- */
+    /* --- Sheets POST (fire-and-forget, never blocks UX) --- */
     function postToSheets(payload) {
         try {
             fetch(SHEETS_URL, {
@@ -173,277 +212,434 @@ function calculateQuote({ unitType, serviceType, activeModifiers = [] }) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
             }).catch(() => {});
-        } catch (_) {
-            // silent — never block UX
-        }
+        } catch (_) { /* silent */ }
     }
 
-    /* --- Step 1: validate contact --- */
-    function validateContact() {
-        contactError.textContent = '';
-        contactForm.querySelectorAll('.error').forEach(el => el.classList.remove('error'));
-
-        const required = ['name', 'phone', 'email', 'address'];
-        let valid = true;
-        let firstBad = null;
-
-        required.forEach(name => {
-            const el = contactForm.querySelector('[name="' + name + '"]');
-            if (!el || !el.value.trim()) {
-                if (el) el.classList.add('error');
-                valid = false;
-                if (!firstBad && el) firstBad = el;
-            }
-        });
-
-        const emailEl = contactForm.querySelector('[name="email"]');
-        if (emailEl && emailEl.value.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailEl.value.trim())) {
-            emailEl.classList.add('error');
-            valid = false;
-            if (!firstBad) firstBad = emailEl;
-        }
-
-        if (!valid) {
-            contactError.textContent = 'Please fill out all required fields.';
-            if (firstBad) firstBad.focus();
-        }
-        return valid;
-    }
-
-    contactForm.addEventListener('submit', function (e) {
-        e.preventDefault();
-        if (!validateContact()) return;
-
-        const data = new FormData(contactForm);
-        state.contact = {
-            name:    (data.get('name')    || '').trim(),
-            phone:   (data.get('phone')   || '').trim(),
-            email:   (data.get('email')   || '').trim(),
-            address: (data.get('address') || '').trim(),
+    /* --- Payload builder: legacy fields (keep Apps Script working) + §6 additions --- */
+    function basePayload(eventType, legacyEvent) {
+        const now = new Date().toISOString();
+        const a = state.attribution;
+        const q = state.quote;
+        return {
+            // legacy fields the existing Apps Script reads
+            event:      legacyEvent,
+            timestamp:  now,
+            // §6 additive schema
+            event_type:         eventType,
+            zip:                state.zip,
+            zip_tier:           state.tier,
+            bedrooms:           state.bedrooms,
+            bathrooms:          state.bathrooms,
+            service:            state.service,
+            condition:          state.condition,
+            addon_fridge:       state.addonFridge,
+            addon_oven:         state.addonOven,
+            frequency_selected: state.frequency,
+            quote_price:        q ? q.displayPrice : null,
+            steady_state_price: q ? q.steadySelected : null,
+            time_preference:    state.timePreference,
+            utm_source:         a.utm_source,
+            utm_medium:         a.utm_medium,
+            utm_campaign:       a.utm_campaign,
+            src:                a.src,
+            page_path:          location.pathname,
+            submitted_at:       now,
         };
+    }
 
-        // Fire-and-forget lead capture — never block the user
-        postToSheets({
-            event: 'lead_captured',
-            timestamp: new Date().toISOString(),
-            name:    state.contact.name,
-            email:   state.contact.email,
-            phone:   state.contact.phone,
-            address: state.contact.address,
+    function bedroomsLabel(n) {
+        if (n === 0) return 'Studio';
+        if (n >= PRICING.OVERFLOW_BEDROOMS) return n + '+ BR';
+        return n + ' BR';
+    }
+    function unitLabel() {
+        return bedroomsLabel(state.bedrooms) + ' / ' + state.bathrooms + ' BA';
+    }
+    function addonLabels() {
+        const list = [];
+        if (state.service === 'first_clean') {
+            if (state.addonFridge) list.push('Inside the fridge');
+            if (state.addonOven)   list.push('Inside the oven');
+        }
+        return list;
+    }
+    function timePrefLabel() {
+        if (state.timePreference === 'earlier') return 'Earlier in the Day';
+        if (state.timePreference === 'later')   return 'Later in the Day';
+        return '';
+    }
+
+    /* --- View / progress navigation --- */
+    function setView(key) {
+        Object.values(stepEls).forEach(el => {
+            if (!el) return;
+            el.classList.remove('step-active');
+            el.classList.add('step-hidden');
         });
+        const el = stepEls[key];
+        if (el) {
+            el.classList.add('step-active');
+            el.classList.remove('step-hidden');
+            updateProgress(parseInt(el.getAttribute('data-progress'), 10) || 1);
+        }
+        const anchor = $('quote');
+        if (anchor) anchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
 
-        showStep(2);
+    function updateProgress(n) {
+        if (!progressEl) return;
+        progressEl.querySelectorAll('.flow-progress__step').forEach(step => {
+            const p = parseInt(step.getAttribute('data-progress'), 10);
+            step.classList.toggle('is-active', p === n);
+            step.classList.toggle('is-done', p < n);
+        });
+    }
+
+    /* ========================================================
+       STEP 1 — Build
+       ======================================================== */
+    const buildForm    = $('build-form');
+    const zipInput     = $('zip');
+    const zipStatus    = $('zip-status');
+    const buildError   = $('build-error');
+    const buildSubmit  = $('build-submit');
+    const zipWaitlist  = $('zip-waitlist');
+    const waitlistCopy = $('waitlist-copy');
+
+    /* Steppers */
+    function initStepper(elId, valueId, onChange) {
+        const el = $(elId);
+        const valEl = $(valueId);
+        if (!el) return;
+        const min = parseInt(el.getAttribute('data-min'), 10);
+        const max = parseInt(el.getAttribute('data-max'), 10);
+
+        function render() {
+            const v = parseInt(el.getAttribute('data-value'), 10);
+            valEl.textContent = (elId === 'stepper-bedrooms') ? bedroomsLabel(v).replace(' BR', '') : String(v);
+            el.querySelector('[data-dir="-1"]').disabled = v <= min;
+            el.querySelector('[data-dir="1"]').disabled  = v >= max;
+        }
+        el.querySelectorAll('.stepper__btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const dir = parseInt(btn.getAttribute('data-dir'), 10);
+                let v = parseInt(el.getAttribute('data-value'), 10) + dir;
+                v = Math.max(min, Math.min(max, v));
+                el.setAttribute('data-value', String(v));
+                render();
+                onChange(v);
+            });
+        });
+        render();
+        onChange(parseInt(el.getAttribute('data-value'), 10));
+    }
+
+    initStepper('stepper-bedrooms', 'bedrooms-value', v => { state.bedrooms = v; });
+    initStepper('stepper-bathrooms', 'bathrooms-value', v => { state.bathrooms = v; });
+
+    /* Service + condition radios */
+    buildForm.querySelectorAll('input[name="service"]').forEach(r => {
+        r.addEventListener('change', () => { if (r.checked) state.service = r.value; });
+    });
+    buildForm.querySelectorAll('input[name="condition"]').forEach(r => {
+        r.addEventListener('change', () => { if (r.checked) state.condition = r.value; });
     });
 
-    contactForm.querySelectorAll('input').forEach(el => {
-        el.addEventListener('input', () => {
-            el.classList.remove('error');
-            if (!contactForm.querySelector('.error')) contactError.textContent = '';
-        });
+    /* ZIP validation — coverage confirmation / waitlist swap (R10) */
+    function evaluateZip() {
+        const zip = (zipInput.value || '').trim();
+        state.zip = zip;
+
+        if (zip.length < 5) {
+            zipStatus.textContent = '';
+            zipStatus.className = 'zip-status';
+            showWaitlist(false);
+            return;
+        }
+
+        state.tier = zipTier(zip);
+        if (state.tier === 'unknown') {
+            zipStatus.textContent = '';
+            zipStatus.className = 'zip-status';
+            waitlistCopy.textContent = "We're not in " + zip + " yet — leave your email and you're first in line when we are.";
+            showWaitlist(true);
+        } else {
+            zipStatus.textContent = '✓ We serve ' + zip;
+            zipStatus.className = 'zip-status is-ok';
+            showWaitlist(false);
+        }
+    }
+
+    function showWaitlist(show) {
+        if (!zipWaitlist) return;
+        zipWaitlist.hidden = !show;
+        buildSubmit.hidden = show;
+    }
+
+    zipInput.addEventListener('input', () => {
+        zipInput.value = zipInput.value.replace(/\D/g, '').slice(0, 5);
+        buildError.textContent = '';
+        evaluateZip();
     });
 
-    /* --- Step 2: collect selections, calculate, render Step 3 --- */
-    backBtn.addEventListener('click', () => showStep(1));
+    /* Waitlist submit (R10) */
+    $('waitlist-submit').addEventListener('click', () => {
+        const emailEl = $('waitlist-email');
+        if (!isEmail(emailEl.value)) { emailEl.classList.add('error'); emailEl.focus(); return; }
+        emailEl.classList.remove('error');
+        const p = basePayload('waitlist_zip', 'waitlist_zip');
+        p.email = emailEl.value.trim();
+        postToSheets(p);
+        $('waitlist-done').hidden = false;
+        emailEl.disabled = true;
+        $('waitlist-submit').disabled = true;
+    });
 
-    serviceForm.addEventListener('submit', function (e) {
+    /* Step 1 submit */
+    buildForm.addEventListener('submit', (e) => {
         e.preventDefault();
-        serviceError.textContent = '';
+        buildError.textContent = '';
 
-        const data         = new FormData(serviceForm);
-        const serviceType  = data.get('service_type');
-        const unitType     = data.get('unit_type');
-        const schedulePref = data.get('schedule_preference');
-
-        if (!schedulePref) {
-            serviceError.textContent = 'Please choose a scheduling preference.';
-            const firstSchedule = serviceForm.querySelector('input[name="schedule_preference"]');
-            if (firstSchedule) firstSchedule.focus();
+        if (state.zip.length < 5 || state.tier === 'unknown') {
+            buildError.textContent = 'Enter a ZIP code in our service area to see pricing.';
+            zipInput.focus();
             return;
         }
 
-        const activeModifiers = [];
-        ['pets', 'stairs', 'sameDay', 'outsideCore'].forEach(key => {
-            if (data.get('mod_' + key)) activeModifiers.push(key);
-        });
-
-        const quote = calculateQuote({ unitType, serviceType, activeModifiers });
-        if (!quote) {
-            serviceError.textContent = 'Something went wrong with your selection. Please try again.';
+        // R9 — overflow (5+ bedrooms)
+        if (state.bedrooms >= PRICING.OVERFLOW_BEDROOMS) {
+            setView('overflow');
             return;
         }
 
-        state.serviceType             = serviceType;
-        state.unitType                = unitType;
-        state.modifiers               = activeModifiers;
-        state.quote                   = quote;
-        state.schedulePreference      = schedulePref;
-        state.schedulePreferenceLabel = SCHEDULE_LABELS[schedulePref] || schedulePref;
-
-        renderQuote();
-        showStep(3);
+        recompute();
+        renderPrice();
+        setView(2);
     });
 
-    /* --- Step 3: render quote display --- */
-    function renderQuote() {
-        const q       = state.quote;
-        const contact = state.contact;
-        if (!q || !contact) return;
+    /* ========================================================
+       STEP 2 — Price
+       ======================================================== */
+    const priceCard   = $('price-card');
+    const addonBlock  = $('addon-block');
+    const freqBlock   = $('freq-block');
+    const freqOptions = $('freq-options');
+    const includedBody = $('included-body');
+    const addonFridge = $('addon-fridge');
+    const addonOven   = $('addon-oven');
 
-        const firstName = (contact.name.split(/\s+/)[0]) || 'there';
-        const totalPrice = Math.round(q.firstVisitTotal);
-        const isMoveout = state.serviceType === 'moveout';
-        const serviceBadge = isMoveout ? 'MOVE-IN / MOVE-OUT' : 'FIRST VISIT DEEP CLEAN';
+    const FREQ_META = [
+        { key: 'once',     name: 'Just once' },
+        { key: 'weekly',   name: 'Weekly' },
+        { key: 'biweekly', name: 'Biweekly' },
+        { key: 'monthly',  name: 'Monthly' },
+    ];
 
-        // Adjustments card (only render if any modifiers selected)
-        let adjustmentsHTML = '';
-        if (q.modList.length) {
-            const rows = q.modList.map(m =>
-                `<div class="adjust-row">
-                    <span class="adjust-row__label">${escapeHtml(m.label)}</span>
-                    <span class="adjust-row__amount">+$${m.amount}</span>
-                </div>`
-            ).join('');
-            adjustmentsHTML = `
-                <div class="quote-card">
-                    <div class="quote-card__title">Adjustments</div>
-                    ${rows}
-                </div>`;
+    function recompute() {
+        state.quote = computeQuote({
+            bedrooms:    state.bedrooms,
+            bathrooms:   state.bathrooms,
+            service:     state.service,
+            condition:   state.condition,
+            addonFridge: state.addonFridge,
+            addonOven:   state.addonOven,
+            zip:         state.zip,
+            frequency:   state.frequency,
+        });
+    }
+
+    function renderPrice() {
+        const q = state.quote;
+        if (!q) return;
+        const isFirst = state.service === 'first_clean';
+
+        // --- Price block ---
+        let html = '';
+        if (isFirst && q.discountApplies) {
+            html = `
+                <div class="price-badge">First clean — 50% off</div>
+                <div class="price-strike">$${q.deepAnchorDisplay}</div>
+                <div class="price-main" id="price-main">$${q.displayPrice}</div>
+                <div class="price-caption">Your first-visit price — for first-time customers.</div>`;
+        } else if (isFirst && q.noStack) {
+            html = `
+                <div class="price-badge">First clean</div>
+                <div class="price-main" id="price-main">$${q.displayPrice}</div>
+                <div class="price-caption">Your first-visit price — for first-time customers.</div>
+                <p class="price-note">For larger homes needing heavy-duty attention, the first-visit discount doesn't apply — you'll get $50 off visits 2&ndash;4 on a recurring plan instead.</p>`;
+        } else {
+            html = `
+                <div class="price-badge">Move In / Move Out</div>
+                <div class="price-main" id="price-main">$${q.displayPrice}</div>
+                <div class="price-caption">Your all-in move clean.</div>`;
         }
+        priceCard.innerHTML = html;
 
-        // Add-ons rows
-        const addonRows = q.includedAddons.map(a =>
-            `<div class="addon-row">
-                <span class="addon-row__label">${escapeHtml(a.label)}</span>
-                <span class="addon-row__anchor">$${a.anchor}</span>
-                <span class="addon-row__included">Included</span>
-                <span class="addon-row__check">✓</span>
-            </div>`
-        ).join('');
+        // --- Add-ons (First Clean only) ---
+        addonBlock.hidden = !isFirst;
 
-        // Recurring plan cards
-        const planCards = q.recurringPlans.map(p => {
-            const featured = p.key === 'biweekly';
-            const badgeClass = p.key === 'monthly' ? '' : '';
-            const badgeHTML = p.badge
-                ? `<span class="plan-card__badge ${p.key === 'weekly' ? 'plan-card__badge--muted' : ''}">${escapeHtml(p.badge)}</span>`
-                : '';
+        // --- Frequency (First Clean only) ---
+        freqBlock.hidden = !isFirst;
+        if (isFirst) renderFreq();
+
+        // --- What's included ---
+        const items = isFirst ? INCLUDED_FIRST : INCLUDED_FIRST.concat(INCLUDED_MOVEOUT_EXTRA);
+        includedBody.innerHTML = '<ul>' + items.map(i => '<li>' + i + '</li>').join('') + '</ul>';
+    }
+
+    function renderFreq() {
+        const q = state.quote;
+        freqOptions.innerHTML = FREQ_META.map(f => {
+            const price = f.key === 'once' ? '' : `<span class="freq-chip__price">$${q.freqSteady[f.key]}/visit</span>`;
+            const checked = state.frequency === f.key ? 'checked' : '';
             return `
-                <div class="plan-card ${featured ? 'plan-card--featured' : ''}">
-                    ${badgeHTML}
-                    <div>
-                        <div class="plan-card__name">${escapeHtml(p.label)}</div>
-                        <div class="plan-card__cadence">${escapeHtml(p.cadence)}</div>
-                    </div>
-                    <div>
-                        <div class="plan-card__price">$${Math.round(p.perVisit)}</div>
-                        <div class="plan-card__per">per visit</div>
-                    </div>
-                </div>`;
+                <label class="freq-chip">
+                    <input type="radio" name="frequency" value="${f.key}" ${checked}>
+                    <span class="freq-chip__body">
+                        <span class="freq-chip__name">${f.name}</span>
+                        ${price || '<span class="freq-chip__price">first visit only</span>'}
+                    </span>
+                </label>`;
         }).join('');
 
-        display.innerHTML = `
-            <div class="quote-display__header">
-                <h2>Your quote is ready, ${escapeHtml(firstName)}.</h2>
-                <p>Prepared by Serve. Review the details below and reserve your spot when you're ready.</p>
-            </div>
-
-            <div class="quote-discount">
-                <div class="quote-discount__price">$${totalPrice}</div>
-                <div class="quote-discount__note">Your first-visit total.</div>
-            </div>
-
-            <div class="quote-card">
-                <div class="quote-card__title">Service Summary</div>
-                <div class="service-badge">${escapeHtml(serviceBadge)}</div>
-                <div class="service-tagline">${escapeHtml(q.service.tagline)}</div>
-                <div class="summary-row">
-                    <span class="summary-row__label">Unit</span>
-                    <span class="summary-row__value">${escapeHtml(q.unit.label)} <span style="color:var(--color-text-muted);font-weight:500;">(${escapeHtml(q.unit.sqft)})</span></span>
-                </div>
-                <div class="summary-row">
-                    <span class="summary-row__label">Service Address</span>
-                    <span class="summary-row__value">${escapeHtml(contact.address)}</span>
-                </div>
-                <div class="summary-row">
-                    <span class="summary-row__label">Scheduling Preference</span>
-                    <span class="summary-row__value">${escapeHtml(state.schedulePreferenceLabel || '—')}</span>
-                </div>
-            </div>
-
-            <div class="quote-card">
-                <div class="quote-card__title">Add-Ons Included</div>
-                ${addonRows}
-                <div class="addon-footer">$${q.includedValue} of extras already included in your price.</div>
-            </div>
-
-            ${adjustmentsHTML}
-
-            <div class="recurring-section">
-                <div class="recurring-section__header">
-                    <div class="recurring-section__title">After Your First Visit — Keep Serve on Your Schedule</div>
-                    <p class="recurring-section__sub">After your first-visit deep clean, recurring visits are priced at the standard rate below. No commitment required today — just see what it looks like.</p>
-                </div>
-                <div class="plan-grid">
-                    ${planCards}
-                </div>
-            </div>
-        `;
-
-        bottomPriceEl.textContent = '$' + totalPrice;
+        freqOptions.querySelectorAll('input[name="frequency"]').forEach(r => {
+            r.addEventListener('change', () => {
+                if (!r.checked) return;
+                state.frequency = r.value;
+                recompute();       // updates steadySelected for the payload
+            });
+        });
     }
 
-    /* --- Reserve --- */
-    reserveBtn.addEventListener('click', function () {
-        if (reserveBtn.disabled) return;
-        reserveBtn.disabled = true;
-        reserveBtn.textContent = 'Reserving…';
+    /* Live add-on toggles (R6) */
+    function onAddonChange() {
+        state.addonFridge = addonFridge.checked;
+        state.addonOven   = addonOven.checked;
+        recompute();
+        const mainEl = $('price-main');
+        if (mainEl && state.quote) mainEl.textContent = '$' + state.quote.displayPrice;
+    }
+    addonFridge.addEventListener('change', onAddonChange);
+    addonOven.addEventListener('change', onAddonChange);
 
-        const q       = state.quote;
-        const contact = state.contact;
-        if (!q || !contact) return;
+    $('back-to-1').addEventListener('click', () => setView(1));
+    $('to-reserve').addEventListener('click', () => setView(3));
 
-        const modifierLabels = q.modList.map(m => m.label);
-
-        postToSheets({
-            event:                     'quote_reserved',
-            timestamp:                 new Date().toISOString(),
-            name:                      contact.name,
-            email:                     contact.email,
-            phone:                     contact.phone,
-            address:                   contact.address,
-            service_type:              state.serviceType,
-            unit_type:                 state.unitType,
-            unit_label:                q.unit.label,
-            modifiers_applied:         modifierLabels,
-            original_price:            Math.round(q.fullPrice),
-            discount_applied:          'None',
-            first_visit_total:         Math.round(q.firstVisitTotal),
-            recurring_weekly:          Math.round(q.recurringPlans.find(p => p.key === 'weekly').perVisit),
-            recurring_biweekly:        Math.round(q.recurringPlans.find(p => p.key === 'biweekly').perVisit),
-            recurring_monthly:         Math.round(q.recurringPlans.find(p => p.key === 'monthly').perVisit),
-            schedule_preference:       state.schedulePreference,
-            schedule_preference_label: state.schedulePreferenceLabel,
-        });
-
-        // Brief disabled state, then swap to confirmation
-        setTimeout(() => {
-            display.hidden     = true;
-            bottomBar.style.display = 'none';
-            const firstName = (contact.name.split(/\s+/)[0]) || 'there';
-            confirmName.textContent = firstName;
-            confirmBlock.hidden = false;
-            confirmBlock.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }, 1000);
+    /* Ghost email capture (spec §5, Step 2) */
+    const emailQuoteTrigger = $('email-quote-trigger');
+    const emailQuoteForm    = $('email-quote-form');
+    emailQuoteTrigger.addEventListener('click', () => {
+        emailQuoteForm.hidden = !emailQuoteForm.hidden;
+        if (!emailQuoteForm.hidden) $('email-quote-input').focus();
+    });
+    $('email-quote-send').addEventListener('click', () => {
+        const emailEl = $('email-quote-input');
+        if (!isEmail(emailEl.value)) { emailEl.classList.add('error'); emailEl.focus(); return; }
+        emailEl.classList.remove('error');
+        const p = basePayload('quote_emailed', 'quote_emailed');
+        p.email = emailEl.value.trim();
+        // legacy pricing fields so the row is readable server-side
+        p.unit_label = unitLabel();
+        p.service_type = state.service;
+        p.first_visit_total = state.quote ? state.quote.displayPrice : '';
+        postToSheets(p);
+        $('email-quote-done').hidden = false;
+        emailEl.disabled = true;
+        $('email-quote-send').disabled = true;
     });
 
-    /* --- Util --- */
-    function escapeHtml(s) {
-        if (s == null) return '';
-        return String(s)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
+    /* ========================================================
+       STEP 3 — Reserve
+       ======================================================== */
+    const reserveForm  = $('reserve-form');
+    const reserveError = $('reserve-error');
+    const reserveSubmit = $('reserve-submit');
+
+    reserveForm.querySelectorAll('input[name="time_preference"]').forEach(r => {
+        r.addEventListener('change', () => { if (r.checked) state.timePreference = r.value; });
+    });
+
+    $('back-to-2').addEventListener('click', () => setView(2));
+
+    reserveForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        reserveError.textContent = '';
+        reserveForm.querySelectorAll('.error').forEach(el => el.classList.remove('error'));
+
+        let valid = true, firstBad = null;
+        if (!state.timePreference) {
+            reserveError.textContent = 'Pick a time preference to continue.';
+            return;
+        }
+        ['r-name', 'r-email', 'r-phone', 'r-address'].forEach(id => {
+            const el = $(id);
+            if (!el.value.trim()) { el.classList.add('error'); valid = false; firstBad = firstBad || el; }
+        });
+        const emailEl = $('r-email');
+        if (emailEl.value.trim() && !isEmail(emailEl.value)) {
+            emailEl.classList.add('error'); valid = false; firstBad = firstBad || emailEl;
+        }
+        if (!valid) {
+            reserveError.textContent = 'Please fill out all required fields.';
+            if (firstBad) firstBad.focus();
+            return;
+        }
+
+        reserveSubmit.disabled = true;
+        reserveSubmit.textContent = 'Reserving…';
+
+        recompute();
+        const q = state.quote;
+        const p = basePayload('reservation', 'quote_reserved');
+        // identity (only on reservation)
+        p.name    = $('r-name').value.trim();
+        p.email   = $('r-email').value.trim();
+        p.phone   = $('r-phone').value.trim();
+        p.address = $('r-address').value.trim();
+        p.unit    = $('r-unit').value.trim();
+        // legacy pricing fields so existing Sheet columns + email keep populating
+        p.unit_label        = unitLabel();
+        p.service_type      = state.service;
+        p.modifiers_applied = addonLabels();
+        p.original_price    = q.deepAnchorDisplay != null ? q.deepAnchorDisplay : q.displayPrice;
+        p.discount_applied  = (state.service === 'first_clean' && q.discountApplies) ? 'First clean 50% off' : 'None';
+        p.first_visit_total = q.displayPrice;
+        p.recurring_weekly   = state.service === 'first_clean' ? q.freqSteady.weekly   : '';
+        p.recurring_biweekly = state.service === 'first_clean' ? q.freqSteady.biweekly : '';
+        p.recurring_monthly  = state.service === 'first_clean' ? q.freqSteady.monthly  : '';
+        p.schedule_preference       = state.timePreference;
+        p.schedule_preference_label = timePrefLabel();
+
+        postToSheets(p);
+        setView('confirmed');
+    });
+
+    /* ========================================================
+       Overflow state — custom quote request (R9)
+       ======================================================== */
+    $('overflow-back').addEventListener('click', () => setView(1));
+    $('overflow-submit').addEventListener('click', () => {
+        const emailEl = $('overflow-email');
+        if (!isEmail(emailEl.value)) { emailEl.classList.add('error'); emailEl.focus(); return; }
+        emailEl.classList.remove('error');
+        const p = basePayload('custom_quote_request', 'custom_quote_request');
+        p.email = emailEl.value.trim();
+        p.phone = $('overflow-phone').value.trim();
+        p.unit_label = unitLabel();
+        postToSheets(p);
+        $('overflow-done').hidden = false;
+        emailEl.disabled = true;
+        $('overflow-phone').disabled = true;
+        $('overflow-submit').disabled = true;
+    });
+
+    /* --- Utils --- */
+    function isEmail(v) {
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((v || '').trim());
     }
+
+    /* Clear error styling on input */
+    document.querySelectorAll('.flow-input').forEach(el => {
+        el.addEventListener('input', () => el.classList.remove('error'));
+    });
 })();
