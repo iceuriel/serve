@@ -143,7 +143,7 @@ function computeQuote(input) {
    Booking Flow — Build -> Price -> Reserve
    ============================================================ */
 (function () {
-    const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbwYbRsTSiZKPyfGtlFkGIXkT5Qfkfu4yefgBOBkF21uOrDz9XFEjz8lNjwAXYkLir7z/exec';
+    const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbwaMIS1nklX2rWuCEa9koeTyuAFt-UdGAZ1mqY98Z5IOHz0i5HgaugH0j5j2Nf-XUGB/exec';
 
     const $ = (id) => document.getElementById(id);
 
