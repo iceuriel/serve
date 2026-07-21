@@ -53,16 +53,16 @@ const PRICING = {
     OVERFLOW_HOURLY_RATE: 130,   // copy only, never computed
 };
 
-// PLACEHOLDER LISTS — the operator must edit these before deploy.
+// Service-area coverage. To change coverage, edit these two lists.
 const ZIP_TIERS = {
     CORE: ["02108","02109","02110","02111","02113","02114","02115","02116",
            "02118","02119","02120","02121","02122","02124","02125","02126",
            "02127","02128","02129","02130","02131","02132","02134","02135",
            "02138","02139","02140","02141","02142","02143","02144","02145",
-           "02445","02446","02467"],          // Boston core + Cambridge/Somerville/Brookline — EDIT ME
+           "02445","02446","02467"],          // Boston core + Cambridge / Somerville / Brookline
     EXTENDED: ["02150","02151","02152","02149","02155","02148","02472","02474",
                "02476","02458","02459","02460","02461","02462","02464","02465",
-               "02466","02468"],              // +$25 ring — EDIT ME
+               "02466","02468"],              // +$25 ring (Chelsea / Revere / Newton / Watertown)
 };
 
 function zipTier(zip) {
