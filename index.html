@@ -367,8 +367,21 @@
 
                 <form class="flow-card" id="reserve-form" novalidate>
 
+                    <!-- Live scheduler (rendered by script.js when availability loads;
+                         the time-preference radios below remain as the fallback) -->
+                    <div class="field-block" id="scheduler-block" hidden>
+                        <span class="field-label">Pick your day and time</span>
+                        <p class="scheduler-sub">Every open time for the next three weeks — pick what fits.</p>
+                        <p class="scheduler-loading" id="scheduler-loading">Loading times&hellip;</p>
+                        <div class="scheduler-days" id="scheduler-days"><!-- rendered by script.js --></div>
+                        <p class="scheduler-fallback-line" id="scheduler-fallback" hidden>
+                            None of these work?
+                            <button type="button" class="scheduler-fallback-link" id="scheduler-fallback-link">Request a different time</button>
+                        </p>
+                    </div>
+
                     <!-- Time preference (preserved control: earlier / later) -->
-                    <div class="field-block">
+                    <div class="field-block" id="timepref-block">
                         <span class="field-label">When do you prefer?</span>
                         <div class="choice-cards">
                             <label class="choice-card">
@@ -437,7 +450,7 @@
                 <div class="flow-confirm">
                     <div class="flow-confirm__mark" aria-hidden="true">&check;</div>
                     <h2>You're on the schedule.</h2>
-                    <p>We'll reach out shortly to confirm your exact arrival window.</p>
+                    <p id="confirm-copy">We'll reach out shortly to confirm your exact arrival window.</p>
                 </div>
             </div>
 

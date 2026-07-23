@@ -17,11 +17,12 @@
  *   Biweekly Rate | Monthly Rate | Schedule Preference | Event Type | ZIP |
  *   ZIP Tier | Bedrooms | Bathrooms | Condition | Add Fridge | Add Oven |
  *   Frequency | Quote Price | Steady-State Price | Time Preference | Unit/Apt |
- *   Src | UTM Source | UTM Medium | UTM Campaign | Page Path
+ *   Src | UTM Source | UTM Medium | UTM Campaign | Page Path | Slot Date |
+ *   Slot Time
  *
  * DEPLOY
  *   1. Paste this over the existing script and Save.
- *   2. Add the new column headers (Q–AH above) to Row 1 of the sheet.
+ *   2. Add the new column headers (Q–AJ above) to Row 1 of the sheet.
  *   3. Deploy > Manage Deployments > edit the existing Web App >
  *      Version: New version > Deploy. Keep the SAME URL (script.js needs no change).
  *   4. First run may re-prompt for the Gmail/MailApp send permission — approve it.
@@ -76,6 +77,8 @@ function doPost(e) {
     data.utm_medium                || "",
     data.utm_campaign              || "",
     data.page_path                 || "",
+    data.slot_date                 || "",
+    data.slot_time                 || "",
   ]);
 
   try {

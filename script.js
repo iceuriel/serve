@@ -144,6 +144,7 @@ function computeQuote(input) {
    ============================================================ */
 (function () {
     const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbwaMIS1nklX2rWuCEa9koeTyuAFt-UdGAZ1mqY98Z5IOHz0i5HgaugH0j5j2Nf-XUGB/exec';
+    const AVAIL_URL  = 'https://script.google.com/macros/s/AKfycbxx_iQ1x71D8FN-pDNwna34KE2YjNrpL7UDUwGlcW54MA_HQzfcGAK_8f6H6Gi5pzY/exec';
 
     const $ = (id) => document.getElementById(id);
 
@@ -187,6 +188,8 @@ function computeQuote(input) {
         addonOven: false,
         frequency: 'once',
         timePreference: null,
+        slotDate: null,
+        slotTime: null,
         quote: null,
         attribution: readAttribution(),
     };
@@ -415,6 +418,7 @@ function computeQuote(input) {
         recompute();
         renderPrice();
         setView(2);
+        prefetchAvailability();   // warm the Step 3 scheduler — fetches once per session
     });
 
     /* ========================================================
@@ -549,6 +553,138 @@ function computeQuote(input) {
     });
 
     /* ========================================================
+       STEP 3 — Live availability scheduler (open agenda)
+       Fed by AVAIL_URL. If the endpoint is down, slow, or has no
+       open slots, the original time-preference radios stay live.
+       ======================================================== */
+    const HORIZON_DAYS = 21;
+
+    let availSlots  = null;        // session cache of bookable slots
+    let availFetched = false;
+    let timeUi = 'fallback';       // 'fallback' | 'loading' | 'scheduler'
+
+    function prefetchAvailability() {
+        if (availFetched) return;
+        availFetched = true;
+        setTimeUi('loading');
+        fetch(AVAIL_URL)
+            .then(res => {
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                return res.json();
+            })
+            .then(data => {
+                if (!data || data.ok !== true || !Array.isArray(data.slots)) {
+                    throw new Error('Unexpected availability response');
+                }
+                availSlots = filterSlots(data.slots);
+                if (availSlots.length) {
+                    renderSchedulerDays(availSlots);
+                    if (timeUi === 'loading') setTimeUi('scheduler');
+                } else if (timeUi === 'loading') {
+                    setTimeUi('fallback');
+                }
+            })
+            .catch(err => {
+                console.warn('Availability unavailable — keeping time-preference fallback.', err);
+                if (timeUi === 'loading') setTimeUi('fallback');
+            });
+    }
+
+    /* Bookable = open > 0, today through the three-week horizon */
+    function filterSlots(slots) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const horizon = new Date(today);
+        horizon.setDate(horizon.getDate() + HORIZON_DAYS);
+        return slots.filter(s => {
+            if (!s || !s.date || !s.time || !(s.open > 0)) return false;
+            const d = parseSlotDate(s.date);
+            return isFinite(d.getTime()) && d >= today && d <= horizon;
+        });
+    }
+
+    /* "2026-07-25" -> local Date (avoids the UTC-midnight off-by-one) */
+    function parseSlotDate(str) {
+        const p = String(str).split('-');
+        return new Date(+p[0], +p[1] - 1, +p[2]);
+    }
+
+    function formatSlotDate(str) {
+        return parseSlotDate(str).toLocaleDateString('en-US', {
+            weekday: 'long', month: 'short', day: 'numeric',
+        });
+    }
+
+    function slotLabel() {
+        return formatSlotDate(state.slotDate) + ' at ' + state.slotTime;
+    }
+
+    /* Swap which time control is live: scheduler vs. the radios */
+    function setTimeUi(mode) {
+        timeUi = mode;
+        $('scheduler-block').hidden    = mode === 'fallback';
+        $('timepref-block').hidden     = mode !== 'fallback';
+        $('scheduler-loading').hidden  = mode !== 'loading';
+        $('scheduler-fallback').hidden = mode !== 'scheduler';
+    }
+
+    /* Build the agenda: one section per day, one chip per open time */
+    function renderSchedulerDays(slots) {
+        const container = $('scheduler-days');
+        container.innerHTML = '';
+        let currentDate = null, rowEl = null;
+        slots.forEach(s => {
+            if (s.date !== currentDate) {
+                currentDate = s.date;
+                const day  = document.createElement('div');
+                day.className = 'scheduler-day';
+                const head = document.createElement('div');
+                head.className = 'scheduler-day__head';
+                head.textContent = formatSlotDate(s.date);
+                rowEl = document.createElement('div');
+                rowEl.className = 'scheduler-day__times';
+                day.appendChild(head);
+                day.appendChild(rowEl);
+                container.appendChild(day);
+            }
+            const chip = document.createElement('button');
+            chip.type = 'button';
+            chip.className = 'slot-chip';
+            chip.textContent = s.time;
+            chip.setAttribute('data-date', s.date);
+            chip.setAttribute('data-time', s.time);
+            chip.setAttribute('aria-pressed', 'false');
+            rowEl.appendChild(chip);
+        });
+    }
+
+    function clearSlotSelection() {
+        state.slotDate = null;
+        state.slotTime = null;
+        document.querySelectorAll('.slot-chip.is-selected').forEach(c => {
+            c.classList.remove('is-selected');
+            c.setAttribute('aria-pressed', 'false');
+        });
+    }
+
+    $('scheduler-days').addEventListener('click', (e) => {
+        const chip = e.target.closest('.slot-chip');
+        if (!chip) return;
+        clearSlotSelection();
+        chip.classList.add('is-selected');
+        chip.setAttribute('aria-pressed', 'true');
+        state.slotDate = chip.getAttribute('data-date');
+        state.slotTime = chip.getAttribute('data-time');
+        reserveError.textContent = '';
+    });
+
+    $('scheduler-fallback-link').addEventListener('click', () => {
+        clearSlotSelection();
+        reserveError.textContent = '';
+        setTimeUi('fallback');
+    });
+
+    /* ========================================================
        STEP 3 — Reserve
        ======================================================== */
     const reserveForm  = $('reserve-form');
@@ -567,7 +703,12 @@ function computeQuote(input) {
         reserveForm.querySelectorAll('.error').forEach(el => el.classList.remove('error'));
 
         let valid = true, firstBad = null;
-        if (!state.timePreference) {
+        if (timeUi !== 'fallback') {
+            if (!state.slotDate || !state.slotTime) {
+                reserveError.textContent = 'Pick a day and time to continue.';
+                return;
+            }
+        } else if (!state.timePreference) {
             reserveError.textContent = 'Pick a time preference to continue.';
             return;
         }
@@ -609,6 +750,20 @@ function computeQuote(input) {
         p.recurring_monthly  = state.service === 'first_clean' ? q.freqSteady.monthly  : '';
         p.schedule_preference       = state.timePreference;
         p.schedule_preference_label = timePrefLabel();
+        // scheduler slot — null when the fallback radios were used
+        p.slot_date = state.slotDate || null;
+        p.slot_time = state.slotTime || null;
+        if (p.slot_date && p.slot_time) {
+            // existing Schedule Preference column + notification email pick this up
+            p.schedule_preference_label = slotLabel();
+        }
+
+        const confirmCopy = $('confirm-copy');
+        if (confirmCopy) {
+            confirmCopy.textContent = (p.slot_date && p.slot_time)
+                ? "You're on the schedule for " + slotLabel() + ". We'll reach out shortly to confirm your exact arrival window."
+                : "We'll reach out shortly to confirm your exact arrival window.";
+        }
 
         postToSheets(p);
         setView('confirmed');

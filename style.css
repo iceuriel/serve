@@ -1120,6 +1120,83 @@ a {
 
 
 /* ============================================================
+   STEP 3 — Live scheduler (open agenda)
+   ============================================================ */
+.scheduler-sub {
+    font-family: var(--flow-serif);
+    font-size: 0.95rem;
+    color: var(--color-text-muted);
+    line-height: 1.5;
+    margin: -0.35rem 0 1rem;
+}
+
+.scheduler-loading {
+    font-family: var(--flow-serif);
+    font-style: italic;
+    font-size: 0.95rem;
+    color: var(--color-text-muted);
+}
+
+.scheduler-day { margin-bottom: 0.875rem; }
+.scheduler-day:last-child { margin-bottom: 0; }
+
+.scheduler-day__head {
+    font-family: var(--flow-serif);
+    font-size: 0.95rem;
+    font-weight: 400;
+    color: var(--color-dark);
+    margin-bottom: 6px;
+}
+
+.scheduler-day__times {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.slot-chip {
+    font-family: var(--flow-serif);
+    font-size: 0.95rem;
+    color: var(--color-dark);
+    background: #fff;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 8px 14px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.slot-chip:hover { border-color: #cbd5e1; }
+.slot-chip:focus-visible {
+    outline: 2px solid var(--color-dark);
+    outline-offset: 2px;
+}
+.slot-chip.is-selected {
+    background: var(--color-dark);
+    border-color: var(--color-dark);
+    color: #fff;
+}
+
+.scheduler-fallback-line {
+    font-family: var(--flow-serif);
+    font-size: 0.95rem;
+    color: var(--color-text-muted);
+    margin-top: 1.1rem;
+}
+
+.scheduler-fallback-link {
+    background: none;
+    border: none;
+    padding: 0;
+    font-family: var(--flow-serif);
+    font-size: 0.95rem;
+    color: var(--color-accent);
+    text-decoration: underline;
+    cursor: pointer;
+}
+.scheduler-fallback-link:hover { color: var(--color-dark); }
+
+
+/* ============================================================
    Reservation confirmation
    ============================================================ */
 .flow-confirm {
