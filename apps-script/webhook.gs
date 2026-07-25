@@ -1,95 +1,94 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-07-26  ·  branch build/attribution-and-notes
+ * VERSION STAMP:  2026-07-26  ·  branch build/attribution-and-notes  ·  part 7
  *
  * Repo source of truth: /apps-script/webhook.gs
- * If the version stamp in the Apps Script editor does not match the one in the
- * repo, what is deployed is stale. This file replaces the old apps-script.gs,
- * which has been deleted — do not resurrect it.
+ * If the stamp in the Apps Script editor does not match the repo, what is
+ * deployed is stale.
  * ==================================================================
  *
- * WHAT THIS DOES
- *   Receives every event from servecleaning.com, writes one row, sends one
- *   notification email, and answers { status: "ok" } so the site can tell the
- *   customer they are actually booked instead of guessing.
+ * ROUTING
+ *   reservation  ->  resolve lead_id  ->  upsert LEADS  ->  append JOBS
+ *   everything else (quote_emailed, waitlist_zip, custom_quote_request)  ->  EVENTS
  *
- *   reservation            -> JOBS tab
- *   quote_emailed          -> LEADS tab
- *   waitlist_zip           -> LEADS tab
- *   custom_quote_request   -> LEADS tab
+ *   Tabs this script is ALLOWED to write: JOBS, LEADS, EVENTS.
+ *   PROPERTIES, RAW INTAKE, OUTREACH LOG and DASHBOARD are hard-blocked by
+ *   assertWritable() — a coding mistake throws rather than corrupting them.
  *
- * THE THREE THINGS THAT MAKE THIS DIFFERENT FROM THE OLD SCRIPT
+ * THREE INVARIANTS
+ *   1. Never widen a tab you designed. Writes are header-driven: read row 1,
+ *      fill the columns that exist, drop the rest (and say so in the log).
+ *      Only EVENTS is auto-created, and only when missing.
+ *   2. Never lose a booking to bookkeeping. If the LEADS upsert fails for any
+ *      reason, the JOBS row is still written and the notification email says so.
+ *   3. Never write twice. submission_id is the idempotency key; a replay
+ *      mutates nothing at all — no JOBS row, no LEADS edit.
  *
- *   1. HEADER-DRIVEN WRITES. It reads row 1 of the tab and fills the columns
- *      that already exist, in whatever order they sit. It never appends a
- *      column, so it can never split your history across a duplicate header.
- *      HEADER_MAP below translates payload keys to your exact header text.
- *      Anything with no column is captured inside `notes` instead of vanishing
- *      — and the moment you add a header matching an unmapped key name, that
- *      field starts filling itself in with no code change.
+ * IDENTITY MODEL
+ *   submission_id  one per POST. Client-generated UUID. Dedupe key only.
+ *   lead_id        one per PERSON. Normalized lowercased email, else property_key.
+ *   job_id         one per BOOKING. SRV-<yyyyMMdd>-<6 chars of submission_id>.
+ *   Same person booking three times -> 1 lead_id, 3 submission_ids, 3 job_ids.
  *
- *   2. normalizeSchedule(). The site has two scheduling paths that write
- *      different keys. Resolving them in one place is what fixes the blank
- *      notes column on slot bookings. See the function for the exact order.
+ * CONTACT DETAILS ARE INTENTIONALLY IN BOTH TABS.
+ *   LEADS is the canonical person record. The JOBS copy is a point-in-time
+ *   snapshot, the way an order snapshots customer details. Do not "normalize"
+ *   this away.
  *
- *   3. submission_id IDEMPOTENCY. Every submission carries a UUID. If that id
- *      is already in the tab, the write is skipped and { duplicate: true } comes
- *      back. That is what makes the site's retry-once-on-failure safe.
+ * SETUP
+ *   1. Fill SPREADSHEET_ID, NOTIFY_EMAIL, JOBS_TAB below.
+ *   2. Run reportLeadsSchema() once — it prints the LEADS header row and tells
+ *      you exactly which fields this script can and cannot write there.
+ *   3. Run testPayload() — writes both scheduling shapes, a repeat-customer
+ *      booking, and an idempotency replay.
+ *   4. Deploy > New deployment > Web app > Execute as: Me > Access: Anyone.
+ *      Paste the /exec URL into SHEETS_URL in script.js (line ~155).
  *
- * SETUP  (three constants, then deploy)
- *   1. SPREADSHEET_ID — from the LEADS MASTER URL, between /d/ and /edit.
- *      Leave it "" if this script is bound to that sheet (Extensions > Apps
- *      Script from inside it), and it will use the active spreadsheet.
- *   2. NOTIFY_EMAIL   — where notifications go.
- *   3. JOBS_TAB       — the tab holding the job_id ... notes header row.
- *
- *   Then: Run testPayload() once, authorize the scopes, confirm two test rows
- *   land in JOBS and the emails arrive. Then Deploy > New deployment > Web app
- *   > Execute as: Me > Who has access: Anyone. Paste the /exec URL into
- *   SHEETS_URL in script.js.
- *
- * NOTE ON RESPONSES
- *   The site now POSTs with Content-Type text/plain so the request stays
- *   CORS-simple and the browser can read this response. Do not change the
- *   response to anything other than JSON, and keep { status: "ok" } — the
- *   success panel on the site is gated on it.
+ * The site POSTs Content-Type text/plain so the request stays CORS-simple and
+ * the browser can read the reply. Keep returning { status: "ok" } — the success
+ * panel on the site is gated on it.
  */
 
 
 /* ============================================================
-   1. CONFIG — fill these in
+   1. CONFIG
    ============================================================ */
 
 const SPREADSHEET_ID = "";                    // "" = use the bound spreadsheet
 const NOTIFY_EMAIL   = "ops@example.com";
 const JOBS_TAB       = "JOBS";
 
-/* Optional — sensible defaults, change only if your ops vocabulary differs. */
-const LEADS_TAB             = "LEADS";   // created automatically if missing
-const NEW_JOB_STATUS        = "new";     // written to job_status on every booking
-const DEFAULT_PAYMENT_STATUS = "";       // left blank; ops owns this field
+const LEADS_TAB  = "LEADS";    // must already exist — never auto-created
+const EVENTS_TAB = "EVENTS";   // auto-created if missing
+
+/** Tabs this script must never touch, whatever else changes. */
+const PROTECTED_TABS = ["PROPERTIES", "RAW INTAKE", "OUTREACH LOG", "DASHBOARD"];
+
+/** Columns ops owns on JOBS. Never written, not even blank-filled. */
+const OPS_OWNED_COLUMNS = ["completed_date", "cleaner", "duration_min", "photos_passed", "payment_status"];
+
+const NEW_JOB_STATUS = "new";
 
 
 /* ============================================================
-   2. HEADER_MAP — payload key -> EXACT header text in row 1
-   Built against the live JOBS header row:
+   2. HEADER_MAP — payload/record key -> EXACT header text
+   Built against the confirmed 32-column JOBS row 1:
+
      job_id | lead_id | source | property_key | service_type | frequency |
      condition | beds | baths | quoted_price | add_ons | add_on_rev |
      final_price | scheduled_date | completed_date | cleaner | start_time |
-     duration_min | photos_passed | payment_status | job_status | notes
+     duration_min | photos_passed | payment_status | job_status | notes |
+     submission_id | received_at | name | email | phone | segment |
+     src_chain | customer_notes | pets_flag | scheduling_type
 
-   Keys NOT listed here fall back to their own name as the header. That is
-   deliberate: it means `customer_notes`, `pets_flag`, `segment`, `name`,
-   `email`, `phone`, `address` and friends stay dormant today and light up the
-   day you add a column with that exact name.
-
-   Columns ops owns and this script never touches:
-     completed_date · cleaner · duration_min · photos_passed
+   Only keys whose record name DIFFERS from the header need an entry here.
+   Everything else matches by name: job_id, lead_id, property_key, condition,
+   job_status, notes, submission_id, received_at, name, email, phone, segment,
+   src_chain, customer_notes, pets_flag, scheduling_type, quote_meta.
    ============================================================ */
 
 const HEADER_MAP = {
-  submission_id:      "lead_id",
   src_first:          "source",
   service_label:      "service_type",
   frequency_selected: "frequency",
@@ -99,15 +98,35 @@ const HEADER_MAP = {
   addons_label:       "add_ons",
   addon_total:        "add_on_rev",
   first_visit_total:  "final_price",
-  slot_date:          "scheduled_date",
-  slot_time:          "start_time",
+  requested_date:     "scheduled_date",
+  requested_window:   "start_time",
 };
 
-/* Header row written into LEADS if that tab has to be created. */
-const LEADS_HEADERS = [
-  "timestamp", "lead_id", "event_type", "source", "segment", "name", "email",
-  "phone", "zip", "zip_tier", "beds", "baths", "service_type", "condition",
-  "frequency", "quoted_price", "notes",
+/**
+ * Fields with no column on JOBS. Packed into `quote_meta` as compact JSON IF
+ * that header exists; dropped silently otherwise (never folded into notes).
+ */
+const QUOTE_META_KEYS = [
+  "original_price", "discount_applied", "steady_state_price",
+  "recurring_weekly", "recurring_biweekly", "recurring_monthly",
+  "zip_tier", "page_path", "utm_source", "utm_medium", "utm_campaign",
+  "unit_label",
+  // Not in the Part 7d list, but dropping a street address loses the one thing
+  // a cleaner needs. Carried here so adding the column recovers them.
+  "address", "unit", "zip", "src", "submitted_at",
+];
+
+/** Canonical LEADS field names. Exact matches only — no guessing at aliases. */
+const LEADS_FIELDS = ["lead_id", "name", "email", "phone", "source", "segment", "source_history"];
+
+/** EVENTS is ours, so its schema is fixed here rather than inferred per payload. */
+const EVENTS_HEADERS = [
+  "received_at", "submitted_at", "submission_id", "event_type", "event",
+  "name", "email", "phone", "zip", "zip_tier", "bedrooms", "bathrooms",
+  "service", "condition", "frequency_selected", "quote_price",
+  "steady_state_price", "addon_total", "addon_fridge", "addon_oven",
+  "unit_label", "src", "src_first", "src_chain", "segment",
+  "utm_source", "utm_medium", "utm_campaign", "page_path",
 ];
 
 
@@ -125,22 +144,37 @@ function doPost(e) {
 
     const eventType     = data.event_type || data.event || "unknown";
     const isReservation = eventType === "reservation" || data.event === "quote_reserved";
+    const ss = SPREADSHEET_ID ? SpreadsheetApp.openById(SPREADSHEET_ID)
+                              : SpreadsheetApp.getActiveSpreadsheet();
 
-    const ss    = SPREADSHEET_ID ? SpreadsheetApp.openById(SPREADSHEET_ID)
-                                 : SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = isReservation ? requireTab(ss, JOBS_TAB) : leadsTab(ss);
+    if (!isReservation) return handleEvent(ss, data, eventType);
 
-    if (alreadyWritten(sheet, data.submission_id)) {
-      console.log("Duplicate submission_id, write skipped: " + data.submission_id);
+    const jobs = requireTab(ss, JOBS_TAB);
+
+    /* Idempotency first — a replay must mutate nothing anywhere. */
+    if (alreadyWritten(jobs, data.submission_id)) {
+      console.log("Duplicate submission_id — no JOBS row, no LEADS mutation: " + data.submission_id);
       return json({ status: "ok", duplicate: true, submission_id: data.submission_id });
     }
 
     const sched  = normalizeSchedule(data);
-    const record = isReservation ? buildJobRecord(data, sched) : buildLeadRecord(data, sched);
-    writeRow(sheet, record);
+    const leadId = resolveLeadId(data);
+
+    /* LEADS upsert BEFORE the JOBS row, so the foreign key points at something
+       real. A failure here is logged and surfaced in the email, never fatal. */
+    let leadResult;
+    try {
+      leadResult = upsertLead(ss, data, leadId);
+    } catch (leadErr) {
+      leadResult = { ok: false, action: "failed", error: String(leadErr), fields: [], missing: [] };
+      console.error("LEADS upsert failed (JOBS row still written): " + leadErr);
+    }
+
+    const record = buildJobRecord(data, sched, leadId, jobs);
+    const write  = writeRow(jobs, record);
 
     try {
-      sendNotification(eventType, data, sched);
+      sendReservationEmail(data, sched, leadId, leadResult);
     } catch (mailErr) {
       console.error("Email send failed (row was still written): " + mailErr);
     }
@@ -149,8 +183,11 @@ function doPost(e) {
       status: "ok",
       duplicate: false,
       submission_id: data.submission_id || "",
-      tab: sheet.getName(),
-      row: sheet.getLastRow(),
+      lead_id: leadId,
+      job_id: record.job_id,
+      lead_action: leadResult.action,
+      dropped_fields: write.noColumn,
+      row: jobs.getLastRow(),
     });
 
   } catch (err) {
@@ -161,44 +198,191 @@ function doPost(e) {
   }
 }
 
-/** Health check — open the /exec URL in a browser to confirm the deployment is live. */
-function doGet() {
-  return json({
-    ok: true,
-    service: "serve-booking-webhook",
-    version: "2026-07-26 build/attribution-and-notes",
+/** Non-reservation events. Never LEADS (identity-less rows), never RAW INTAKE. */
+function handleEvent(ss, data, eventType) {
+  const sheet = eventsTab(ss);
+
+  if (alreadyWritten(sheet, data.submission_id)) {
+    return json({ status: "ok", duplicate: true, submission_id: data.submission_id });
+  }
+
+  const record = { received_at: nowIso() };
+  EVENTS_HEADERS.forEach(function (h) {
+    if (h !== "received_at" && data[h] !== undefined) record[h] = data[h];
   });
+  const write = writeRow(sheet, record, {});   // EVENTS uses raw payload names
+
+  try { sendEventEmail(eventType, data); }
+  catch (mailErr) { console.error("Email send failed: " + mailErr); }
+
+  return json({
+    status: "ok", duplicate: false, tab: EVENTS_TAB,
+    submission_id: data.submission_id || "", dropped_fields: write.noColumn,
+  });
+}
+
+/** Health check — open the /exec URL in a browser. */
+function doGet() {
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-07-26 part 7" });
 }
 
 
 /* ============================================================
-   4. THE SCHEDULING FIX
+   4. IDENTITY
+   ============================================================ */
+
+/** One id per person: normalized email, else the property key. */
+function resolveLeadId(data) {
+  const email = normalizeEmail(data.email);
+  if (email) return email;
+  const key = propertyKey(data);
+  return key || "";
+}
+
+function normalizeEmail(v) {
+  return isSet(v) ? String(v).trim().toLowerCase() : "";
+}
+
+/** Stable per submission — a retry that slips past dedupe produces the same id. */
+function makeJobId(data, sched) {
+  const day = isSet(sched.date)
+    ? String(sched.date).replace(/-/g, "")
+    : Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyyMMdd");
+  let tail = String(data.submission_id || "").replace(/[^A-Za-z0-9]/g, "").slice(-6).toUpperCase();
+  if (!tail) tail = String(Math.floor(Math.random() * 1000000));
+  return "SRV-" + day + "-" + tail;
+}
+
+/** ZIP + address + unit, normalised. The same home always produces the same key. */
+function propertyKey(data) {
+  return [data.zip, data.address, data.unit]
+    .filter(isSet)
+    .map(function (v) {
+      return String(v).trim().toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    })
+    .filter(function (v) { return v !== ""; })
+    .join("-");
+}
+
+
+/* ============================================================
+   5. LEADS UPSERT
+   One row per person. Header-driven, additive-only, never widens the tab.
+   ============================================================ */
+
+function upsertLead(ss, data, leadId) {
+  const sheet = ss.getSheetByName(LEADS_TAB);
+  if (!sheet) throw new Error('Tab "' + LEADS_TAB + '" not found — cannot upsert the lead.');
+  assertWritable(LEADS_TAB);
+
+  const headers = sheetHeaders(sheet);
+  if (!headers.length) throw new Error('Tab "' + LEADS_TAB + '" has no header row.');
+
+  /* Which of the fields we care about actually exist on the tab. */
+  const col = {};
+  const missing = [];
+  LEADS_FIELDS.forEach(function (f) {
+    const i = headers.indexOf(f);
+    if (i === -1) missing.push(f); else col[f] = i;
+  });
+  if (missing.length) console.log("LEADS has no column for: " + missing.join(", ") + " — skipped.");
+
+  /* Match on lead_id, else on normalized email. */
+  const matchCol = (col.lead_id !== undefined) ? col.lead_id
+                 : (col.email   !== undefined) ? col.email : -1;
+  if (matchCol === -1) {
+    throw new Error('LEADS has neither a "lead_id" nor an "email" column — cannot match rows.');
+  }
+  const matchOnEmail = (col.lead_id === undefined);
+  const needle = matchOnEmail ? normalizeEmail(data.email) : String(leadId).trim().toLowerCase();
+
+  const lastRow  = sheet.getLastRow();
+  const existing = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, headers.length).getValues() : [];
+
+  let rowIndex = -1;
+  if (isSet(needle)) {
+    for (let i = 0; i < existing.length; i++) {
+      if (String(existing[i][matchCol]).trim().toLowerCase() === needle) { rowIndex = i + 2; break; }
+    }
+  }
+
+  const incomingTag = firstSet(data.src, data.src_first, "");
+  const incoming = {
+    lead_id: leadId,
+    name:    data.name  || "",
+    email:   normalizeEmail(data.email),
+    phone:   data.phone || "",
+    source:  firstSet(data.src_first, data.src, ""),
+    segment: data.segment || "",
+  };
+
+  /* ---- No match: create ---- */
+  if (rowIndex === -1) {
+    const row = new Array(headers.length).fill("");
+    const written = [];
+    Object.keys(incoming).forEach(function (f) {
+      if (col[f] !== undefined && isSet(incoming[f])) { row[col[f]] = incoming[f]; written.push(f); }
+    });
+    if (col.source_history !== undefined && isSet(incomingTag)) {
+      row[col.source_history] = incomingTag;
+      written.push("source_history");
+    }
+    sheet.appendRow(row);
+    return { ok: true, action: "created", lead_id: leadId, row: sheet.getLastRow(),
+             fields: written, missing: missing, headers: headers };
+  }
+
+  /* ---- Match: update blanks only, append to source_history ---- */
+  const current = existing[rowIndex - 2];
+  const filled = [];
+
+  Object.keys(incoming).forEach(function (f) {
+    if (col[f] === undefined) return;
+    if (isSet(current[col[f]])) return;              // never overwrite a non-empty cell
+    if (!isSet(incoming[f])) return;
+    sheet.getRange(rowIndex, col[f] + 1).setValue(incoming[f]);
+    filled.push(f);
+  });
+
+  let historyAppended = false;
+  if (col.source_history !== undefined && isSet(incomingTag)) {
+    const raw  = String(current[col.source_history] || "");
+    const tags = raw.split(",").map(function (t) { return t.trim(); }).filter(Boolean);
+    if (tags.indexOf(incomingTag) === -1) {
+      tags.push(incomingTag);
+      sheet.getRange(rowIndex, col.source_history + 1).setValue(tags.join(", "));
+      historyAppended = true;
+    }
+  }
+
+  return { ok: true, action: "matched", lead_id: leadId, row: rowIndex,
+           fields: filled, history_appended: historyAppended, missing: missing, headers: headers };
+}
+
+
+/* ============================================================
+   6. SCHEDULING
    ============================================================ */
 
 /**
- * Resolve one true schedule answer from a payload that may describe the time in
- * any of three shapes. The site has two scheduling controls: the live slot
- * picker writes slot_date + slot_time, the earlier/later radios write
- * time_preference + schedule_preference, and only schedule_preference_label is
- * populated on both paths. Reading a single key is what left the notes column
- * blank on slot bookings while the email showed the date fine.
+ * Resolve one true schedule answer. The site has two scheduling controls that
+ * write different keys, and only schedule_preference_label is populated on both
+ * paths — reading a single key is what left `notes` blank on slot bookings.
  *
- * Order, most structured first:
- *   1. slot_date + slot_time     — a real booked slot
- *   2. time_preference / schedule_preference — earlier or later
+ *   1. slot_date + slot_time  (or requested_date + requested_window)
+ *   2. time_preference / schedule_preference
  *   3. schedule_preference_label — guaranteed non-empty backstop
- *   4. "No time specified"       — should never be reached in practice
+ *   4. "No time specified"
  *
- * Always returns { shape, date, time, summary } with a non-empty summary.
+ * Always returns a non-empty summary.
  */
 function normalizeSchedule(data) {
-  if (isSet(data.slot_date) && isSet(data.slot_time)) {
-    return {
-      shape: "slot",
-      date: String(data.slot_date),
-      time: String(data.slot_time),
-      summary: prettyDate(data.slot_date) + " at " + data.slot_time,
-    };
+  const date = firstSet(data.slot_date, data.requested_date);
+  const time = firstSet(data.slot_time, data.requested_window);
+
+  if (isSet(date) && isSet(time)) {
+    return { shape: "slot", date: String(date), time: String(time),
+             summary: prettyDate(date) + " at " + time };
   }
 
   const pref = firstSet(data.time_preference, data.schedule_preference);
@@ -207,12 +391,8 @@ function normalizeSchedule(data) {
   }
 
   if (isSet(data.schedule_preference_label)) {
-    return {
-      shape: "label",
-      date: "",
-      time: "",
-      summary: String(data.schedule_preference_label),
-    };
+    return { shape: "label", date: "", time: "",
+             summary: String(data.schedule_preference_label) };
   }
 
   return { shape: "none", date: "", time: "", summary: "No time specified" };
@@ -225,7 +405,7 @@ function prefLabel(v) {
   return String(v);
 }
 
-/** "2026-08-14" -> "Friday, Aug 14". Parsed as a local date, never UTC midnight. */
+/** "2026-08-14" -> "Friday, Aug 14". Parsed local, never UTC midnight. */
 function prettyDate(ymd) {
   const parts = String(ymd).split("-");
   if (parts.length !== 3) return String(ymd);
@@ -236,14 +416,13 @@ function prettyDate(ymd) {
 
 
 /* ============================================================
-   5. RECORD BUILDERS
+   7. JOBS RECORD
    ============================================================ */
 
-function buildJobRecord(data, sched) {
-  return {
-    /* --- maps onto existing JOBS columns --- */
+function buildJobRecord(data, sched, leadId, sheet) {
+  const record = {
     job_id:             makeJobId(data, sched),
-    submission_id:      data.submission_id || "",
+    lead_id:            leadId,
     src_first:          firstSet(data.src_first, data.src, ""),
     property_key:       propertyKey(data),
     service_label:      serviceLabel(data),
@@ -253,122 +432,68 @@ function buildJobRecord(data, sched) {
     bathrooms:          valOrBlank(data.bathrooms),
     quote_price:        valOrBlank(data.quote_price),
     addons_label:       addonsLabel(data),
-    addon_total:        valOrBlank(data.addon_total),
+    addon_total:        addonRevenue(data),
     first_visit_total:  valOrBlank(firstSet(data.first_visit_total, data.quote_price)),
-    slot_date:          sched.date,
-    slot_time:          sched.time,
-    payment_status:     DEFAULT_PAYMENT_STATUS,
+    requested_date:     sched.date,
+    requested_window:   sched.time,
     job_status:         NEW_JOB_STATUS,
-    notes:              buildNotes(data, sched),
 
-    /* --- no column in JOBS today; captured inside notes. Add a header with
-           any of these exact names and it starts filling itself in. --- */
-    name:               data.name || "",
-    email:              data.email || "",
-    phone:              data.phone || "",
-    address:            data.address || "",
-    unit:               data.unit || "",
-    zip:                data.zip || "",
-    zip_tier:           data.zip_tier || "",
-    customer_notes:     data.customer_notes || "",
-    pets_flag:          petsFlag(data) ? "TRUE" : "FALSE",
-    segment:            data.segment || "",
-    src:                data.src || "",
-    src_chain:          data.src_chain || "",
-    schedule_summary:   sched.summary,
-    schedule_shape:     sched.shape,
-    steady_state_price: valOrBlank(data.steady_state_price),
-    recurring_weekly:   valOrBlank(data.recurring_weekly),
-    recurring_biweekly: valOrBlank(data.recurring_biweekly),
-    recurring_monthly:  valOrBlank(data.recurring_monthly),
-    discount_applied:   data.discount_applied || "",
-    utm_source:         data.utm_source || "",
-    utm_medium:         data.utm_medium || "",
-    utm_campaign:       data.utm_campaign || "",
-    page_path:          data.page_path || "",
-    event_type:         data.event_type || data.event || "",
-    submitted_at:       firstSet(data.submitted_at, data.timestamp, ""),
-  };
-}
+    notes:              sched.summary,        // schedule summary ONLY, never empty
+    scheduling_type:    sched.shape,
 
-function buildLeadRecord(data, sched) {
-  return {
-    timestamp:          firstSet(data.timestamp, data.submitted_at, new Date().toISOString()),
     submission_id:      data.submission_id || "",
-    event_type:         data.event_type || data.event || "",
-    src_first:          firstSet(data.src_first, data.src, ""),
-    segment:            data.segment || "",
-    name:               data.name || "",
+    received_at:        nowIso(),
+    name:               data.name  || "",
     email:              data.email || "",
     phone:              data.phone || "",
-    zip:                data.zip || "",
-    zip_tier:           data.zip_tier || "",
-    bedrooms:           valOrBlank(data.bedrooms),
-    bathrooms:          valOrBlank(data.bathrooms),
-    service_label:      serviceLabel(data),
-    condition:          data.condition || "",
-    frequency_selected: data.frequency_selected || "",
-    quote_price:        valOrBlank(firstSet(data.quote_price, data.first_visit_total)),
-    notes:              buildNotes(data, sched),
+    segment:            data.segment   || "",
+    src_chain:          data.src_chain || "",
+    customer_notes:     data.customer_notes || "",   // customer free text ONLY
+    pets_flag:          petsFlag(data) ? "TRUE" : "FALSE",
   };
+
+  /* Everything with no column of its own — only if quote_meta exists. */
+  if (sheetHeaders(sheet).indexOf("quote_meta") !== -1) {
+    const meta = {};
+    QUOTE_META_KEYS.forEach(function (k) { if (isSet(data[k])) meta[k] = data[k]; });
+    if (Object.keys(meta).length) record.quote_meta = JSON.stringify(meta);
+  }
+
+  return record;
 }
 
 /**
- * Everything that matters, in one cell, in a fixed order. This is the column
- * that must never be blank — it is the human-readable record of the booking and
- * the safety net for every field that has no column of its own.
+ * Add-on revenue. Move In / Move Out bundles fridge and oven into the
+ * multiplier, so this is legitimately 0 on those jobs — do not impute $85.
  */
-function buildNotes(data, sched) {
-  const lines = [];
-
-  lines.push("Scheduling: " + sched.summary + "  [" + sched.shape + "]");
-
-  if (isSet(data.customer_notes)) {
-    lines.push('Customer said: "' + String(data.customer_notes).trim() + '"');
-  }
-  lines.push("Pets: " + (petsFlag(data) ? "YES" : "no"));
-
-  const contact = [data.name, data.phone, data.email].filter(isSet);
-  if (contact.length) lines.push("Contact: " + contact.join("  ·  "));
-
-  const where = [data.address, data.unit].filter(isSet).join(", ");
-  if (isSet(where) || isSet(data.zip)) {
-    lines.push("Address: " + where + (isSet(data.zip) ? "  " + data.zip : "") +
-               (isSet(data.zip_tier) ? " (" + data.zip_tier + ")" : ""));
-  }
-
-  lines.push("Attribution: segment=" + (data.segment || "direct") +
-             "  ·  src=" + (data.src || "-") +
-             "  ·  first=" + (data.src_first || "-") +
-             "  ·  chain=" + (data.src_chain || "-"));
-
-  const utm = ["utm_source", "utm_medium", "utm_campaign"]
-    .filter(function (k) { return isSet(data[k]); })
-    .map(function (k) { return k.replace("utm_", "") + "=" + data[k]; });
-  if (utm.length) lines.push("UTM: " + utm.join("  ·  "));
-
-  if (isSet(data.steady_state_price)) {
-    lines.push("Recurring: " + money(data.steady_state_price) + "/visit (" +
-               (data.frequency_selected || "") + ")");
-  }
-  if (isSet(data.discount_applied) && data.discount_applied !== "None") {
-    lines.push("Discount: " + data.discount_applied);
-  }
-
-  lines.push("Submitted: " + firstSet(data.submitted_at, data.timestamp, ""));
-  return lines.join("\n");
+function addonRevenue(data) {
+  if (serviceKey(data) === "move_out") return 0;
+  return valOrBlank(data.addon_total);
 }
 
 
 /* ============================================================
-   6. SHEET I/O — header-driven, never widens the sheet
+   8. SHEET I/O — header-driven, never widens a tab
    ============================================================ */
 
-function writeRow(sheet, record) {
-  const headers = sheetHeaders(sheet);
-  if (!headers.length) {
-    throw new Error('Tab "' + sheet.getName() + '" has no header row in row 1.');
+function assertWritable(name) {
+  if (PROTECTED_TABS.indexOf(String(name).toUpperCase()) !== -1) {
+    throw new Error('Refusing to write to protected tab "' + name + '".');
   }
+}
+
+/**
+ * @param map  key->header translation. HEADER_MAP is JOBS-specific, so EVENTS
+ *             passes {} and matches on the raw payload names in its own header
+ *             row. Applying the JOBS map everywhere silently dropped bedrooms,
+ *             bathrooms and quote_price from EVENTS.
+ */
+function writeRow(sheet, record, map) {
+  assertWritable(sheet.getName());
+  const translate = map || HEADER_MAP;
+
+  const headers = sheetHeaders(sheet);
+  if (!headers.length) throw new Error('Tab "' + sheet.getName() + '" has no header row.');
 
   const byHeader = {};
   const noColumn = [];
@@ -376,18 +501,19 @@ function writeRow(sheet, record) {
   Object.keys(record).forEach(function (key) {
     const value = record[key];
     if (value === undefined || value === null || value === "") return;
-    const header = HEADER_MAP[key] || key;
+    const header = translate[key] || key;
+    if (OPS_OWNED_COLUMNS.indexOf(header) !== -1) return;      // ops owns these
     if (headers.indexOf(header) === -1) { noColumn.push(key); return; }
-    if (byHeader[header] === undefined) byHeader[header] = value;   // first writer wins
+    if (byHeader[header] === undefined) byHeader[header] = value;
   });
 
-  if (noColumn.length) {
-    console.log("No column for [" + noColumn.join(", ") + "] — captured in notes.");
-  }
+  if (noColumn.length) console.log("Dropped (no column): " + noColumn.join(", "));
 
   sheet.appendRow(headers.map(function (h) {
     return byHeader[h] !== undefined ? byHeader[h] : "";
   }));
+
+  return { noColumn: noColumn };
 }
 
 function sheetHeaders(sheet) {
@@ -402,8 +528,7 @@ function alreadyWritten(sheet, submissionId) {
   if (!isSet(submissionId)) return false;
 
   const headers = sheetHeaders(sheet);
-  let col = headers.indexOf(HEADER_MAP.submission_id);
-  if (col === -1) col = headers.indexOf("submission_id");
+  const col = headers.indexOf("submission_id");
   if (col === -1) return false;                      // nowhere to check — allow the write
 
   const lastRow = sheet.getLastRow();
@@ -419,56 +544,54 @@ function alreadyWritten(sheet, submissionId) {
 
 function requireTab(ss, name) {
   const sheet = ss.getSheetByName(name);
-  if (!sheet) {
-    throw new Error('Tab "' + name + '" not found. Check the JOBS_TAB constant.');
-  }
+  if (!sheet) throw new Error('Tab "' + name + '" not found. Check the tab-name constants.');
+  assertWritable(name);
   return sheet;
 }
 
-/** Lead events land here. Created with LEADS_HEADERS the first time it is needed. */
-function leadsTab(ss) {
-  let sheet = ss.getSheetByName(LEADS_TAB);
+/** EVENTS is ours to create. LEADS and JOBS are never auto-created. */
+function eventsTab(ss) {
+  assertWritable(EVENTS_TAB);
+  let sheet = ss.getSheetByName(EVENTS_TAB);
   if (!sheet) {
-    sheet = ss.insertSheet(LEADS_TAB);
-    sheet.appendRow(LEADS_HEADERS);
+    sheet = ss.insertSheet(EVENTS_TAB);
+    sheet.appendRow(EVENTS_HEADERS);
     sheet.setFrozenRows(1);
-    console.log('Created the "' + LEADS_TAB + '" tab.');
+    console.log('Created the "' + EVENTS_TAB + '" tab.');
   }
   return sheet;
 }
 
 
 /* ============================================================
-   7. NOTIFICATION EMAILS
+   9. EMAILS
    ============================================================ */
 
-function sendNotification(eventType, data, sched) {
-  if (eventType === "reservation" || data.event === "quote_reserved") {
-    sendReservationEmail(data, sched);
-  } else if (eventType === "quote_emailed") {
-    sendQuoteEmailedEmail(data);
-  } else if (eventType === "waitlist_zip") {
-    sendWaitlistEmail(data);
-  } else if (eventType === "custom_quote_request") {
-    sendCustomQuoteEmail(data);
-  }
-}
+function sendReservationEmail(data, sched, leadId, leadResult) {
+  const warn = (leadResult && leadResult.ok === false)
+    ? "\n*** LEADS UPSERT FAILED — the JOBS row was written anyway. ***\n" +
+      "*** " + leadResult.error + " ***\n" +
+      "*** Add the person to LEADS by hand. ***\n\n"
+    : "";
 
-function sendReservationEmail(data, sched) {
   const subject = "Serve Reservation — " + (data.name || "Unknown") + " · " + homeSummary(data) +
-                  (petsFlag(data) ? " · PETS" : "");
+                  (petsFlag(data) ? " · PETS" : "") +
+                  ((leadResult && leadResult.ok === false) ? " · LEADS WRITE FAILED" : "");
 
   const body =
+    warn +
     "A visitor just reserved a clean on servecleaning.com.\n\n" +
-    "— WHEN —\n" +
-    sched.summary + "\n" +
-    "(" + sched.shape + ")\n\n" +
+    "— WHEN —\n" + sched.summary + "\n(" + sched.shape + ")\n\n" +
     "— CONTACT —\n" +
     "Name:    " + (data.name    || "") + "\n" +
     "Email:   " + (data.email   || "") + "\n" +
     "Phone:   " + (data.phone   || "") + "\n" +
     "Address: " + (data.address || "") + (isSet(data.unit) ? ", " + data.unit : "") + "\n" +
     "ZIP:     " + (data.zip || "") + " (" + (data.zip_tier || "") + ")\n\n" +
+    "— RECORDS —\n" +
+    "lead_id:  " + leadId + "  (" + (leadResult ? leadResult.action : "?") + ")\n" +
+    "job_id:   " + makeJobId(data, sched) + "\n" +
+    "property: " + propertyKey(data) + "\n\n" +
     "— SERVICE —\n" +
     "Service:    " + serviceLabel(data) + "\n" +
     "Home:       " + homeSummary(data) + "\n" +
@@ -480,14 +603,10 @@ function sendReservationEmail(data, sched) {
     (isSet(data.customer_notes) ? data.customer_notes : "(nothing added)") + "\n\n" +
     "— PRICING (all-in) —\n" +
     "First-visit price: " + money(firstSet(data.quote_price, data.first_visit_total)) + "\n" +
-    (isSet(data.addon_total) && Number(data.addon_total) > 0
-      ? "Of which add-ons: " + money(data.addon_total) + "\n" : "") +
+    (Number(addonRevenue(data)) > 0 ? "Of which add-ons: " + money(addonRevenue(data)) + "\n" : "") +
     (isSet(data.steady_state_price)
       ? "Recurring/visit:   " + money(data.steady_state_price) +
         " (" + (data.frequency_selected || "") + ")\n" : "") +
-    (isSet(data.recurring_weekly)   ? "Weekly rate:       " + money(data.recurring_weekly)   + "\n" : "") +
-    (isSet(data.recurring_biweekly) ? "Biweekly rate:     " + money(data.recurring_biweekly) + "\n" : "") +
-    (isSet(data.recurring_monthly)  ? "Monthly rate:      " + money(data.recurring_monthly)  + "\n" : "") +
     attributionBlock(data) +
     "\nSubmission: " + (data.submission_id || "(none)") +
     "\nSubmitted:  " + firstSet(data.submitted_at, data.timestamp, "");
@@ -495,44 +614,34 @@ function sendReservationEmail(data, sched) {
   MailApp.sendEmail(NOTIFY_EMAIL, subject, body);
 }
 
-function sendQuoteEmailedEmail(data) {
-  const subject = "Serve Lead — quote emailed to " + (data.email || "unknown");
+function sendEventEmail(eventType, data) {
+  let subject, lead;
+  if (eventType === "quote_emailed") {
+    subject = "Serve Lead — quote emailed to " + (data.email || "unknown");
+    lead = "A visitor emailed themselves a quote. Warm lead — priced, not reserved.";
+  } else if (eventType === "waitlist_zip") {
+    subject = "Serve Waitlist — " + (data.zip || "?") + " (out of area)";
+    lead = "Someone outside the service area joined the waitlist.";
+  } else if (eventType === "custom_quote_request") {
+    subject = "Serve Custom Quote Request — " + homeSummary(data);
+    lead = "A larger home (5+ BR) requested a personal quote. Send an hourly scope today ($130/hr).";
+  } else {
+    subject = "Serve Event — " + eventType;
+    lead = "A non-reservation event was recorded.";
+  }
+
   const body =
-    "A visitor emailed themselves a quote on servecleaning.com.\n" +
-    "Warm lead — they saw a price but have NOT reserved yet.\n\n" +
+    lead + "\n\n" +
     "Email:     " + (data.email || "") + "\n" +
+    "Phone:     " + (data.phone || "(not provided)") + "\n" +
     "ZIP:       " + (data.zip || "") + " (" + (data.zip_tier || "") + ")\n" +
     "Service:   " + serviceLabel(data) + "\n" +
     "Home:      " + homeSummary(data) + "\n" +
-    "Condition: " + (data.condition || "") + "\n" +
     "Quoted:    " + money(firstSet(data.quote_price, data.first_visit_total)) + "\n" +
     attributionBlock(data) +
+    "\nLogged to the " + EVENTS_TAB + " tab." +
     "\nSubmitted: " + firstSet(data.submitted_at, data.timestamp, "");
-  MailApp.sendEmail(NOTIFY_EMAIL, subject, body);
-}
 
-function sendWaitlistEmail(data) {
-  const subject = "Serve Waitlist — " + (data.zip || "?") + " (out of area)";
-  const body =
-    "Someone outside the current service area joined the waitlist on servecleaning.com.\n\n" +
-    "Email: " + (data.email || "") + "\n" +
-    "ZIP:   " + (data.zip || "") + "\n" +
-    attributionBlock(data) +
-    "\nSubmitted: " + firstSet(data.submitted_at, data.timestamp, "");
-  MailApp.sendEmail(NOTIFY_EMAIL, subject, body);
-}
-
-function sendCustomQuoteEmail(data) {
-  const subject = "Serve Custom Quote Request — " + homeSummary(data);
-  const body =
-    "A larger home (5+ BR) requested a personal quote on servecleaning.com.\n\n" +
-    "Email: " + (data.email || "") + "\n" +
-    "Phone: " + (data.phone || "(not provided)") + "\n" +
-    "ZIP:   " + (data.zip || "") + " (" + (data.zip_tier || "") + ")\n" +
-    "Home:  " + homeSummary(data) + "\n" +
-    attributionBlock(data) +
-    "\nSend them an hourly-scope quote today ($130/hr).\n" +
-    "Submitted: " + firstSet(data.submitted_at, data.timestamp, "");
   MailApp.sendEmail(NOTIFY_EMAIL, subject, body);
 }
 
@@ -550,25 +659,21 @@ function attributionBlock(data) {
 
 
 /* ============================================================
-   8. HELPERS
+   10. HELPERS
    ============================================================ */
 
 function parseBody(e) {
   if (!e || !e.postData || !e.postData.contents) return null;
-  try {
-    return JSON.parse(e.postData.contents);
-  } catch (err) {
-    console.error("Could not parse body: " + err);
-    return null;
-  }
+  try { return JSON.parse(e.postData.contents); }
+  catch (err) { console.error("Could not parse body: " + err); return null; }
 }
 
 function json(obj) {
-  return ContentService
-    .createTextOutput(JSON.stringify(obj))
+  return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
 }
 
+function nowIso()      { return new Date().toISOString(); }
 function isSet(v)      { return v !== null && v !== undefined && String(v).trim() !== ""; }
 function valOrBlank(v) { return (v === null || v === undefined) ? "" : v; }
 function money(v)      { return isSet(v) ? "$" + v : "—"; }
@@ -580,11 +685,13 @@ function firstSet() {
   return "";
 }
 
+function serviceKey(data)   { return String(firstSet(data.service, data.service_type)); }
+
 function serviceLabel(data) {
-  const s = firstSet(data.service, data.service_type);
+  const s = serviceKey(data);
   if (s === "move_out")    return "Move In / Move Out";
   if (s === "first_clean") return "First Clean";
-  return String(s || "");
+  return s;
 }
 
 function homeSummary(data) {
@@ -593,6 +700,7 @@ function homeSummary(data) {
 }
 
 function addonsLabel(data) {
+  if (serviceKey(data) === "move_out") return "";      // bundled into the multiplier
   if (Array.isArray(data.modifiers_applied) && data.modifiers_applied.length) {
     return data.modifiers_applied.join(", ");
   }
@@ -604,7 +712,7 @@ function addonsLabel(data) {
 
 /**
  * Trust the site's flag when it sends one; re-derive from the notes otherwise,
- * so a stale cached script.js can't quietly lose the signal. Word-boundaried —
+ * so a stale cached script.js cannot lose the signal. Word-boundaried —
  * "carpet" must not read as "pet".
  */
 function petsFlag(data) {
@@ -616,93 +724,114 @@ function petsFlag(data) {
   return re.test(String(data.customer_notes || ""));
 }
 
-/** Stable per submission — a retry that slips past dedupe still produces the same id. */
-function makeJobId(data, sched) {
-  const day = isSet(sched.date)
-    ? String(sched.date).replace(/-/g, "")
-    : Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyyMMdd");
-  let tail = String(data.submission_id || "").replace(/[^A-Za-z0-9]/g, "").slice(-6).toUpperCase();
-  if (!tail) tail = String(Math.floor(Math.random() * 1000000));
-  return "SRV-" + day + "-" + tail;
-}
-
-/** ZIP + address + unit, normalised. Same home always produces the same key. */
-function propertyKey(data) {
-  const parts = [data.zip, data.address, data.unit]
-    .filter(isSet)
-    .map(function (v) {
-      return String(v).trim().toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-    })
-    .filter(function (v) { return v !== ""; });
-  return parts.join("-");
-}
-
 
 /* ============================================================
-   9. TEST — run this once from the editor before deploying
-   Writes two rows into JOBS, one per scheduling shape, and sends
-   both notification emails. Check that `notes` is populated on
-   BOTH rows: that is the bug this build exists to fix.
+   11. RUN THESE FROM THE EDITOR
    ============================================================ */
 
+/**
+ * Prints the LEADS header row and exactly which fields this script can write
+ * there. Run this FIRST — it is the only way to see the real schema, since the
+ * mapping happens at runtime against whatever row 1 actually says.
+ */
+function reportLeadsSchema() {
+  const ss = SPREADSHEET_ID ? SpreadsheetApp.openById(SPREADSHEET_ID)
+                            : SpreadsheetApp.getActiveSpreadsheet();
+
+  console.log("Tabs in this spreadsheet: " +
+    ss.getSheets().map(function (s) { return s.getName(); }).join(" | "));
+
+  const leads = ss.getSheetByName(LEADS_TAB);
+  if (!leads) { console.log('NO TAB NAMED "' + LEADS_TAB + '".'); return; }
+
+  const headers = sheetHeaders(leads);
+  console.log("LEADS row 1 (" + headers.length + " columns):\n  " + headers.join(" | "));
+
+  const found = [], missing = [];
+  LEADS_FIELDS.forEach(function (f) {
+    (headers.indexOf(f) !== -1 ? found : missing).push(f);
+  });
+  console.log("WILL WRITE:  " + (found.join(", ")   || "(nothing)"));
+  console.log("NO COLUMN:   " + (missing.join(", ") || "(none — full coverage)"));
+  console.log("Row matching on: " +
+    (headers.indexOf("lead_id") !== -1 ? "lead_id" :
+     headers.indexOf("email")   !== -1 ? "email (no lead_id column)" :
+     "NOTHING — upsert will fail"));
+
+  const jobs = ss.getSheetByName(JOBS_TAB);
+  if (jobs) {
+    const jh = sheetHeaders(jobs);
+    console.log("\nJOBS row 1 (" + jh.length + " columns):\n  " + jh.join(" | "));
+    console.log("quote_meta column present: " + (jh.indexOf("quote_meta") !== -1));
+  }
+}
+
+/**
+ * Writes: a slot booking, a preference booking, a REPEAT booking from the same
+ * email, and an idempotency replay. Check that the repeat produced one LEADS
+ * row with an appended source_history and a second JOBS row.
+ */
 function testPayload() {
   const stamp = Date.now();
 
   const base = {
-    event: "quote_reserved",
-    event_type: "reservation",
-    timestamp: new Date().toISOString(),
-    submitted_at: new Date().toISOString(),
-    zip: "02134", zip_tier: "core",
-    bedrooms: 2, bathrooms: 1,
-    service: "first_clean", service_type: "first_clean",
-    condition: "standard",
-    addon_fridge: true, addon_oven: false,
-    modifiers_applied: ["Inside the fridge"],
-    addon_total: 45,
-    frequency_selected: "biweekly",
-    quote_price: 214, first_visit_total: 214,
-    original_price: 383, discount_applied: "First clean 50% off",
-    steady_state_price: 122,
+    event: "quote_reserved", event_type: "reservation",
+    timestamp: nowIso(), submitted_at: nowIso(),
+    zip: "02134", zip_tier: "core", bedrooms: 2, bathrooms: 1,
+    service: "first_clean", service_type: "first_clean", condition: "standard",
+    addon_fridge: true, addon_oven: false, modifiers_applied: ["Inside the fridge"],
+    addon_total: 45, frequency_selected: "biweekly",
+    quote_price: 214, first_visit_total: 214, original_price: 383,
+    discount_applied: "First clean 50% off", steady_state_price: 122,
     recurring_weekly: 111, recurring_biweekly: 122, recurring_monthly: 142,
-    name: "Test Customer", email: "test@example.com", phone: "(617) 555-0100",
+    name: "Test Customer", email: "Test.Customer@Example.com  ", phone: "(617) 555-0100",
     address: "123 Beacon St", unit: "4B", unit_label: "2 BR / 1 BA",
-    customer_notes: "We have a friendly dog, please keep the back door shut. Park in the driveway.",
-    pets_flag: true,
     src: "qr-allston-01", src_first: "qr-allston-01", src_chain: "qr-allston-01",
-    segment: "qr_code",
-    utm_source: "poster", utm_medium: "print", utm_campaign: "allston-summer",
-    page_path: "/",
+    segment: "qr_code", utm_source: "poster", utm_medium: "print", page_path: "/",
   };
 
-  // Shape 1 — live slot picker.
-  const slotRow = Object.assign({}, base, {
+  const slot = Object.assign({}, base, {
     submission_id: "test-" + stamp + "-slot",
-    slot_date: "2026-08-14",
-    slot_time: "9–11 AM",
-    schedule_preference: null,
-    schedule_preference_label: "Friday, Aug 14 at 9–11 AM",
-    time_preference: null,
+    slot_date: "2026-08-14", slot_time: "9-11 AM",
+    schedule_preference_label: "Friday, Aug 14 at 9-11 AM",
+    customer_notes: "We have a friendly dog, keep the back door shut.",
+    pets_flag: true,
   });
 
-  // Shape 2 — earlier/later fallback radios.
-  const prefRow = Object.assign({}, base, {
+  const pref = Object.assign({}, base, {
     submission_id: "test-" + stamp + "-pref",
-    slot_date: null,
-    slot_time: null,
-    schedule_preference: "earlier",
+    email: "someone.else@example.com",
+    schedule_preference: "earlier", time_preference: "earlier",
     schedule_preference_label: "Earlier in the Day",
-    time_preference: "earlier",
-    customer_notes: "No pets. Lockbox code is on the door, 1234.",
+    customer_notes: "No pets. Lockbox on the door.",
     pets_flag: false,
   });
 
-  [slotRow, prefRow].forEach(function (payload) {
-    const res = doPost({ postData: { contents: JSON.stringify(payload) } });
-    console.log(payload.submission_id + " -> " + res.getContent());
+  // Same person as `slot`, different casing and a different tag.
+  const repeat = Object.assign({}, base, {
+    submission_id: "test-" + stamp + "-repeat",
+    email: "TEST.CUSTOMER@example.com",
+    src: "ig-story-07", src_first: "qr-allston-01",
+    src_chain: "qr-allston-01>ig-story-07",
+    slot_date: "2026-09-02", slot_time: "1-3 PM",
+    customer_notes: "Same dog as last time.",
   });
 
-  // Third call repeats the first id — should come back duplicate:true, no new row.
-  const dupe = doPost({ postData: { contents: JSON.stringify(slotRow) } });
-  console.log("idempotency check -> " + dupe.getContent());
+  // Move Out — add_on_rev must be 0, not $85.
+  const moveOut = Object.assign({}, base, {
+    submission_id: "test-" + stamp + "-moveout",
+    email: "moveout@example.com",
+    service: "move_out", service_type: "move_out",
+    modifiers_applied: [], addon_total: 0,
+    quote_price: 536, first_visit_total: 536,
+    slot_date: "2026-09-10", slot_time: "8-10 AM",
+  });
+
+  [slot, pref, repeat, moveOut].forEach(function (p) {
+    const res = doPost({ postData: { contents: JSON.stringify(p) } });
+    console.log(p.submission_id + " -> " + res.getContent());
+  });
+
+  const replay = doPost({ postData: { contents: JSON.stringify(slot) } });
+  console.log("idempotency replay -> " + replay.getContent());
 }
