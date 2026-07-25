@@ -22,7 +22,7 @@
             <ul class="nav__links">
                 <li><a href="#how-it-works">How It Works</a></li>
                 <li><a href="#examples">Examples</a></li>
-                <li><a href="#quote" class="nav__cta">Instant Quote</a></li>
+                <li><a href="#quote" class="nav__cta">Instant quote</a></li>
             </ul>
             <button class="nav__hamburger" aria-label="Open menu" aria-expanded="false">
                 <span></span><span></span><span></span>
@@ -32,7 +32,7 @@
             <ul>
                 <li><a href="#how-it-works">How It Works</a></li>
                 <li><a href="#examples">Examples</a></li>
-                <li><a href="#quote">Instant Quote</a></li>
+                <li><a href="#quote">Instant quote</a></li>
             </ul>
         </div>
     </nav>
@@ -45,7 +45,7 @@
         <div class="hero__content">
             <h1 class="hero__headline">Greater Boston's Premier Cleaning Service.</h1>
             <p class="hero__sub">Professional, insured, and background-checked cleaners — available for standard, deep, and move-out cleans across the Greater Boston area.</p>
-            <a href="#quote" class="btn btn--primary">Instant Quote</a>
+            <a href="#quote" class="btn btn--primary">Instant quote</a>
         </div>
     </section>
 
@@ -91,6 +91,7 @@
                     <div class="step__number">3</div>
                     <h3>Enjoy Your Space</h3>
                     <p>Come home to a spotless space. We're not done until you're completely satisfied.</p>
+                    <p class="step__link"><a href="#after-you-book">See how the day runs, start to finish &rarr;</a></p>
                 </div>
             </div>
         </div>
@@ -422,11 +423,20 @@
                         <input class="flow-input" type="text" id="r-unit" name="unit" autocomplete="address-line2" placeholder="Apt 4B">
                     </div>
 
+                    <div class="field-block">
+                        <label class="field-label" for="r-notes">Anything we should know? <span class="opt">(optional)</span></label>
+                        <textarea class="flow-input flow-textarea" id="r-notes" name="customer_notes" rows="3" maxlength="600"
+                                  placeholder="Pets, parking, how to get in, rooms to skip, anything fragile&hellip;"></textarea>
+                        <p class="field-hint">If you have pets, tell us here &mdash; we plan the visit around them.</p>
+                    </div>
+
                     <div class="form-error" id="reserve-error" aria-live="polite"></div>
                     <div class="step-actions">
                         <button type="button" class="btn btn--ghost" id="back-to-2">&larr; Back</button>
                         <button type="submit" class="btn btn--primary" id="reserve-submit">Reserve my clean</button>
                     </div>
+
+                    <p class="reserve-aftercare">Wondering what happens next? <a href="#after-you-book">See how the day runs &rarr;</a></p>
                 </form>
             </div>
 
@@ -454,6 +464,68 @@
                 </div>
             </div>
 
+        </div>
+    </section>
+
+    <!-- AFTER YOU BOOK
+         Standalone section, deliberately a SIBLING of #quote — not a .quote-step.
+         The Build → Price → Reserve step-switching JS only ever touches the five
+         fixed panel IDs, so this block stays readable at every stage of the flow. -->
+    <section class="svmA-section" id="after-you-book">
+        <div class="svmA-wrap">
+            <h2>After you book</h2>
+            <p class="svmA-lede">No mystery, no scramble. Here's exactly how the day runs &mdash; from the moment you reserve to the moment we lock up.</p>
+
+            <div class="svmA-grid">
+                <div class="svmA-bubble">
+                    <span class="svmA-step">Within a few hours</span>
+                    <h3>We confirm your window</h3>
+                    <p>A real person calls or texts to lock in your arrival window and answer anything you left in the notes box. No automated runaround.</p>
+                </div>
+                <div class="svmA-bubble">
+                    <span class="svmA-step">The day before</span>
+                    <h3>A reminder, and that's it</h3>
+                    <p>You get a text with your window and your cleaner's name. There's nothing to prep &mdash; clearing counters helps, but it's never required.</p>
+                </div>
+                <div class="svmA-bubble">
+                    <span class="svmA-step">Getting in</span>
+                    <h3>Access and parking</h3>
+                    <p>Home, lockbox, doorman, or a hidden key &mdash; tell us which when you book. Flag tight parking or a permit zone and we plan around it.</p>
+                </div>
+                <div class="svmA-bubble">
+                    <span class="svmA-step">Pets</span>
+                    <h3>They can stay right where they are</h3>
+                    <p>Mention your pets in the notes box. We keep doors closed, work around them, and use products that are safe once dry.</p>
+                </div>
+                <div class="svmA-bubble">
+                    <span class="svmA-step">On the day</span>
+                    <h3>We bring everything</h3>
+                    <p>Supplies, vacuums, and equipment come with us &mdash; you provide nothing. Stay home or go about your day, whichever you prefer.</p>
+                </div>
+                <div class="svmA-bubble">
+                    <span class="svmA-step">Before we leave</span>
+                    <h3>Photo-verified, then done</h3>
+                    <p>Every job ends with a walkthrough and photos. If something isn't right, tell us within 24 hours and we come back and fix it.</p>
+                </div>
+            </div>
+
+            <h3 class="svmA-shots-title">What &ldquo;done&rdquo; looks like</h3>
+            <div class="svmA-shots">
+                <figure class="svmA-shot">
+                    <img src="images/kitchen1_after.jpeg" alt="Kitchen counters cleared and degreased at the end of a Serve clean" loading="lazy">
+                    <figcaption>Kitchen, reset</figcaption>
+                </figure>
+                <figure class="svmA-shot">
+                    <img src="images/bath1_after.jpeg" alt="Bathroom vanity polished and disinfected at the end of a Serve clean" loading="lazy">
+                    <figcaption>Bathroom, detailed</figcaption>
+                </figure>
+                <figure class="svmA-shot">
+                    <img src="images/living1_after.jpeg" alt="Living room vacuumed and tidied at the end of a Serve clean" loading="lazy">
+                    <figcaption>Living space, finished</figcaption>
+                </figure>
+            </div>
+
+            <p class="svmA-foot">Something specific to sort out first? Email <a href="mailto:servehomecleaning@gmail.com">servehomecleaning@gmail.com</a> or call <a href="tel:+12062097707">(206) 209-7707</a>.</p>
         </div>
     </section>
 

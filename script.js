@@ -143,8 +143,41 @@ function computeQuote(input) {
    Booking Flow — Build -> Price -> Reserve
    ============================================================ */
 (function () {
+
+    /* ============================================================
+       ENDPOINTS — the only two URLs on the page. Both are Google
+       Apps Script web-app deployments (.../exec).
+       ============================================================ */
+
+    /* Booking webhook — writes to LEADS MASTER and sends the notification
+       email. Repo source of truth for the receiving script: /apps-script/webhook.gs.
+       Redeploy that, then paste the new /exec URL here. */
     const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbwaMIS1nklX2rWuCEa9koeTyuAFt-UdGAZ1mqY98Z5IOHz0i5HgaugH0j5j2Nf-XUGB/exec';
-    const AVAIL_URL  = 'https://script.google.com/macros/s/AKfycbxx_iQ1x71D8FN-pDNwna34KE2YjNrpL7UDUwGlcW54MA_HQzfcGAK_8f6H6Gi5pzY/exec';
+
+    /* ------------------------------------------------------------------
+       AVAILABILITY FEED — feeds the Step 3 time-slot picker.
+       ASSUME STALE as of 2026-07-26. The Ops MASTER behind this endpoint moved
+       Google accounts, so this deployment is bound to the OLD account. A
+       /macros/s/.../exec ID carries no account identity, so this cannot be
+       verified from the code alone — treat it as dead until proven otherwise.
+
+       While it is dead the site quietly serves the earlier/later time-preference
+       fallback. Bookings still work; you just lose real slot selection.
+
+       TO FIX: redeploy the availability doGet from the servecos.com account and
+       paste the new /exec URL below. Set it to '' to skip the network call
+       entirely and go straight to the fallback.
+
+       Expected response shape:
+         { ok: true, slots: [ { date: "2026-08-14", time: "9–11 AM", open: 2 }, … ] }
+       ------------------------------------------------------------------ */
+    const AVAILABILITY_SOURCE_URL = 'https://script.google.com/macros/s/AKfycbxx_iQ1x71D8FN-pDNwna34KE2YjNrpL7UDUwGlcW54MA_HQzfcGAK_8f6H6Gi5pzY/exec';
+
+    /* Hard caps. The availability fetch must never strand a customer on
+       "Loading times…" with no way to submit, and the reservation POST must
+       never leave them staring at "Reserving…". */
+    const AVAILABILITY_TIMEOUT_MS = 5000;
+    const RESERVE_CONFIRM_TIMEOUT_MS = 10000;
 
     const $ = (id) => document.getElementById(id);
 
@@ -169,12 +202,106 @@ function computeQuote(input) {
         'Doors, frames, light switches and outlet covers',
         'Detailed hand-scrubbing of built-up grime',
     ];
+    /* Move In / Move Out adds these on top of INCLUDED_FIRST. The fridge and oven
+       lines matter: those are paid add-ons on a First Clean, and the add-on
+       toggles are hidden on Move Out — this list is where the customer learns
+       they are already covered. */
     const INCLUDED_MOVEOUT_EXTRA = [
         'Windows and sills',
-        'Inside cabinets',
+        'Inside cabinets and drawers',
         'Baseboards',
-        'Appliance interiors',
+        'Inside the fridge &mdash; included, not an add-on',
+        'Inside the oven &mdash; included, not an add-on',
     ];
+
+    /* ============================================================
+       ATTRIBUTION — src / segment / UTM
+       `src` is the tag printed on a poster, QR code, or link:
+       servecleaning.com/?src=qr-allston-01
+
+       EDIT ME: add one row per tag prefix you print. Matching is on the first
+       segment of the tag (split on - _ . /), case-insensitive. A tag that
+       matches nothing lands in 'other'; no ?src at all is 'direct'.
+       ============================================================ */
+    const SRC_SEGMENTS = [
+        ['qr',     'qr_code'],
+        ['poster', 'poster'],
+        ['flyer',  'flyer'],
+        ['door',   'door_hanger'],
+        ['ig',     'social'],
+        ['fb',     'social'],
+        ['tt',     'social'],
+        ['nd',     'nextdoor'],
+        ['ref',    'referral'],
+        ['gmb',    'google_business'],
+        ['email',  'email'],
+    ];
+
+    function segmentFor(src) {
+        if (!src) return 'direct';
+        const head = String(src).toLowerCase().split(/[-_./]/)[0];
+        const hit = SRC_SEGMENTS.find(pair => pair[0] === head);
+        return hit ? hit[1] : 'other';
+    }
+
+    /**
+     * Read once per page load, persist for the session.
+     *
+     * `src` / `utm_*` keep their original last-touch behaviour: a URL param wins,
+     * otherwise the stored value carries through a refresh or a back-button hop.
+     * Layered on top: `serve_src` is the FIRST tag of the session and is never
+     * overwritten, and `serve_src_chain` records every distinct tag in order — so
+     * a second tagged link can no longer erase the one that actually earned the visit.
+     */
+    function readAttribution() {
+        let saved = {};
+        try { saved = JSON.parse(sessionStorage.getItem('serve_attr') || '{}'); } catch (_) {}
+        const params = new URLSearchParams(location.search);
+        const keys = ['src', 'utm_source', 'utm_medium', 'utm_campaign'];
+        const attr = {};
+        keys.forEach(k => { attr[k] = params.get(k) || saved[k] || null; });
+        try { sessionStorage.setItem('serve_attr', JSON.stringify(attr)); } catch (_) {}
+
+        const urlSrc = params.get('src');
+        let firstSrc = null;
+        let chain = [];
+        try {
+            firstSrc = sessionStorage.getItem('serve_src');
+            if (!firstSrc && attr.src) {
+                firstSrc = attr.src;
+                sessionStorage.setItem('serve_src', firstSrc);   // first touch — write once
+            }
+            chain = (sessionStorage.getItem('serve_src_chain') || '').split('>').filter(Boolean);
+            if (urlSrc && chain[chain.length - 1] !== urlSrc) {
+                chain.push(urlSrc);
+                sessionStorage.setItem('serve_src_chain', chain.join('>'));
+            }
+        } catch (_) { /* private mode / storage disabled — degrade to last-touch only */ }
+
+        attr.src_first = firstSrc || attr.src || null;
+        attr.src_chain = chain.length ? chain.join('>') : (attr.src || null);
+        attr.segment   = segmentFor(attr.src_first);
+        return attr;
+    }
+
+    /* One id per submission. Sent as submission_id so the Apps Script can skip a
+       row it has already written — which is what makes the Addition E retry safe. */
+    function newSubmissionId() {
+        try {
+            if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+                return window.crypto.randomUUID();
+            }
+        } catch (_) { /* fall through */ }
+        return 'sub-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+    }
+
+    /* Notes → pets flag. Word-boundaried on purpose: "carpet" must not read as
+       "pet", and "category" must not read as "cat". */
+    const PET_WORDS = /\b(pets?|dogs?|puppy|puppies|cats?|kitten|kittens|kitty|feline|canine|animals?|birds?|parrot|hamster|rabbits?|bunny|guinea pig|ferret|reptile|snake|lizard|litter ?box|crate|kennel|leash|paws?|fur|shedding)\b/i;
+
+    function detectPets(text) {
+        return PET_WORDS.test(String(text || ''));
+    }
 
     /* --- State --- */
     const state = {
@@ -194,28 +321,68 @@ function computeQuote(input) {
         attribution: readAttribution(),
     };
 
-    /* --- Attribution (src / UTM) — read once, persist across steps --- */
-    function readAttribution() {
-        let saved = {};
-        try { saved = JSON.parse(sessionStorage.getItem('serve_attr') || '{}'); } catch (_) {}
-        const params = new URLSearchParams(location.search);
-        const keys = ['src', 'utm_source', 'utm_medium', 'utm_campaign'];
-        const attr = {};
-        keys.forEach(k => { attr[k] = params.get(k) || saved[k] || null; });
-        try { sessionStorage.setItem('serve_attr', JSON.stringify(attr)); } catch (_) {}
-        return attr;
-    }
+    /* ============================================================
+       Sheets POST
 
-    /* --- Sheets POST (fire-and-forget, never blocks UX) --- */
+       Content-Type is text/plain on BOTH paths. That keeps the request
+       "CORS-simple", so the browser never fires a preflight OPTIONS that an
+       Apps Script web app cannot answer. The .gs reads e.postData.contents
+       either way, so the JSON body is unaffected.
+
+       Lead events (waitlist, emailed quote, custom quote) stay fire-and-forget.
+       The reservation uses a readable response — see postReservation.
+       ============================================================ */
     function postToSheets(payload) {
         try {
             fetch(SHEETS_URL, {
                 method: 'POST',
                 mode: 'no-cors',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                 body: JSON.stringify(payload),
             }).catch(() => {});
         } catch (_) { /* silent */ }
+    }
+
+    /**
+     * Reservation POST — readable, so we only tell someone they are booked once
+     * the sheet write is confirmed.
+     *
+     * If the readable call fails for ANY reason (network, timeout, CORS, a non-ok
+     * status, an unparseable body), it retries once as the old fire-and-forget
+     * no-cors call so the lead still lands, then resolves unconfirmed. The caller
+     * shows the success panel either way — a customer never gets an error screen
+     * for a booking we may well have received. Both attempts carry the same
+     * submission_id, so the retry cannot double-book the sheet.
+     *
+     * Resolves { confirmed: true|false }. Never rejects.
+     */
+    function postReservation(payload) {
+        return new Promise((resolve) => {
+            const ctrl  = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+            const timer = setTimeout(() => { if (ctrl) ctrl.abort(); }, RESERVE_CONFIRM_TIMEOUT_MS);
+
+            fetch(SHEETS_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify(payload),
+                signal: ctrl ? ctrl.signal : undefined,
+            })
+                .then(res => {
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    return res.json();
+                })
+                .then(body => {
+                    if (!body || body.status !== 'ok') throw new Error('Unconfirmed response');
+                    clearTimeout(timer);
+                    resolve({ confirmed: true });
+                })
+                .catch(err => {
+                    clearTimeout(timer);
+                    console.warn('Reservation write unconfirmed — retrying fire-and-forget.', err);
+                    postToSheets(payload);
+                    resolve({ confirmed: false });
+                });
+        });
     }
 
     /* --- Payload builder: legacy fields (keep Apps Script working) + §6 additions --- */
@@ -240,13 +407,18 @@ function computeQuote(input) {
             frequency_selected: state.frequency,
             quote_price:        q ? q.displayPrice : null,
             steady_state_price: q ? q.steadySelected : null,
+            addon_total:        q ? q.addons : null,   // reported, not recomputed
             time_preference:    state.timePreference,
             utm_source:         a.utm_source,
             utm_medium:         a.utm_medium,
             utm_campaign:       a.utm_campaign,
-            src:                a.src,
+            src:                a.src,          // last touch (unchanged behaviour)
+            src_first:          a.src_first,    // first touch — never overwritten
+            src_chain:          a.src_chain,    // every tag this session, in order
+            segment:            a.segment,      // derived from src_first
             page_path:          location.pathname,
             submitted_at:       now,
+            submission_id:      newSubmissionId(),
         };
     }
 
@@ -342,7 +514,11 @@ function computeQuote(input) {
 
     /* Service + condition radios */
     buildForm.querySelectorAll('input[name="service"]').forEach(r => {
-        r.addEventListener('change', () => { if (r.checked) state.service = r.value; });
+        r.addEventListener('change', () => {
+            if (!r.checked) return;
+            state.service = r.value;
+            syncAddonsToService();   // Move Out hides the toggles — don't leave them armed
+        });
     });
     buildForm.querySelectorAll('input[name="condition"]').forEach(r => {
         r.addEventListener('change', () => { if (r.checked) state.condition = r.value; });
@@ -415,6 +591,7 @@ function computeQuote(input) {
             return;
         }
 
+        syncAddonsToService();
         recompute();
         renderPrice();
         setView(2);
@@ -526,6 +703,20 @@ function computeQuote(input) {
     addonFridge.addEventListener('change', onAddonChange);
     addonOven.addEventListener('change', onAddonChange);
 
+    /**
+     * Add-ons are First Clean only. The block is hidden on Move Out, so a box
+     * ticked earlier would otherwise stay ticked and invisible — and reappear,
+     * still ticked, the moment the customer switched back. Clear DOM and state
+     * together so what they see and what we send never diverge.
+     */
+    function syncAddonsToService() {
+        if (state.service === 'first_clean') return;
+        state.addonFridge = false;
+        state.addonOven   = false;
+        if (addonFridge) addonFridge.checked = false;
+        if (addonOven)   addonOven.checked   = false;
+    }
+
     $('back-to-1').addEventListener('click', () => setView(1));
     $('to-reserve').addEventListener('click', () => setView(3));
 
@@ -554,8 +745,9 @@ function computeQuote(input) {
 
     /* ========================================================
        STEP 3 — Live availability scheduler (open agenda)
-       Fed by AVAIL_URL. If the endpoint is down, slow, or has no
-       open slots, the original time-preference radios stay live.
+       Fed by AVAILABILITY_SOURCE_URL. If that endpoint is missing, down, slow,
+       or has no open slots, the time-preference radios stay live and the
+       customer can always book. See prefetchAvailability for the fail-safes.
        ======================================================== */
     const HORIZON_DAYS = 21;
 
@@ -563,16 +755,42 @@ function computeQuote(input) {
     let availFetched = false;
     let timeUi = 'fallback';       // 'fallback' | 'loading' | 'scheduler'
 
+    /**
+     * Warm the Step 3 scheduler. Every failure mode — no URL configured, network
+     * error, non-200, bad JSON, no open slots, or a feed that simply hangs — lands
+     * in the same place: the earlier/later radios, live and submittable. The
+     * timeout is the one that matters. A dead endpoint that ERRORS is harmless;
+     * a dead endpoint that HANGS would otherwise leave the customer on
+     * "Loading times…" with the radios hidden and no way to book.
+     */
     function prefetchAvailability() {
         if (availFetched) return;
         availFetched = true;
+
+        if (!AVAILABILITY_SOURCE_URL) {
+            console.info('No availability source configured — serving the time-preference fallback.');
+            return;   // timeUi is already 'fallback'; skip the round trip entirely
+        }
+
         setTimeUi('loading');
-        fetch(AVAIL_URL)
+
+        const ctrl  = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+        const timer = setTimeout(() => { if (ctrl) ctrl.abort(); }, AVAILABILITY_TIMEOUT_MS);
+
+        // Belt and braces: if AbortController is missing, this still drops the UI
+        // back to the radios once the cap elapses, whatever the fetch is doing.
+        const failSafe = setTimeout(() => {
+            if (timeUi === 'loading') setTimeUi('fallback');
+        }, AVAILABILITY_TIMEOUT_MS);
+
+        fetch(AVAILABILITY_SOURCE_URL, { signal: ctrl ? ctrl.signal : undefined })
             .then(res => {
                 if (!res.ok) throw new Error('HTTP ' + res.status);
                 return res.json();
             })
             .then(data => {
+                clearTimeout(timer);
+                clearTimeout(failSafe);
                 if (!data || data.ok !== true || !Array.isArray(data.slots)) {
                     throw new Error('Unexpected availability response');
                 }
@@ -585,7 +803,9 @@ function computeQuote(input) {
                 }
             })
             .catch(err => {
-                console.warn('Availability unavailable — keeping time-preference fallback.', err);
+                clearTimeout(timer);
+                clearTimeout(failSafe);
+                console.warn('Availability unavailable — serving the time-preference fallback.', err);
                 if (timeUi === 'loading') setTimeUi('fallback');
             });
     }
@@ -687,9 +907,11 @@ function computeQuote(input) {
     /* ========================================================
        STEP 3 — Reserve
        ======================================================== */
-    const reserveForm  = $('reserve-form');
-    const reserveError = $('reserve-error');
+    const reserveForm   = $('reserve-form');
+    const reserveError  = $('reserve-error');
     const reserveSubmit = $('reserve-submit');
+    const reserveNotes  = $('r-notes');
+    let reserveSubmitting = false;   // blocks the Enter-key + click double-fire
 
     reserveForm.querySelectorAll('input[name="time_preference"]').forEach(r => {
         r.addEventListener('change', () => { if (r.checked) state.timePreference = r.value; });
@@ -699,6 +921,7 @@ function computeQuote(input) {
 
     reserveForm.addEventListener('submit', (e) => {
         e.preventDefault();
+        if (reserveSubmitting) return;
         reserveError.textContent = '';
         reserveForm.querySelectorAll('.error').forEach(el => el.classList.remove('error'));
 
@@ -726,6 +949,7 @@ function computeQuote(input) {
             return;
         }
 
+        reserveSubmitting = true;
         reserveSubmit.disabled = true;
         reserveSubmit.textContent = 'Reserving…';
 
@@ -738,6 +962,9 @@ function computeQuote(input) {
         p.phone   = $('r-phone').value.trim();
         p.address = $('r-address').value.trim();
         p.unit    = $('r-unit').value.trim();
+        // free-text notes + the pets signal derived from them
+        p.customer_notes = reserveNotes ? reserveNotes.value.trim() : '';
+        p.pets_flag      = detectPets(p.customer_notes);
         // legacy pricing fields so existing Sheet columns + email keep populating
         p.unit_label        = unitLabel();
         p.service_type      = state.service;
@@ -765,8 +992,14 @@ function computeQuote(input) {
                 : "We'll reach out shortly to confirm your exact arrival window.";
         }
 
-        postToSheets(p);
-        setView('confirmed');
+        // Only claim the spot once the sheet write comes back confirmed. If it
+        // cannot be confirmed, postReservation has already retried fire-and-forget
+        // and warned in the console — we still show success rather than sending a
+        // paying customer an error for a booking we probably received.
+        postReservation(p).then(result => {
+            if (!result.confirmed) console.warn('Reservation shown as booked but write unconfirmed.', p.submission_id);
+            setView('confirmed');
+        });
     });
 
     /* ========================================================
