@@ -988,8 +988,11 @@ function testPayload() {
     recurring_weekly: 111, recurring_biweekly: 122, recurring_monthly: 142,
     name: "Test Customer", email: "Test.Customer@Example.com  ", phone: "(617) 555-0100",
     address: "123 Beacon St", unit: "4B", unit_label: "2 BR / 1 BA",
-    src: "qr-allston-01", src_first: "qr-allston-01", src_chain: "qr-allston-01",
-    segment: "qr_code", utm_source: "poster", utm_medium: "print", page_path: "/",
+    // Schema-valid segment. NOTE: the live site still emits its channel
+    // taxonomy (qr_code, poster, ...) until the prefix mapping is settled —
+    // see the segment section in /docs/SCHEMA.md.
+    src: "dh-bh-01", src_first: "dh-bh-01", src_chain: "dh-bh-01",
+    segment: "movein", utm_source: "poster", utm_medium: "print", page_path: "/",
   };
 
   const slot = Object.assign({}, base, {
@@ -1010,11 +1013,13 @@ function testPayload() {
   });
 
   // Same person as `slot`, different casing and a different tag.
+  // Expect: NO new LEADS row, source_history appended, last_touch bumped,
+  // first_touch unchanged, and a second JOBS row.
   const repeat = Object.assign({}, base, {
     submission_id: "test-" + stamp + "-repeat",
     email: "TEST.CUSTOMER@example.com",
-    src: "ig-story-07", src_first: "qr-allston-01",
-    src_chain: "qr-allston-01>ig-story-07",
+    src: "ref-jordan-m", src_first: "dh-bh-01",
+    src_chain: "dh-bh-01>ref-jordan-m",
     slot_date: "2026-09-02", slot_time: "1-3 PM",
     customer_notes: "Same dog as last time.",
   });

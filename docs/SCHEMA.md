@@ -79,11 +79,11 @@ Anything that's reference data for a single job → `quote_meta`.
 | 12 | `status` | ? | **TO DEFINE.** Likely lifecycle: `new` → `contacted` → `quoted` → `booked` → `customer` / `dead`. |
 | 13 | `first_variant` | ? | **TO DEFINE.** Likely: which A/B/C cold-email subject line this lead received first. |
 | 14 | `dnc_scrub` | ? | **TO DEFINE.** Likely: `TRUE`/`FALSE` — scrubbed against the DNC registry before SMS. |
-| 15 | `first_touch` | **WH** | **RECORD ACTIVITY** timestamp — when this workbook first saw the person. Real Sheets datetime, never a string. Stamped once at row creation and **immutable forever after**. Not an outreach date; `OUTREACH_LOG` owns sends. |
-| 16 | `last_touch` | **WH** | **RECORD ACTIVITY** timestamp — most recent activity for this person. Real Sheets datetime. Bumped on every matched booking. **The only cell the upsert overwrites when already populated.** |
+| 15 | `first_touch` | **WH** | **RECORD ACTIVITY** timestamp — when this workbook first saw the person. Real Sheets datetime, never a string. Stamped once at row creation and **immutable forever after**. Not an outreach date; `OUTREACH_LOG` owns sends. Existing cells verified `DATE` on 2026-07-27. |
+| 16 | `last_touch` | **WH** | **RECORD ACTIVITY** timestamp — most recent activity for this person. Real Sheets datetime. Bumped on every matched booking. **The only cell the upsert overwrites when already populated.** Existing cells verified `DATE` on 2026-07-27. |
 | 17 | `ltv` | FX | Lifetime value. Sum of `final_price` in JOBS for this `lead_id`. |
 | 18 | `notes` | OPS | Free text about the person. Not written by the script. |
-| 19 | `segment` | WH | *Header being added — live tab is 18 columns until then.* `movein` · `pro` · `direct`. |
+| 19 | `segment` | WH | `movein` · `pro` · `direct`. Header live as of 2026-07-27 — LEADS is 19 columns. **See the segment conflict in Known open items: the site is not yet emitting this vocabulary.** |
 
 **The script writes only:** `lead_id`, `name`, `email`, `phone`, `service_address`, `unit`, `zip`, `source`, `segment`, `source_history`, `first_touch`, `last_touch`.
 **Everything else is yours** and is skipped silently.
@@ -119,8 +119,7 @@ Anything that's reference data for a single job → `quote_meta`.
 - `linkdin` in RAW_INTAKE is a typo for `linkedin`. Header matching is by exact text — fix it and the mapping together, or not at all.
 - Nothing writes to `PROPERTIES` yet. `property_key` is generated on every booking but no property record is created. Next build.
 - `ltv` has no formula yet.
-- LEADS `segment` header pending.
-- **`segment` vocabulary conflict — UNRESOLVED, see below.** The site currently emits a different set of values than this file documents. Until the prefix table is confirmed, the `segment` column receives values outside `movein · pro · direct`.
+- **`segment` vocabulary conflict — UNRESOLVED, see below.** The header is now live in both JOBS and LEADS, so every booking writes to it. Until the prefix table is confirmed, that column receives values outside `movein · pro · direct`.
 
 ### The `segment` conflict (open)
 
@@ -144,6 +143,10 @@ every historical row once the mapping is settled.
 Then `SRC_SEGMENTS` becomes that two-entry table with `direct` as the default,
 and this section is deleted.
 
+**Until then:** the column will contain channel-taxonomy values from live
+bookings. `testPayload()` deliberately sends a schema-valid `movein` so test
+rows do not add to the mess.
+
 ---
 
 ## Changelog
@@ -152,4 +155,5 @@ and this section is deleted.
 |---|---|
 | 2026-07-27 | JOBS extended 22 → 36 columns (attribution, contact snapshot, customer notes, pets, address, quote_meta). LEADS upsert added. EVENTS tab introduced. This file created. |
 | 2026-07-27 | Reconciled `webhook.gs` against this file: protected-tab names normalized to underscores (the guard had been comparing against space-separated names and was silently inert for `RAW_INTAKE` and `OUTREACH_LOG`); LEADS upsert extended to `service_address` / `unit` / `zip`; `received_at` switched from UTC to America/New_York; `start_time` now carries the preference label on non-slot bookings instead of being left blank. |
+| 2026-07-27 | **Verified against the live workbook** via `reportLeadsSchema()`: six tabs confirmed with underscore names; JOBS at 36 columns in the documented order with `quote_meta` present; LEADS at **19** columns — the `segment` header has landed, so coverage is complete and nothing is skipped; `first_touch` / `last_touch` confirmed to hold real `DATE` values (number format is Automatic, which is cosmetic). Row matching resolves on `lead_id`. |
 | 2026-07-27 | LEADS `first_touch` and `last_touch` resolved from TO DEFINE to **record-activity timestamps written by the webhook** as real Sheets datetimes — not outreach dates. `first_touch` is immutable after creation (enforced, throws); `last_touch` bumps on every matched booking. `LEADS_FIELDS` now lists payload keys translated through `LEADS_HEADER_MAP` (`address` → `service_address`), mirroring how JOBS already worked. Live LEADS tab confirmed at 18 columns; `segment` still pending. |
