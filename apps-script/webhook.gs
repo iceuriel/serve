@@ -1,9 +1,10 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-07-27  ·  branch build/attribution-and-notes  ·  36-col JOBS
+ * VERSION STAMP:  2026-07-27  ·  branch build/attribution-and-notes  ·  SCHEMA.md r2
  *
  * Repo source of truth: /apps-script/webhook.gs
+ * Column meanings and ownership: /docs/SCHEMA.md — that file is authoritative.
  * If the stamp in the Apps Script editor does not match the repo, what is
  * deployed is stale.
  * ==================================================================
@@ -13,8 +14,9 @@
  *   everything else (quote_emailed, waitlist_zip, custom_quote_request)  ->  EVENTS
  *
  *   Tabs this script is ALLOWED to write: JOBS, LEADS, EVENTS.
- *   PROPERTIES, RAW INTAKE, OUTREACH LOG and DASHBOARD are hard-blocked by
+ *   PROPERTIES, RAW_INTAKE, OUTREACH_LOG and DASHBOARD are hard-blocked by
  *   assertWritable() — a coding mistake throws rather than corrupting them.
+ *   Tab names normalize, so underscores vs. spaces cannot defeat the guard.
  *
  * THREE INVARIANTS
  *   1. Never widen a tab you designed. Writes are header-driven: read row 1,
@@ -72,8 +74,12 @@ const JOBS_TAB       = "JOBS";
 const LEADS_TAB  = "LEADS";    // must already exist — never auto-created
 const EVENTS_TAB = "EVENTS";   // auto-created if missing
 
-/** Tabs this script must never touch, whatever else changes. */
-const PROTECTED_TABS = ["PROPERTIES", "RAW INTAKE", "OUTREACH LOG", "DASHBOARD"];
+/**
+ * Tabs this script must never touch, whatever else changes.
+ * Compared through normalizeTabName(), so spacing and punctuation cannot defeat
+ * the guard: "RAW_INTAKE", "RAW INTAKE" and "raw-intake" all match.
+ */
+const PROTECTED_TABS = ["PROPERTIES", "RAW_INTAKE", "OUTREACH_LOG", "DASHBOARD"];
 
 /** Columns ops owns on JOBS. Never written, not even blank-filled. */
 const OPS_OWNED_COLUMNS = ["completed_date", "cleaner", "duration_min", "photos_passed", "payment_status"];
@@ -143,8 +149,16 @@ const QUOTE_META_KEYS = [
  */
 const OPS_PREFERRED_KEYS = ["address", "unit", "zip"];
 
-/** Canonical LEADS field names. Exact matches only — no guessing at aliases. */
-const LEADS_FIELDS = ["lead_id", "name", "email", "phone", "source", "segment", "source_history"];
+/**
+ * The ONLY LEADS columns this script writes. Exact header matches, no alias
+ * guessing. Everything else on that tab is the operator's — source_detail,
+ * contacted_via, status, first_variant, dnc_scrub, first_touch, last_touch,
+ * ltv, notes — and is skipped silently.
+ *
+ * Note the payload key `address` maps to the header `service_address`.
+ */
+const LEADS_FIELDS = ["lead_id", "name", "email", "phone", "service_address",
+                      "unit", "zip", "source", "segment", "source_history"];
 
 /** EVENTS is ours, so its schema is fixed here rather than inferred per payload. */
 const EVENTS_HEADERS = [
@@ -233,7 +247,7 @@ function handleEvent(ss, data, eventType) {
     return json({ status: "ok", duplicate: true, submission_id: data.submission_id });
   }
 
-  const record = { received_at: nowIso() };
+  const record = { received_at: receivedAt() };
   EVENTS_HEADERS.forEach(function (h) {
     if (h !== "received_at" && data[h] !== undefined) record[h] = data[h];
   });
@@ -250,7 +264,7 @@ function handleEvent(ss, data, eventType) {
 
 /** Health check — open the /exec URL in a browser. */
 function doGet() {
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-07-27 36-col JOBS" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-07-27 SCHEMA.md r2" });
 }
 
 
@@ -344,12 +358,15 @@ function upsertLead(ss, data, leadId) {
 
   const incomingTag = firstSet(data.src, data.src_first, "");
   const incoming = {
-    lead_id: leadId,
-    name:    data.name  || "",
-    email:   normalizeEmail(data.email),
-    phone:   data.phone || "",
-    source:  firstSet(data.src_first, data.src, ""),
-    segment: data.segment || "",
+    lead_id:         leadId,
+    name:            data.name  || "",
+    email:           normalizeEmail(data.email),
+    phone:           data.phone || "",
+    service_address: data.address || "",     // payload `address` -> `service_address`
+    unit:            data.unit || "",
+    zip:             data.zip  || "",
+    source:          firstSet(data.src_first, data.src, ""),
+    segment:         data.segment || "",
   };
 
   /* ---- No match: create ---- */
@@ -471,14 +488,18 @@ function buildJobRecord(data, sched, leadId, sheet) {
     addon_total:        addonRevenue(data),
     first_visit_total:  valOrBlank(firstSet(data.first_visit_total, data.quote_price)),
     requested_date:     sched.date,
-    requested_window:   sched.time,
+    // start_time holds the window on a slot booking, the preference label
+    // otherwise. Blank only when no time was expressed at all.
+    requested_window:   sched.shape === "slot" ? sched.time
+                      : sched.shape === "none" ? ""
+                      : sched.summary,
     job_status:         NEW_JOB_STATUS,
 
     notes:              sched.summary,        // schedule summary ONLY, never empty
     scheduling_type:    sched.shape,
 
     submission_id:      data.submission_id || "",
-    received_at:        nowIso(),
+    received_at:        receivedAt(),
     name:               data.name  || "",
     email:              data.email || "",
     phone:              data.phone || "",
@@ -529,8 +550,13 @@ function addonRevenue(data) {
    8. SHEET I/O — header-driven, never widens a tab
    ============================================================ */
 
+/** "Raw Intake" / "RAW_INTAKE" / "raw-intake" all normalize to RAW_INTAKE. */
+function normalizeTabName(name) {
+  return String(name).trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
 function assertWritable(name) {
-  if (PROTECTED_TABS.indexOf(String(name).toUpperCase()) !== -1) {
+  if (PROTECTED_TABS.map(normalizeTabName).indexOf(normalizeTabName(name)) !== -1) {
     throw new Error('Refusing to write to protected tab "' + name + '".');
   }
 }
@@ -727,6 +753,17 @@ function json(obj) {
 }
 
 function nowIso()      { return new Date().toISOString(); }
+
+/**
+ * received_at per the schema: ISO 8601 in America/New_York, e.g.
+ * 2026-07-27T11:42:08-04:00. Pinned to the business timezone rather than
+ * Session.getScriptTimeZone() so the column stays consistent even if the script
+ * project's timezone is ever changed.
+ */
+const BUSINESS_TZ = "America/New_York";
+function receivedAt() {
+  return Utilities.formatDate(new Date(), BUSINESS_TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+}
 function isSet(v)      { return v !== null && v !== undefined && String(v).trim() !== ""; }
 function valOrBlank(v) { return (v === null || v === undefined) ? "" : v; }
 function money(v)      { return isSet(v) ? "$" + v : "—"; }
