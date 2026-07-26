@@ -25,6 +25,13 @@
  *   3. Never write twice. submission_id is the idempotency key; a replay
  *      mutates nothing at all — no JOBS row, no LEADS edit.
  *
+ * ATOMICITY
+ *   The JOBS row is a single appendRow of an array built completely in memory
+ *   first. You get a whole row or no row — never a half-populated one. If the
+ *   append throws, doPost returns {status:"error"}, the site's retry fires, and
+ *   the same submission_id writes cleanly because nothing was recorded. See
+ *   upsertLead for the LEADS caveat.
+ *
  * IDENTITY MODEL
  *   submission_id  one per POST. Client-generated UUID. Dedupe key only.
  *   lead_id        one per PERSON. Normalized lowercased email, else property_key.
@@ -40,6 +47,9 @@
  *   1. Fill SPREADSHEET_ID, NOTIFY_EMAIL, JOBS_TAB below.
  *   2. Run reportLeadsSchema() once — it prints the LEADS header row and tells
  *      you exactly which fields this script can and cannot write there.
+ *      It is strictly READ-ONLY: getSheets, getSheetByName, getLastColumn,
+ *      getRange().getValues() and console.log, nothing else. It creates no tab,
+ *      no column and no cell, and sends no email. Safe on a live workbook.
  *   3. Run testPayload() — writes both scheduling shapes, a repeat-customer
  *      booking, and an idempotency replay.
  *   4. Deploy > New deployment > Web app > Execute as: Me > Access: Anyone.
@@ -73,19 +83,25 @@ const NEW_JOB_STATUS = "new";
 
 /* ============================================================
    2. HEADER_MAP — payload/record key -> EXACT header text
-   Built against the confirmed 32-column JOBS row 1:
+   Built against the 36-column JOBS row 1:
 
      job_id | lead_id | source | property_key | service_type | frequency |
      condition | beds | baths | quoted_price | add_ons | add_on_rev |
      final_price | scheduled_date | completed_date | cleaner | start_time |
      duration_min | photos_passed | payment_status | job_status | notes |
      submission_id | received_at | name | email | phone | segment |
-     src_chain | customer_notes | pets_flag | scheduling_type
+     src_chain | customer_notes | pets_flag | scheduling_type |
+     address | unit | zip | quote_meta
 
    Only keys whose record name DIFFERS from the header need an entry here.
    Everything else matches by name: job_id, lead_id, property_key, condition,
    job_status, notes, submission_id, received_at, name, email, phone, segment,
-   src_chain, customer_notes, pets_flag, scheduling_type, quote_meta.
+   src_chain, customer_notes, pets_flag, scheduling_type, address, unit, zip,
+   quote_meta.
+
+   THE RULE, so this stays consistent as the schema grows:
+     Anything a human reads, sorts or filters in normal ops  ->  its own column.
+     Anything that is reference data for one job              ->  quote_meta.
    ============================================================ */
 
 const HEADER_MAP = {
@@ -103,18 +119,29 @@ const HEADER_MAP = {
 };
 
 /**
- * Fields with no column on JOBS. Packed into `quote_meta` as compact JSON IF
- * that header exists; dropped silently otherwise (never folded into notes).
+ * SECONDARY reference data only — what you read when investigating one job,
+ * never what you sort or filter a sheet by. Packed into `quote_meta` as compact
+ * JSON if that header exists; dropped otherwise, never folded into notes.
+ *
+ * address / unit / zip are deliberately NOT here. property_key is a join key,
+ * not an address, and nothing in this build writes to PROPERTIES — so an address
+ * missing from JOBS is absent from the whole workbook. They are ops data and get
+ * real columns. See OPS_PREFERRED_KEYS.
  */
 const QUOTE_META_KEYS = [
   "original_price", "discount_applied", "steady_state_price",
   "recurring_weekly", "recurring_biweekly", "recurring_monthly",
   "zip_tier", "page_path", "utm_source", "utm_medium", "utm_campaign",
-  "unit_label",
-  // Not in the Part 7d list, but dropping a street address loses the one thing
-  // a cleaner needs. Carried here so adding the column recovers them.
-  "address", "unit", "zip", "src", "submitted_at",
+  "unit_label", "src", "submitted_at",
 ];
+
+/**
+ * Ops fields that belong in their own columns and must never be silently lost.
+ * Written straight to the matching header. If a header is missing, they fall
+ * back into quote_meta rather than vanishing — a safety net for a schema that
+ * has not caught up yet, not the intended path.
+ */
+const OPS_PREFERRED_KEYS = ["address", "unit", "zip"];
 
 /** Canonical LEADS field names. Exact matches only — no guessing at aliases. */
 const LEADS_FIELDS = ["lead_id", "name", "email", "phone", "source", "segment", "source_history"];
@@ -270,6 +297,15 @@ function propertyKey(data) {
    One row per person. Header-driven, additive-only, never widens the tab.
    ============================================================ */
 
+/**
+ * ATOMICITY, for the record:
+ *   The CREATE path is one appendRow — atomic, all or nothing.
+ *   The MATCH path is several setValue calls and is NOT atomic. If it fails
+ *   partway you get a valid row that is merely less complete: only blank cells
+ *   are ever filled and source_history is only ever appended to, so a partial
+ *   failure can never corrupt or contradict existing data. The JOBS row is
+ *   written regardless, and the notification email flags the failure.
+ */
 function upsertLead(ss, data, leadId) {
   const sheet = ss.getSheetByName(LEADS_TAB);
   if (!sheet) throw new Error('Tab "' + LEADS_TAB + '" not found — cannot upsert the lead.');
@@ -452,11 +488,28 @@ function buildJobRecord(data, sched, leadId, sheet) {
     pets_flag:          petsFlag(data) ? "TRUE" : "FALSE",
   };
 
-  /* Everything with no column of its own — only if quote_meta exists. */
-  if (sheetHeaders(sheet).indexOf("quote_meta") !== -1) {
+  const headers = sheetHeaders(sheet);
+
+  /* Ops fields -> their own columns. quote_meta is not involved when the column
+     exists, which is the normal case. */
+  const orphanedOps = [];
+  OPS_PREFERRED_KEYS.forEach(function (k) {
+    if (headers.indexOf(k) !== -1) record[k] = data[k] || "";
+    else if (isSet(data[k]))       orphanedOps.push(k);
+  });
+
+  /* Secondary reference data -> quote_meta, plus any ops field whose column is
+     missing, so nothing is lost while a schema catches up. */
+  if (headers.indexOf("quote_meta") !== -1) {
     const meta = {};
     QUOTE_META_KEYS.forEach(function (k) { if (isSet(data[k])) meta[k] = data[k]; });
+    orphanedOps.forEach(function (k) {
+      meta[k] = data[k];
+      console.log('No "' + k + '" column on ' + sheet.getName() + ' — carried in quote_meta.');
+    });
     if (Object.keys(meta).length) record.quote_meta = JSON.stringify(meta);
+  } else if (orphanedOps.length) {
+    console.log("No quote_meta column — DROPPED: " + orphanedOps.join(", "));
   }
 
   return record;
