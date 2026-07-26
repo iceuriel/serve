@@ -1,7 +1,7 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-07-26  ·  branch build/attribution-and-notes  ·  part 7
+ * VERSION STAMP:  2026-07-27  ·  branch build/attribution-and-notes  ·  36-col JOBS
  *
  * Repo source of truth: /apps-script/webhook.gs
  * If the stamp in the Apps Script editor does not match the repo, what is
@@ -250,7 +250,7 @@ function handleEvent(ss, data, eventType) {
 
 /** Health check — open the /exec URL in a browser. */
 function doGet() {
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-07-26 part 7" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-07-27 36-col JOBS" });
 }
 
 
