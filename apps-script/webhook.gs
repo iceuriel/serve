@@ -1,7 +1,7 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-07-27  ·  branch build/attribution-and-notes  ·  SCHEMA.md r2
+ * VERSION STAMP:  2026-07-27  ·  branch build/attribution-and-notes  ·  SCHEMA.md r3
  *
  * Repo source of truth: /apps-script/webhook.gs
  * Column meanings and ownership: /docs/SCHEMA.md — that file is authoritative.
@@ -150,15 +150,44 @@ const QUOTE_META_KEYS = [
 const OPS_PREFERRED_KEYS = ["address", "unit", "zip"];
 
 /**
- * The ONLY LEADS columns this script writes. Exact header matches, no alias
- * guessing. Everything else on that tab is the operator's — source_detail,
- * contacted_via, status, first_variant, dnc_scrub, first_touch, last_touch,
- * ltv, notes — and is skipped silently.
+ * The ONLY LEADS columns this script writes, listed as PAYLOAD keys.
+ * Translate to header text with leadsHeaderFor().
  *
- * Note the payload key `address` maps to the header `service_address`.
+ * Everything else on that tab is the operator's — source_detail, contacted_via,
+ * status, first_variant, dnc_scrub, ltv, notes — and is skipped silently.
  */
-const LEADS_FIELDS = ["lead_id", "name", "email", "phone", "service_address",
+const LEADS_FIELDS = ["lead_id", "name", "email", "phone", "address",
                       "unit", "zip", "source", "segment", "source_history"];
+
+/** LEADS-specific payload key -> header, where the two differ. */
+const LEADS_HEADER_MAP = { address: "service_address" };
+
+function leadsHeaderFor(field) {
+  return LEADS_HEADER_MAP[field] || field;
+}
+
+/**
+ * RECORD ACTIVITY timestamps — when this workbook last heard from the person.
+ * NOT outreach dates: OUTREACH_LOG owns actual sends.
+ *
+ * Written as JS Date objects so Sheets stores real datetimes. Writing an ISO
+ * string here would break sorting and date math silently, because the column
+ * would hold text that merely looks like a date.
+ */
+const LEADS_FIRST_TOUCH = "first_touch";
+const LEADS_LAST_TOUCH  = "last_touch";
+
+/**
+ * Columns that must never be modified once a LEADS row exists.
+ *
+ * first_touch is stamped exactly once, at row creation, and is immutable
+ * forever after. This is enforced by setLeadCell() THROWING — not merely by
+ * this script happening not to write it — so a future edit that adds
+ * first_touch to an update loop fails loudly instead of quietly rewriting
+ * history. On a match we do not even blank-fill it: a row imported from a deed
+ * or Apollo batch first appeared on its import date, not today.
+ */
+const LEADS_IMMUTABLE_ON_MATCH = [LEADS_FIRST_TOUCH];
 
 /** EVENTS is ours, so its schema is fixed here rather than inferred per payload. */
 const EVENTS_HEADERS = [
@@ -264,7 +293,7 @@ function handleEvent(ss, data, eventType) {
 
 /** Health check — open the /exec URL in a browser. */
 function doGet() {
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-07-27 SCHEMA.md r2" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-07-27 SCHEMA.md r3" });
 }
 
 
@@ -328,12 +357,13 @@ function upsertLead(ss, data, leadId) {
   const headers = sheetHeaders(sheet);
   if (!headers.length) throw new Error('Tab "' + LEADS_TAB + '" has no header row.');
 
-  /* Which of the fields we care about actually exist on the tab. */
+  /* Which of the fields we care about actually exist on the tab. Keyed by
+     payload key; the header may differ (address -> service_address). */
   const col = {};
   const missing = [];
-  LEADS_FIELDS.forEach(function (f) {
-    const i = headers.indexOf(f);
-    if (i === -1) missing.push(f); else col[f] = i;
+  LEADS_FIELDS.concat([LEADS_FIRST_TOUCH, LEADS_LAST_TOUCH]).forEach(function (f) {
+    const i = headers.indexOf(leadsHeaderFor(f));
+    if (i === -1) missing.push(leadsHeaderFor(f)); else col[f] = i;
   });
   if (missing.length) console.log("LEADS has no column for: " + missing.join(", ") + " — skipped.");
 
@@ -358,18 +388,20 @@ function upsertLead(ss, data, leadId) {
 
   const incomingTag = firstSet(data.src, data.src_first, "");
   const incoming = {
-    lead_id:         leadId,
-    name:            data.name  || "",
-    email:           normalizeEmail(data.email),
-    phone:           data.phone || "",
-    service_address: data.address || "",     // payload `address` -> `service_address`
-    unit:            data.unit || "",
-    zip:             data.zip  || "",
-    source:          firstSet(data.src_first, data.src, ""),
-    segment:         data.segment || "",
+    lead_id: leadId,
+    name:    data.name  || "",
+    email:   normalizeEmail(data.email),
+    phone:   data.phone || "",
+    address: data.address || "",     // -> service_address
+    unit:    data.unit || "",
+    zip:     data.zip  || "",
+    source:  firstSet(data.src_first, data.src, ""),
+    segment: data.segment || "",
   };
 
-  /* ---- No match: create ---- */
+  const stamp = new Date();          // a real Date, never an ISO string
+
+  /* ---- No match: create. Both timestamps stamped once, here. ---- */
   if (rowIndex === -1) {
     const row = new Array(headers.length).fill("");
     const written = [];
@@ -380,12 +412,15 @@ function upsertLead(ss, data, leadId) {
       row[col.source_history] = incomingTag;
       written.push("source_history");
     }
+    [LEADS_FIRST_TOUCH, LEADS_LAST_TOUCH].forEach(function (f) {
+      if (col[f] !== undefined) { row[col[f]] = stamp; written.push(f); }
+    });
     sheet.appendRow(row);
     return { ok: true, action: "created", lead_id: leadId, row: sheet.getLastRow(),
              fields: written, missing: missing, headers: headers };
   }
 
-  /* ---- Match: update blanks only, append to source_history ---- */
+  /* ---- Match: fill blanks, append history, bump last_touch ---- */
   const current = existing[rowIndex - 2];
   const filled = [];
 
@@ -393,7 +428,7 @@ function upsertLead(ss, data, leadId) {
     if (col[f] === undefined) return;
     if (isSet(current[col[f]])) return;              // never overwrite a non-empty cell
     if (!isSet(incoming[f])) return;
-    sheet.getRange(rowIndex, col[f] + 1).setValue(incoming[f]);
+    setLeadCell(sheet, rowIndex, col[f], f, incoming[f]);
     filled.push(f);
   });
 
@@ -403,13 +438,49 @@ function upsertLead(ss, data, leadId) {
     const tags = raw.split(",").map(function (t) { return t.trim(); }).filter(Boolean);
     if (tags.indexOf(incomingTag) === -1) {
       tags.push(incomingTag);
-      sheet.getRange(rowIndex, col.source_history + 1).setValue(tags.join(", "));
+      setLeadCell(sheet, rowIndex, col.source_history, "source_history", tags.join(", "));
       historyAppended = true;
     }
   }
 
+  /* last_touch is the ONE cell this script overwrites when already populated —
+     that is the whole point of a "most recent activity" column. Everything else
+     above is blank-fill-only.
+
+     first_touch is deliberately absent from this block and always will be;
+     setLeadCell() throws if anyone adds it. */
+  let lastTouchBumped = false;
+  if (col[LEADS_LAST_TOUCH] !== undefined) {
+    warnIfTextDate(current[col[LEADS_LAST_TOUCH]], LEADS_LAST_TOUCH);
+    setLeadCell(sheet, rowIndex, col[LEADS_LAST_TOUCH], LEADS_LAST_TOUCH, stamp);
+    lastTouchBumped = true;
+  }
+
   return { ok: true, action: "matched", lead_id: leadId, row: rowIndex,
-           fields: filled, history_appended: historyAppended, missing: missing, headers: headers };
+           fields: filled, history_appended: historyAppended,
+           last_touch_bumped: lastTouchBumped, missing: missing, headers: headers };
+}
+
+/**
+ * Every write to an EXISTING LEADS row goes through here. Throws on any column
+ * in LEADS_IMMUTABLE_ON_MATCH, so first_touch cannot be rewritten by a future
+ * edit that forgets why it matters.
+ */
+function setLeadCell(sheet, rowIndex, colIndex, field, value) {
+  if (LEADS_IMMUTABLE_ON_MATCH.indexOf(field) !== -1) {
+    throw new Error('Refusing to modify "' + field + '" on an existing LEADS row — ' +
+                    'it is stamped once at creation and immutable thereafter.');
+  }
+  sheet.getRange(rowIndex, colIndex + 1).setValue(value);
+}
+
+/** A date column holding text will not sort or do date math. Say so, once per write. */
+function warnIfTextDate(currentValue, field) {
+  if (typeof currentValue === "string" && currentValue.trim() !== "") {
+    console.log('WARNING: LEADS "' + field + '" currently holds TEXT ("' + currentValue +
+                '"). Writing a real datetime now — reformat the column to a date type ' +
+                'so the whole column sorts consistently.');
+  }
 }
 
 
@@ -838,8 +909,10 @@ function reportLeadsSchema() {
   console.log("LEADS row 1 (" + headers.length + " columns):\n  " + headers.join(" | "));
 
   const found = [], missing = [];
-  LEADS_FIELDS.forEach(function (f) {
-    (headers.indexOf(f) !== -1 ? found : missing).push(f);
+  LEADS_FIELDS.concat([LEADS_FIRST_TOUCH, LEADS_LAST_TOUCH]).forEach(function (f) {
+    const h = leadsHeaderFor(f);
+    (headers.indexOf(h) !== -1 ? found : missing).push(
+      h === f ? h : (f + " -> " + h));
   });
   console.log("WILL WRITE:  " + (found.join(", ")   || "(nothing)"));
   console.log("NO COLUMN:   " + (missing.join(", ") || "(none — full coverage)"));
@@ -848,12 +921,51 @@ function reportLeadsSchema() {
      headers.indexOf("email")   !== -1 ? "email (no lead_id column)" :
      "NOTHING — upsert will fail"));
 
+  console.log("\nfirst_touch / last_touch cell types (existing data, sampled):");
+  reportTouchColumnTypes(leads, headers);
+
   const jobs = ss.getSheetByName(JOBS_TAB);
   if (jobs) {
     const jh = sheetHeaders(jobs);
     console.log("\nJOBS row 1 (" + jh.length + " columns):\n  " + jh.join(" | "));
     console.log("quote_meta column present: " + (jh.indexOf("quote_meta") !== -1));
   }
+}
+
+/**
+ * Read-only. Samples the top data rows of first_touch / last_touch and reports
+ * what they actually contain: a real Sheets datetime, text that merely looks
+ * like one, a number, or blank. Text in a date column is the failure mode worth
+ * catching — it sorts lexically and breaks date math without any error.
+ */
+function reportTouchColumnTypes(sheet, headers) {
+  const lastRow = sheet.getLastRow();
+
+  [LEADS_FIRST_TOUCH, LEADS_LAST_TOUCH].forEach(function (field) {
+    const i = headers.indexOf(field);
+    if (i === -1) { console.log("  " + field + ": NO COLUMN"); return; }
+    if (lastRow < 2) { console.log("  " + field + ": column present, no data rows to sample"); return; }
+
+    const n = Math.min(8, lastRow - 1);
+    const values  = sheet.getRange(2, i + 1, n, 1).getValues();
+    const formats = sheet.getRange(2, i + 1, n, 1).getNumberFormats();
+
+    const kinds = values.map(function (r, k) {
+      const v = r[0];
+      if (v === "" || v === null || v === undefined) return "blank";
+      if (Object.prototype.toString.call(v) === "[object Date]") return "DATE";
+      if (typeof v === "number") return "number";
+      return 'TEXT("' + String(v).slice(0, 20) + '")';
+    });
+
+    const distinct = kinds.filter(function (k, idx) { return kinds.indexOf(k) === idx; });
+    console.log("  " + field + ": " + distinct.join(" | ") +
+                "   [format: " + formats[0][0] + "]");
+    if (distinct.some(function (k) { return k.indexOf("TEXT(") === 0; })) {
+      console.log("     ^ TEXT found. The script writes real Dates, so this column " +
+                  "will end up mixed. Reformat it to Date time and retype the old cells.");
+    }
+  });
 }
 
 /**

@@ -79,14 +79,22 @@ Anything that's reference data for a single job → `quote_meta`.
 | 12 | `status` | ? | **TO DEFINE.** Likely lifecycle: `new` → `contacted` → `quoted` → `booked` → `customer` / `dead`. |
 | 13 | `first_variant` | ? | **TO DEFINE.** Likely: which A/B/C cold-email subject line this lead received first. |
 | 14 | `dnc_scrub` | ? | **TO DEFINE.** Likely: `TRUE`/`FALSE` — scrubbed against the DNC registry before SMS. |
-| 15 | `first_touch` | ? | **TO DEFINE.** Likely a **date** — first outreach sent. If it holds tags instead, it duplicates `source` and should be deleted. |
-| 16 | `last_touch` | ? | **TO DEFINE.** Likely a **date** — most recent outreach. |
+| 15 | `first_touch` | **WH** | **RECORD ACTIVITY** timestamp — when this workbook first saw the person. Real Sheets datetime, never a string. Stamped once at row creation and **immutable forever after**. Not an outreach date; `OUTREACH_LOG` owns sends. |
+| 16 | `last_touch` | **WH** | **RECORD ACTIVITY** timestamp — most recent activity for this person. Real Sheets datetime. Bumped on every matched booking. **The only cell the upsert overwrites when already populated.** |
 | 17 | `ltv` | FX | Lifetime value. Sum of `final_price` in JOBS for this `lead_id`. |
 | 18 | `notes` | OPS | Free text about the person. Not written by the script. |
-| 19 | `segment` | WH | *Header being added.* `movein` · `pro` · `direct`. |
+| 19 | `segment` | WH | *Header being added — live tab is 18 columns until then.* `movein` · `pro` · `direct`. |
 
-**The script writes only:** `lead_id`, `name`, `email`, `phone`, `service_address`, `unit`, `zip`, `source`, `segment`, `source_history`.
-**Everything else is yours** and is skipped silently. Blank cells only; `source_history` is append-only.
+**The script writes only:** `lead_id`, `name`, `email`, `phone`, `service_address`, `unit`, `zip`, `source`, `segment`, `source_history`, `first_touch`, `last_touch`.
+**Everything else is yours** and is skipped silently.
+
+**Write rules, in precedence order:**
+1. `first_touch` — write once, at creation. Never modified, **not even blank-filled** on a later match. A row imported from a deed or Apollo batch first appeared on its import date, not on the day it happens to book. Enforced by `setLeadCell()`, which throws.
+2. `last_touch` — always overwritten on a match. This is the single documented exception to the blank-cells-only rule.
+3. `source_history` — append-only; a tag already present is not re-added.
+4. Everything else — blank cells only; a populated value is never overwritten.
+
+> Both timestamps are written as JS `Date` objects so Sheets stores real datetimes. An ISO string in a date column sorts lexically and breaks date math with no error. `reportLeadsSchema()` samples the existing cells and reports whether they hold `DATE`, `TEXT`, `number`, or `blank`; the upsert also logs a warning if it finds text where a date belongs.
 
 > **How to resolve a TO DEFINE:** scroll the column. If it has values, those values are the definition — write them down here. If it's empty, it has never been used — define it now or delete the column. Do not let a script write to a column whose meaning is unresolved.
 
@@ -144,3 +152,4 @@ and this section is deleted.
 |---|---|
 | 2026-07-27 | JOBS extended 22 → 36 columns (attribution, contact snapshot, customer notes, pets, address, quote_meta). LEADS upsert added. EVENTS tab introduced. This file created. |
 | 2026-07-27 | Reconciled `webhook.gs` against this file: protected-tab names normalized to underscores (the guard had been comparing against space-separated names and was silently inert for `RAW_INTAKE` and `OUTREACH_LOG`); LEADS upsert extended to `service_address` / `unit` / `zip`; `received_at` switched from UTC to America/New_York; `start_time` now carries the preference label on non-slot bookings instead of being left blank. |
+| 2026-07-27 | LEADS `first_touch` and `last_touch` resolved from TO DEFINE to **record-activity timestamps written by the webhook** as real Sheets datetimes — not outreach dates. `first_touch` is immutable after creation (enforced, throws); `last_touch` bumps on every matched booking. `LEADS_FIELDS` now lists payload keys translated through `LEADS_HEADER_MAP` (`address` → `service_address`), mirroring how JOBS already worked. Live LEADS tab confirmed at 18 columns; `segment` still pending. |
