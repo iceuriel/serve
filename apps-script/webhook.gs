@@ -317,7 +317,10 @@ function normalizeEmail(v) {
 function makeJobId(data, sched) {
   const day = isSet(sched.date)
     ? String(sched.date).replace(/-/g, "")
-    : Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyyMMdd");
+    // BUSINESS_TZ, not the script project's timezone — otherwise an undated
+    // booking gets a job_id stamped in one zone and a received_at in another,
+    // and the two columns disagree about what day it was.
+    : Utilities.formatDate(new Date(), BUSINESS_TZ, "yyyyMMdd");
   let tail = String(data.submission_id || "").replace(/[^A-Za-z0-9]/g, "").slice(-6).toUpperCase();
   if (!tail) tail = String(Math.floor(Math.random() * 1000000));
   return "SRV-" + day + "-" + tail;
@@ -529,13 +532,26 @@ function prefLabel(v) {
   return String(v);
 }
 
-/** "2026-08-14" -> "Friday, Aug 14". Parsed local, never UTC midnight. */
+const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const MONTH_NAMES   = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * "2026-08-14" -> "Friday, Aug 14".
+ *
+ * Deliberately timezone-free. The customer picked a calendar date, which has no
+ * timezone at all. The previous version built a local Date and formatted it in
+ * another zone; whenever those two disagreed the weekday came out one day off.
+ * Fixing the arithmetic to UTC on both sides removes the class of bug rather
+ * than the instance.
+ */
 function prettyDate(ymd) {
   const parts = String(ymd).split("-");
   if (parts.length !== 3) return String(ymd);
-  const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-  if (isNaN(d.getTime())) return String(ymd);
-  return Utilities.formatDate(d, Session.getScriptTimeZone(), "EEEE, MMM d");
+  const y = Number(parts[0]), m = Number(parts[1]), d = Number(parts[2]);
+  if (!isFinite(y) || !isFinite(m) || !isFinite(d)) return String(ymd);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (isNaN(dt.getTime())) return String(ymd);
+  return WEEKDAY_NAMES[dt.getUTCDay()] + ", " + MONTH_NAMES[dt.getUTCMonth()] + " " + dt.getUTCDate();
 }
 
 
