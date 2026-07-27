@@ -152,7 +152,7 @@ function computeQuote(input) {
     /* Booking webhook — writes to LEADS MASTER and sends the notification
        email. Repo source of truth for the receiving script: /apps-script/webhook.gs.
        Redeploy that, then paste the new /exec URL here. */
-    const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbwaMIS1nklX2rWuCEa9koeTyuAFt-UdGAZ1mqY98Z5IOHz0i5HgaugH0j5j2Nf-XUGB/exec';
+    const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbxVWfrn2Mos2-yO1AhDe20tpnFcAdc-nZ_6zb0qK02msdyJZVETgLQ77TvUnxHf5jWMBQ/exec';
 
     /* ------------------------------------------------------------------
        AVAILABILITY FEED — feeds the Step 3 time-slot picker.

@@ -1,7 +1,12 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-07-27  ·  branch build/attribution-and-notes  ·  SCHEMA.md r3
+ * VERSION STAMP:  2026-07-27  ·  branch build/attribution-and-notes  ·  SCHEMA.md r4
+ *
+ * r4 = timezone pinning (BUSINESS_TZ everywhere, timezone-free prettyDate).
+ * r3 and r4 differ in behaviour, so if doGet reports r3 the deployed copy is
+ * the one that can stamp job_id a day off received_at. Bump this stamp on every
+ * behavioural change, not just schema changes — that is the whole point of it.
  *
  * Repo source of truth: /apps-script/webhook.gs
  * Column meanings and ownership: /docs/SCHEMA.md — that file is authoritative.
@@ -293,7 +298,7 @@ function handleEvent(ss, data, eventType) {
 
 /** Health check — open the /exec URL in a browser. */
 function doGet() {
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-07-27 SCHEMA.md r3" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-07-27 SCHEMA.md r4" });
 }
 
 
