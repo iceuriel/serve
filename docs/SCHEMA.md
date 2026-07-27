@@ -110,6 +110,21 @@ Anything that's reference data for a single job → `quote_meta`.
 | `DASHBOARD` | Channel spend → cost-per-booked-job. Spend entered by hand. | FX + OPS |
 | `EVENTS` | Non-reservation site events (quote viewed, waitlist, custom quote). Auto-created by the webhook. | WH |
 
+### The Ops sheet — a separate workbook
+
+`AVAILABILITY` lives in the **Ops** spreadsheet, not Leads MASTER, and is served
+by `/apps-script/availability.gs` as its own deployment. Required headers,
+case-sensitive: **`date`** · **`start_time`** · **`status`** (`cleaner_id` is read
+but not required). A row is published when `status` is `open`, the date is a real
+date cell, `start_time` parses as `"8:00 AM"` text or a real time value, and the
+start falls between `MIN_LEAD_HOURS` (18) and `DAYS_AHEAD` (21) out.
+
+Output is aggregated counts only — never cleaner names:
+`{ ok, slots: [ { date: "2026-07-29", time: "1:00 PM", open: 2 } ] }`
+
+`DAYS_AHEAD` must not exceed `HORIZON_DAYS` in `script.js`, or the site silently
+discards the tail of the feed.
+
 **Protected from the script:** `PROPERTIES`, `RAW_INTAKE`, `OUTREACH_LOG`, `DASHBOARD`. `assertWritable()` throws rather than writing to any of them.
 
 ---
