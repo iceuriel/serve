@@ -156,22 +156,17 @@ function computeQuote(input) {
 
     /* ------------------------------------------------------------------
        AVAILABILITY FEED — feeds the Step 3 time-slot picker.
-       ASSUME STALE as of 2026-07-26. The Ops MASTER behind this endpoint moved
-       Google accounts, so this deployment is bound to the OLD account. A
-       /macros/s/.../exec ID carries no account identity, so this cannot be
-       verified from the code alone — treat it as dead until proven otherwise.
+       Served by /apps-script/availability.gs, deployed from the Ops sheet on
+       servecos.com. Verified live 2026-07-27: HTTP 200, 9 slots,
+       Access-Control-Allow-Origin: *.
 
-       While it is dead the site quietly serves the earlier/later time-preference
-       fallback. Bookings still work; you just lose real slot selection.
+       Set this to '' to skip the network call entirely and go straight to the
+       earlier/later fallback.
 
-       TO FIX: redeploy the availability doGet from the servecos.com account and
-       paste the new /exec URL below. Set it to '' to skip the network call
-       entirely and go straight to the fallback.
-
-       Expected response shape:
-         { ok: true, slots: [ { date: "2026-08-14", time: "9–11 AM", open: 2 }, … ] }
+       Response shape:
+         { ok: true, slots: [ { date: "2026-08-07", time: "12:00 PM", open: 1 }, … ] }
        ------------------------------------------------------------------ */
-    const AVAILABILITY_SOURCE_URL = 'https://script.google.com/macros/s/AKfycbxx_iQ1x71D8FN-pDNwna34KE2YjNrpL7UDUwGlcW54MA_HQzfcGAK_8f6H6Gi5pzY/exec';
+    const AVAILABILITY_SOURCE_URL = 'https://script.google.com/macros/s/AKfycbzumNZZ9KI56KZuM2QlbhlB4QVp3cRS5Q_v8Z3jO0PW5CENCi2NDRExQL2Ko3vA93XM/exec';
 
     /* Hard caps. The availability fetch must never strand a customer on
        "Loading times…" with no way to submit, and the reservation POST must
