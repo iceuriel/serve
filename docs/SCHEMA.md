@@ -3,9 +3,14 @@
 **Location:** `/docs/SCHEMA.md` in the site repo.
 **Purpose:** the single source of truth for what every column means and who writes it.
 
+**Companion:** `/docs/HANDOFF.md` — current system state, what the last build
+changed, and what to work on next. This file is the contract; that one is the
+narrative.
+
 **Rules:**
 1. Any build that adds, renames, or repurposes a column updates this file **in the same commit**. No exceptions.
 2. Claude Code reads this file during Phase 0 recon. It is never pasted into chat — pasting is how context gets truncated.
+2a. Anything a future reader would need lives in the docs, not the chat. If it changes how the system behaves or fails — a risk, a gotcha, a deferred decision — it belongs in this file or `HANDOFF.md`. Chat scrolls away.
 3. Workbook: **Leads MASTER**, owned by servecos.com. Tabs: `PROPERTIES · LEADS · JOBS · OUTREACH_LOG · RAW_INTAKE · DASHBOARD` (+ `EVENTS`, auto-created).
 4. Tab names use **underscores**, not spaces. Anything comparing tab names must normalize.
 
