@@ -1,8 +1,9 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-07-28  ·  master  ·  r5 — PROPERTIES + slot write-back
+ * VERSION STAMP:  2026-07-28  ·  master  ·  r6 — self-cleaning testPayload
  *
+ * r6 = testPayload picks a real open slot and cleans up after itself.
  * r5 = PROPERTIES upsert + AVAILABILITY write-back to the Ops workbook.
  * r4 = timezone pinning (BUSINESS_TZ everywhere, timezone-free prettyDate).
  * Each revision differs in behaviour, so an older stamp reported by doGet means
@@ -437,7 +438,7 @@ function handleEvent(ss, data, eventType) {
 
 /** Health check — open the /exec URL in a browser. */
 function doGet() {
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-07-28 r5" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-07-28 r6" });
 }
 
 
@@ -1375,13 +1376,82 @@ function reportTouchColumnTypes(sheet, headers) {
   });
 }
 
+/* ============================================================
+   TEST FIXTURES
+
+   Everything the test writes is identifiable and removable:
+     submission_id  starts with TEST_PREFIX
+     email          ends with @example.com  (RFC-reserved, never a real person)
+     address        TEST_ADDRESS, deliberately not a real street
+   cleanupTestRows() keys on exactly those, so it can never touch a real row.
+   ============================================================ */
+const TEST_PREFIX  = "test-";
+const TEST_ADDRESS = "1 Testing Way";
+const TEST_UNIT    = "TEST";
+
 /**
- * Writes: a slot booking, a preference booking, a REPEAT booking from the same
- * email, and an idempotency replay. Check that the repeat produced one LEADS
- * row with an appended source_history and a second JOBS row.
+ * Find a slot that is genuinely open right now.
+ *
+ * The old fixture hardcoded "2026-08-14" / "9-11 AM" — a date and a window-style
+ * time that never existed in AVAILABILITY, which publishes single start times
+ * like "8:00 AM". Every run therefore reported a conflict and the happy path of
+ * the write-back was never exercised at all. Reading the real sheet means the
+ * test cannot drift from the data again.
+ *
+ * Returns { date, time, row, cleaner } or null.
+ */
+function findOpenSlot() {
+  try {
+    const av = SpreadsheetApp.openById(OPS_SPREADSHEET_ID).getSheetByName(AVAILABILITY_TAB);
+    if (!av) return null;
+    const headers = sheetHeaders(av);
+    const iDate = headers.indexOf("date"),
+          iTime = headers.indexOf("start_time"),
+          iStat = headers.indexOf("status"),
+          iCln  = headers.indexOf("cleaner_id");
+    if (iDate === -1 || iTime === -1 || iStat === -1) return null;
+    const last = av.getLastRow();
+    if (last < 2) return null;
+    const rows = av.getRange(2, 1, last - 1, headers.length).getValues();
+    for (let r = 0; r < rows.length; r++) {
+      if (String(rows[r][iStat]).trim().toLowerCase() !== SLOT_OPEN) continue;
+      return {
+        date: slotDateKey(rows[r][iDate]),
+        time: slotTimeLabel(rows[r][iTime]),
+        row:  r + 2,
+        cleaner: iCln === -1 ? "" : rows[r][iCln],
+      };
+    }
+  } catch (err) {
+    console.error("findOpenSlot failed: " + err);
+  }
+  return null;
+}
+
+/**
+ * End-to-end exercise against the LIVE workbooks: a slot booking on a real open
+ * slot, a preference booking, a repeat customer, a move-out, and an idempotency
+ * replay. Cleans up after itself.
+ *
+ * What to check in the log:
+ *   slot booking      slot_action "booked", property_action "created"
+ *   preference        slot_action "skipped" — there is no slot to flip
+ *   repeat            lead_action "matched", property_action "matched"
+ *   move-out          add_on_rev 0 in the sheet, not 85
+ *   replay            duplicate true, and nothing changes anywhere
  */
 function testPayload() {
   const stamp = Date.now();
+  const open  = findOpenSlot();
+
+  if (open) {
+    console.log("Using a real open slot: " + open.date + " " + open.time +
+                " (AVAILABILITY row " + open.row + (open.cleaner ? ", " + open.cleaner : "") + ")");
+  } else {
+    console.log("NO OPEN SLOT FOUND — the slot bookings will report a conflict, which " +
+                "is correct behaviour but does not exercise the write-back. Add an " +
+                "`open` row to AVAILABILITY to test it properly.");
+  }
 
   const base = {
     event: "quote_reserved", event_type: "reservation",
@@ -1394,24 +1464,21 @@ function testPayload() {
     discount_applied: "First clean 50% off", steady_state_price: 122,
     recurring_weekly: 111, recurring_biweekly: 122, recurring_monthly: 142,
     name: "Test Customer", email: "Test.Customer@Example.com  ", phone: "(617) 555-0100",
-    address: "123 Beacon St", unit: "4B", unit_label: "2 BR / 1 BA",
-    // Schema-valid segment. NOTE: the live site still emits its channel
-    // taxonomy (qr_code, poster, ...) until the prefix mapping is settled —
-    // see the segment section in /docs/SCHEMA.md.
+    address: TEST_ADDRESS, unit: TEST_UNIT, unit_label: "2 BR / 1 BA",
     src: "dh-bh-01", src_first: "dh-bh-01", src_chain: "dh-bh-01",
-    segment: "movein", utm_source: "poster", utm_medium: "print", page_path: "/",
+    segment: "pro", utm_source: "poster", utm_medium: "print", page_path: "/",
   };
 
   const slot = Object.assign({}, base, {
-    submission_id: "test-" + stamp + "-slot",
-    slot_date: "2026-08-14", slot_time: "9-11 AM",
-    schedule_preference_label: "Friday, Aug 14 at 9-11 AM",
+    submission_id: TEST_PREFIX + stamp + "-slot",
+    slot_date: open ? open.date : "2026-01-01",
+    slot_time: open ? open.time : "9:00 AM",
     customer_notes: "We have a friendly dog, keep the back door shut.",
     pets_flag: true,
   });
 
   const pref = Object.assign({}, base, {
-    submission_id: "test-" + stamp + "-pref",
+    submission_id: TEST_PREFIX + stamp + "-pref",
     email: "someone.else@example.com",
     schedule_preference: "earlier", time_preference: "earlier",
     schedule_preference_label: "Earlier in the Day",
@@ -1419,33 +1486,135 @@ function testPayload() {
     pets_flag: false,
   });
 
-  // Same person as `slot`, different casing and a different tag.
-  // Expect: NO new LEADS row, source_history appended, last_touch bumped,
-  // first_touch unchanged, and a second JOBS row.
+  /* Same person as `slot`, different casing and a different tag. Expect NO new
+     LEADS row, source_history appended, last_touch bumped, first_touch
+     unchanged, and a second JOBS row. Deliberately no slot — booking the same
+     open slot twice would be a conflict by design, tested separately below. */
   const repeat = Object.assign({}, base, {
-    submission_id: "test-" + stamp + "-repeat",
+    submission_id: TEST_PREFIX + stamp + "-repeat",
     email: "TEST.CUSTOMER@example.com",
     src: "ref-jordan-m", src_first: "dh-bh-01",
     src_chain: "dh-bh-01>ref-jordan-m",
-    slot_date: "2026-09-02", slot_time: "1-3 PM",
+    time_preference: "later", schedule_preference: "later",
     customer_notes: "Same dog as last time.",
   });
 
-  // Move Out — add_on_rev must be 0, not $85.
   const moveOut = Object.assign({}, base, {
-    submission_id: "test-" + stamp + "-moveout",
+    submission_id: TEST_PREFIX + stamp + "-moveout",
     email: "moveout@example.com",
     service: "move_out", service_type: "move_out",
     modifiers_applied: [], addon_total: 0,
     quote_price: 536, first_visit_total: 536,
-    slot_date: "2026-09-10", slot_time: "8-10 AM",
+    time_preference: "earlier", schedule_preference: "earlier",
   });
 
   [slot, pref, repeat, moveOut].forEach(function (p) {
-    const res = doPost({ postData: { contents: JSON.stringify(p) } });
-    console.log(p.submission_id + " -> " + res.getContent());
+    console.log(p.submission_id + " -> " +
+                doPost({ postData: { contents: JSON.stringify(p) } }).getContent());
   });
 
-  const replay = doPost({ postData: { contents: JSON.stringify(slot) } });
-  console.log("idempotency replay -> " + replay.getContent());
+  /* Booking the SAME slot again must conflict without failing the booking. */
+  if (open) {
+    const clash = Object.assign({}, slot, {
+      submission_id: TEST_PREFIX + stamp + "-clash",
+      email: "clash@example.com",
+    });
+    console.log("same-slot clash -> " +
+                doPost({ postData: { contents: JSON.stringify(clash) } }).getContent());
+  }
+
+  console.log("idempotency replay -> " +
+              doPost({ postData: { contents: JSON.stringify(slot) } }).getContent());
+
+  console.log("");
+  cleanupTestRows();
+}
+
+/**
+ * Remove everything testPayload wrote and reopen any slot it booked.
+ *
+ * Safe by construction: it only ever deletes rows whose submission_id starts
+ * with TEST_PREFIX, whose email is @example.com, or whose property_key came
+ * from TEST_ADDRESS. A real booking matches none of those.
+ *
+ * Runnable on its own if a test run failed part-way through.
+ */
+function cleanupTestRows() {
+  const ss = SPREADSHEET_ID ? SpreadsheetApp.openById(SPREADSHEET_ID)
+                            : SpreadsheetApp.getActiveSpreadsheet();
+  const report = [];
+
+  /* --- reopen AVAILABILITY rows this test booked --- */
+  try {
+    const av = SpreadsheetApp.openById(OPS_SPREADSHEET_ID).getSheetByName(AVAILABILITY_TAB);
+    const h  = sheetHeaders(av);
+    const iStat = h.indexOf("status"), iJob = h.indexOf("job_id");
+    const last  = av.getLastRow();
+    let reopened = 0;
+    if (iStat !== -1 && iJob !== -1 && last > 1) {
+      const rows = av.getRange(2, 1, last - 1, h.length).getValues();
+      for (let r = 0; r < rows.length; r++) {
+        /* Only rows whose job_id belongs to a test JOBS row we are about to
+           delete. Matching on job_id, not status, so an operator's own booking
+           can never be reopened. */
+        if (!isSet(rows[r][iJob])) continue;
+        if (!isTestJobId(ss, rows[r][iJob])) continue;
+        av.getRange(r + 2, iStat + 1).setValue(SLOT_OPEN);
+        av.getRange(r + 2, iJob + 1).setValue("");
+        reopened++;
+      }
+    }
+    report.push("AVAILABILITY rows reopened: " + reopened);
+  } catch (err) {
+    report.push("AVAILABILITY cleanup FAILED: " + err);
+  }
+
+  /* --- delete rows, bottom-up so indices stay valid --- */
+  report.push(deleteMatching(ss, JOBS_TAB, "submission_id",
+    function (v) { return String(v).indexOf(TEST_PREFIX) === 0; }));
+  report.push(deleteMatching(ss, LEADS_TAB, "email",
+    function (v) { return /@example\.com$/i.test(String(v).trim()); }));
+  report.push(deleteMatching(ss, PROPERTIES_TAB, "property_key",
+    function (v) { return String(v).toUpperCase().indexOf("TESTING-WAY") !== -1; }));
+  report.push(deleteMatching(ss, EVENTS_TAB, "submission_id",
+    function (v) { return String(v).indexOf(TEST_PREFIX) === 0; }));
+
+  console.log("--- cleanup ---");
+  report.forEach(function (line) { console.log("  " + line); });
+}
+
+/** True if this job_id belongs to a JOBS row created by testPayload. */
+function isTestJobId(ss, jobId) {
+  const jobs = ss.getSheetByName(JOBS_TAB);
+  if (!jobs) return false;
+  const h = sheetHeaders(jobs);
+  const iJob = h.indexOf("job_id"), iSub = h.indexOf("submission_id");
+  if (iJob === -1 || iSub === -1) return false;
+  const last = jobs.getLastRow();
+  if (last < 2) return false;
+  const rows = jobs.getRange(2, 1, last - 1, h.length).getValues();
+  const needle = String(jobId).trim();
+  for (let r = 0; r < rows.length; r++) {
+    if (String(rows[r][iJob]).trim() !== needle) continue;
+    return String(rows[r][iSub]).indexOf(TEST_PREFIX) === 0;
+  }
+  return false;
+}
+
+/** Delete rows of `tab` where `column` satisfies `pred`. Bottom-up. */
+function deleteMatching(ss, tabName, column, pred) {
+  const sheet = ss.getSheetByName(tabName);
+  if (!sheet) return tabName + ": no tab";
+  const h = sheetHeaders(sheet);
+  const i = h.indexOf(column);
+  if (i === -1) return tabName + ': no "' + column + '" column';
+  const last = sheet.getLastRow();
+  if (last < 2) return tabName + ": no data rows";
+
+  const values = sheet.getRange(2, i + 1, last - 1, 1).getValues();
+  let deleted = 0;
+  for (let r = values.length - 1; r >= 0; r--) {      // bottom-up keeps indices valid
+    if (pred(values[r][0])) { sheet.deleteRow(r + 2); deleted++; }
+  }
+  return tabName + ": " + deleted + " test row(s) deleted";
 }
