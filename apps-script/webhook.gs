@@ -1413,15 +1413,27 @@ function findOpenSlot() {
     const last = av.getLastRow();
     if (last < 2) return null;
     const rows = av.getRange(2, 1, last - 1, headers.length).getValues();
+    const todayKey = slotDateKey(new Date());
+
+    /* Prefer a slot a customer could actually book. AVAILABILITY accumulates
+       past rows that are still marked open — nothing expires them — and taking
+       the first one would test the write-back against a date the feed never
+       publishes. Fall back to any open row so the test still runs on a sheet
+       with no future availability, and say which happened. */
+    let fallback = null;
     for (let r = 0; r < rows.length; r++) {
       if (String(rows[r][iStat]).trim().toLowerCase() !== SLOT_OPEN) continue;
-      return {
+      const hit = {
         date: slotDateKey(rows[r][iDate]),
         time: slotTimeLabel(rows[r][iTime]),
         row:  r + 2,
         cleaner: iCln === -1 ? "" : rows[r][iCln],
+        past: false,
       };
+      if (hit.date >= todayKey) return hit;              // ISO dates sort as strings
+      if (!fallback) { hit.past = true; fallback = hit; }
     }
+    if (fallback) return fallback;
   } catch (err) {
     console.error("findOpenSlot failed: " + err);
   }
@@ -1447,6 +1459,11 @@ function testPayload() {
   if (open) {
     console.log("Using a real open slot: " + open.date + " " + open.time +
                 " (AVAILABILITY row " + open.row + (open.cleaner ? ", " + open.cleaner : "") + ")");
+    if (open.past) {
+      console.log("  NOTE: that slot is in the PAST and no customer could book it. " +
+                  "The write-back is still exercised, but AVAILABILITY has no future " +
+                  "open row — stale rows are never expired. Worth clearing out.");
+    }
   } else {
     console.log("NO OPEN SLOT FOUND — the slot bookings will report a conflict, which " +
                 "is correct behaviour but does not exercise the write-back. Add an " +
