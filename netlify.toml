@@ -10,20 +10,11 @@
 #
 # Adding an asset to the site means adding it to the copy line below.
 
+# The allow-list itself lives in scripts/build-site.sh so that Netlify,
+# Cloudflare Pages and any local build publish an identical set of files.
 [build]
   publish = "_site"
-  command = """
-    set -e
-    rm -rf _site && mkdir -p _site
-    cp index.html script.js style.css _site/
-    cp -r images _site/
-    echo '--- published files ---'
-    find _site -type f | sort
-    if find _site -type f \\( -name '*.md' -o -name '*.gs' -o -name '*.json' -o -name '*.toml' \\) | grep -q .; then
-      echo 'ERROR: private-looking files staged for publication'
-      exit 1
-    fi
-  """
+  command = "bash scripts/build-site.sh"
 
 # Static assets, long cache. index.html must revalidate or a booking-flow fix
 # sits in browser caches for hours — that is how a stale SHEETS_URL keeps

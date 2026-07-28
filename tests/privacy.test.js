@@ -104,22 +104,26 @@ t('has a guard step that fails on private file types', /Fail if anything private
   t('artifact excludes ' + p, !staged);
 });
 
-/* ---------- 4b. the Netlify build is an allow-list too ---------- */
-console.log('\n=== 4b. Netlify publishes an allow-list ===');
+/* ---------- 4b. the shared build script is an allow-list ---------- */
+console.log('\n=== 4b. scripts/build-site.sh publishes an allow-list ===');
+const bs = fs.readFileSync(path.join(REPO_ROOT, 'scripts', 'build-site.sh'), 'utf8');
+['index.html', 'script.js', 'style.css', 'images'].forEach(a =>
+  t('stages ' + a, new RegExp('cp\\s+(-r\\s+)?[^\\n]*' + a.replace('.', '\\.')).test(bs)));
+['docs', 'apps-script', 'tests', 'CLAUDE.md'].forEach(p =>
+  t('never stages ' + p, !new RegExp('cp\\s+(-r\\s+)?[^\\n]*\\b' + p.replace('.', '\\.') + '\\b').test(bs)));
+t('guards against private file types', /ERROR: private-looking files/.test(bs));
+t('fails the build on a guard hit', /exit 1/.test(bs));
+
+console.log('\n=== 4c. every host calls that one script ===');
 const ntPath = path.join(REPO_ROOT, 'netlify.toml');
-if (!fs.existsSync(ntPath)) {
-  console.log('  --    no netlify.toml; skipping (not the active host)');
-} else {
+if (fs.existsSync(ntPath)) {
   const nt = fs.readFileSync(ntPath, 'utf8');
-  t('publishes a staged directory, not the repo root', /publish\s*=\s*"_site"/.test(nt));
-  t('does NOT publish the repo root', !/publish\s*=\s*"\.?"/.test(nt));
-  t('build guards against private file types', /ERROR: private-looking files/.test(nt));
-  ['index.html', 'script.js', 'style.css', 'images'].forEach(a =>
-    t('stages ' + a, new RegExp('cp\\s+(-r\\s+)?[^\\n]*' + a.replace('.', '\\.')).test(nt)));
-  ['docs', 'apps-script', 'tests'].forEach(p =>
-    t('never stages ' + p, !new RegExp('cp\\s+(-r\\s+)?[^\\n]*\\b' + p + '\\b[^\\n]*_site').test(nt)));
+  t('netlify.toml publishes _site', /publish\s*=\s*"_site"/.test(nt));
+  t('netlify.toml calls build-site.sh', /scripts\/build-site\.sh/.test(nt));
   t('index.html revalidates so a booking fix cannot sit in caches',
-    /for = "\/index\.html"[\s\S]{0,120}must-revalidate/.test(nt));
+    /for = "\/index\.html"[\s\S]{0,140}must-revalidate/.test(nt));
+} else {
+  console.log('  --    no netlify.toml (not the active host)');
 }
 
 /* ---------- 5. optional local pattern list ---------- */
