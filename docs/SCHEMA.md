@@ -109,11 +109,38 @@ Anything that's reference data for a single job → `quote_meta`.
 
 | Tab | Purpose | Written by |
 |---|---|---|
-| `PROPERTIES` | One row per address. The durable asset — customers are transient, properties aren't. Keyed on `property_key`. | MAN (webhook does **not** write here yet) |
+| `PROPERTIES` | One row per address. The durable asset — customers are transient, properties aren't. Keyed on `property_key`. | **WH** (six columns only) + MAN |
 | `RAW_INTAKE` | Deed + Apollo staging buffer. Columns: `file_date · intake_date · batch · raw_source · name · email_corp · email_personal · phone · address · unit · zip · linkdin · company · title · sale_price · deed_type · promoted · promoted_lead_id · raw_notes`. Rows get promoted into LEADS. | MAN |
 | `OUTREACH_LOG` | Sends, opens, replies per lead. | MAN |
 | `DASHBOARD` | Channel spend → cost-per-booked-job. Spend entered by hand. | FX + OPS |
 | `EVENTS` | Non-reservation site events (quote viewed, waitlist, custom quote). Auto-created by the webhook. | WH |
+
+### PROPERTIES — one row per address
+
+Live header row (17 cols), confirmed 2026-07-28:
+
+`property_key · service_address · unit · neighborhood · zip · property_type ·
+beds · baths · deed_date · sale_price · deed_type · buyer_name ·
+first_clean_min · last_service_date · photo_folder · known_issues · notes`
+
+**The webhook writes six of them**, blank-cells-only, on every booking:
+`property_key`, `service_address` (payload `address`), `unit`, `zip`,
+`beds` (payload `bedrooms`), `baths` (payload `bathrooms`).
+
+Everything else is yours. Deed fields (`deed_date`, `sale_price`, `deed_type`,
+`buyer_name`) are promoted from `RAW_INTAKE`; `neighborhood`, `property_type`,
+`first_clean_min`, `photo_folder`, `known_issues` and `notes` are operator
+knowledge. **`last_service_date` is deliberately not written** — a booking is a
+future intention, not a service that happened. It belongs to whatever marks a
+job complete.
+
+`property_key` is `ZIP-ADDRESS-UNIT` normalised, so **unit is part of the
+identity**: `123 Beacon St Apt 4B` and `Apt 5C` are two properties with separate
+access notes and separate histories. A booking with no address writes nothing.
+
+`PROPERTIES` remains on the protected list. `upsertProperty()` is the only
+writer, through `assertPropertiesWritable()`, which throws for any tab that is
+not `PROPERTIES`.
 
 ### EVENTS — non-reservation site events
 
@@ -153,6 +180,35 @@ A missing or mis-cased header returns `ok:false` rather than an empty slot list.
 That distinction matters: the site treats an empty list as "no availability" and
 quietly serves the earlier/later radios, so a header typo would otherwise remove
 the scheduler with nothing anywhere reporting a fault.
+
+**Live header row (7 cols), confirmed 2026-07-28:**
+`date · start_time · cleaner_id · status · job_id · week_of · notes`
+Observed `status` values: `open`, `booked`, `held`.
+
+#### `status` and `job_id` are now written by the webhook
+
+On a slot booking the webhook opens the Ops workbook by id, finds the first row
+matching date + time with `status = open`, sets it to `booked`, and writes the
+`job_id` — which is what links a JOBS row to the AVAILABILITY row that satisfied
+it. **`held` is never touched**; it is the operator's hold and only `open` is
+eligible.
+
+The read happens at write time, inside the script lock `doPost` already holds —
+never from the customer's view, which the five-minute feed cache makes stale by
+construction.
+
+**A conflict is not an error.** If no open row matches, someone took the slot
+inside the cache window. The booking is still written and the notification
+subject carries `· SLOT CONFLICT` for a human to resolve. Refusing the booking
+would punish the customer for our caching. Likewise an unreachable Ops workbook
+gives `· SLOT NOT MARKED` and the slot stays open until fixed by hand.
+
+> **Drift hazard.** `webhook.gs` and `availability.gs` are separate script
+> projects and cannot share code, yet both must derive the same date key and the
+> same time label or every booking reports a phantom conflict.
+> `slotDateKey`/`slotTimeLabel` in the webhook mirror `ymd`/`clockLabel` in the
+> feed, and `tests/properties-and-slots.test.js` loads both files and asserts
+> they agree. Change one, change the other.
 
 **Protected from the script:** `PROPERTIES`, `RAW_INTAKE`, `OUTREACH_LOG`, `DASHBOARD`. `assertWritable()` throws rather than writing to any of them.
 
@@ -198,48 +254,48 @@ both confirmed returning 404.
 
 ## Known open items
 
-- **A booked slot is never marked taken — double-booking is possible today.** The
-  booking flow reads `AVAILABILITY` but nothing writes back to it. `status` is the
-  only source of truth for whether a slot is free, so after every reservation
-  somebody must set that row to `booked` by hand. Until then the same slot stays
-  bookable by the next visitor. Every slot currently published is one cleaner
-  deep, so a single booking exhausts it and the second customer is a genuine
-  conflict, not a queue. Highest-value next build: have the webhook flip the row,
-  which needs it to reach the Ops spreadsheet as well as Leads MASTER —
-  `SpreadsheetApp.openById` on the Ops ID, plus that ID added to config.
 - `linkdin` in RAW_INTAKE is a typo for `linkedin`. Header matching is by exact text — fix it and the mapping together, or not at all.
-- Nothing writes to `PROPERTIES` yet. `property_key` is generated on every booking but no property record is created. Next build.
 - `ltv` has no formula yet.
+- **Slot depth is one cleaner deep.** Write-back now prevents a slot being sold
+  twice, but with a single `open` row per time a conflict is still a real clash
+  rather than a queue. This is a roster problem, not a code one — more
+  `AVAILABILITY` rows per time means `open: 2+` and genuine resilience.
+- **Nothing releases a slot.** If a booking is cancelled, its `AVAILABILITY` row
+  stays `booked`. The `job_id` written back is the handle for undoing that, but
+  no code does it yet.
 - Part of the original build spec was lost to a truncated paste — the `src` /
-  "skins" / "redirects" sub-items of Task 1. `src` was covered by the attribution
-  work; the other two were never recovered and never built.
-- **`segment` vocabulary conflict — UNRESOLVED, see below.** The header is now live in both JOBS and LEADS, so every booking writes to it. Until the prefix table is confirmed, that column receives values outside `movein · pro · direct`.
+  "skins" / "redirects" sub-items of Task 1. All three are now built: `src` by
+  the attribution work, skins and redirects re-specified and shipped 2026-07-28.
+- Part of the original build spec was lost to a truncated paste — the "skins" and
+  "redirects" items of Task 1. Both were re-specified and built on 2026-07-28
+  (two hero skins plus `/movein` and `/clean`). Nothing outstanding.
 
-### The `segment` conflict (open)
+### `segment` — resolved 2026-07-28
 
-This file defines `segment` as `movein · pro · direct`, derived from the src prefix.
+`segment` is an **intent** taxonomy: `movein · pro · direct`. Derived from the
+first-touch `src` prefix by `SRC_SEGMENTS` in `script.js` (~line 172).
 
-`script.js` (`SRC_SEGMENTS`, ~line 226) currently derives a finer-grained channel
-taxonomy instead: `qr_code · poster · flyer · door_hanger · social · nextdoor ·
-referral · google_business · email · other · direct`.
+Channel is deliberately **not** what this column records — `source` already holds
+the full first-touch tag and `src_chain` holds every tag of the session, so a
+third channel field would say nothing new. Segment answers what the person
+*needs*, which is what selects the hero skin and the pricing emphasis.
 
-Both are internally consistent; they answer different questions. The channel
-taxonomy says *what medium* the tag came from. `movein · pro · direct` looks like
-it says *which acquisition pipeline* the lead belongs to — plausibly deed/mover
-data vs. Apollo B2B contacts vs. untagged, mirroring the two halves of
-`RAW_INTAKE`.
+| Prefix | Segment | Meaning |
+|---|---|---|
+| `deed` `db` `mv` | `movein` | Just closed. Needs a first clean, buys once, decides fast. |
+| `dh` `poster` `qr` `flyer` `eddm` | `pro` | Lives here already. Pitch is weekends back; goal is a recurring plan. |
+| `email` `em` | `pro` | Cold email to the professional segment. |
+| `ref` | `direct` | A person sent them, but we do not know why. |
+| *(no tag)* | `direct` | |
+| *(unrecognised tag)* | `direct` | Intent unknown — guessing puts the wrong pitch in front of a real customer. |
 
-No data is lost either way: `source` holds the full first-touch tag and
-`src_chain` holds every tag, so `segment` can be recomputed retroactively for
-every historical row once the mapping is settled.
+Selection is **first touch**. A visitor who arrives on a deed link and later
+scans a poster QR stays `movein`; the poster did not change why they need a
+clean.
 
-**To resolve:** state which src prefixes map to `movein` and which to `pro`.
-Then `SRC_SEGMENTS` becomes that two-entry table with `direct` as the default,
-and this section is deleted.
-
-**Until then:** the column will contain channel-taxonomy values from live
-bookings. `testPayload()` deliberately sends a schema-valid `movein` so test
-rows do not add to the mess.
+Any row stays recomputable — `source` keeps the full tag — so a prefix added
+later can be backfilled. **No backfill was needed at resolution:** `JOBS.segment`
+held `direct ×1` and blank ×12, with no channel values anywhere.
 
 ---
 
@@ -247,6 +303,9 @@ rows do not add to the mess.
 
 | Date | Change |
 |---|---|
+| 2026-07-28 | **Webhook r5.** `PROPERTIES` upsert — six columns, blank-fill only, the tab stays on the protected list behind a `assertPropertiesWritable()` allowance that refuses any other tab. `AVAILABILITY` write-back to the Ops workbook — `open` → `booked` plus `job_id`, never touching `held`, read at write time inside the existing script lock. Both run *after* the JOBS row and can never fail a booking; failures surface as `· SLOT CONFLICT` / `· SLOT NOT MARKED` / a PROPERTIES warning in the notification. Ops tabs `CLEANERS`, `SCHEDULE`, `OPS_DASHBOARD` added to the protected list now that the workbook is reachable by id. |
+| 2026-07-28 | `segment` resolved to the intent taxonomy `movein · pro · direct`; two hero skins select off it by first touch; `/movein` and `/clean` vanity redirects feed the same first-touch path. Confirmation panel now promises a confirmation email within 15 minutes with the footer address as fallback — the tripwire for a silent write failure, which otherwise looks identical to success from the customer's side. |
+| 2026-07-28 | **Privacy.** The Pages workflow published the whole repo to servecleaning.com, including a personal profile. Site moved to Cloudflare with an allow-list build, the GitHub repo made private, and every personal identifier purged from all 47 commits on both branches. `tests/privacy.test.js` enforces it. |
 | 2026-07-27 | JOBS extended 22 → 36 columns (attribution, contact snapshot, customer notes, pets, address, quote_meta). LEADS upsert added. EVENTS tab introduced. This file created. |
 | 2026-07-27 | Reconciled `webhook.gs` against this file: protected-tab names normalized to underscores (the guard had been comparing against space-separated names and was silently inert for `RAW_INTAKE` and `OUTREACH_LOG`); LEADS upsert extended to `service_address` / `unit` / `zip`; `received_at` switched from UTC to America/New_York; `start_time` now carries the preference label on non-slot bookings instead of being left blank. |
 | 2026-07-27 | Timezone pinning. `job_id`'s undated fallback and `prettyDate()` were using the Apps Script *project* timezone while `received_at` used `America/New_York`. All date formatting now pins `BUSINESS_TZ`, and `prettyDate()` is timezone-free entirely — a booked calendar date has no timezone, and deriving the weekday through a local `Date` could shift it by a day. **Correction:** an earlier version of this entry said a live `testPayload()` run had produced a `job_id` dated a day off its `received_at`. That was inferred from the `job_id` alone; the row's `received_at` was never checked and the two may well have agreed. The fix stands regardless — the webhook and availability scripts are separate Apps Script projects with independent timezone settings, and nothing guaranteed they matched. |

@@ -190,8 +190,20 @@ t('event submission_id captured', EV._rows[1][EV._rows[0].indexOf('submission_id
 t('event received_at stamped', /^\d{4}-\d{2}-\d{2}T/.test(String(EV._rows[1][0])));
 t('event did NOT touch LEADS', L._rows.length - 1 === 3);
 t('event did NOT touch JOBS', J._rows.length - 1 === 4);
-['PROPERTIES','RAW INTAKE','OUTREACH LOG','DASHBOARD'].forEach(n =>
+/* PROPERTIES is deliberately writable now — it is the one narrow exception, and
+   properties-and-slots.test.js owns its behaviour. Everything else on the deny
+   list must still be header-only. */
+['RAW INTAKE','OUTREACH LOG','DASHBOARD'].forEach(n =>
   t(n + ' untouched (header only)', S.tabs[n]._rows.length === 1));
+t('PROPERTIES IS written (the deliberate exception)', S.tabs['PROPERTIES']._rows.length > 1,
+  S.tabs['PROPERTIES']._rows.length - 1);
+t('assertWritable still refuses PROPERTIES for any other caller', (() => {
+  try { S.sandbox.assertWritable('PROPERTIES'); return false; } catch (e) { return /Refusing to write/.test(e.message); }
+})());
+t('the PROPERTIES allowance cannot be pointed at another tab', (() => {
+  try { S.sandbox.assertPropertiesWritable('RAW_INTAKE'); return false; }
+  catch (e) { return /exists\s+only for PROPERTIES/.test(e.message); }
+})());
 
 console.log('\n--- dropped fields (must be the 7d list, nothing else) ---');
 const dropLines = [...new Set(S.logs.filter(l => /^Dropped/.test(l)))];

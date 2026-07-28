@@ -1,26 +1,39 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-07-27  ·  branch build/attribution-and-notes  ·  SCHEMA.md r4
+ * VERSION STAMP:  2026-07-28  ·  master  ·  r5 — PROPERTIES + slot write-back
  *
+ * r5 = PROPERTIES upsert + AVAILABILITY write-back to the Ops workbook.
  * r4 = timezone pinning (BUSINESS_TZ everywhere, timezone-free prettyDate).
- * r3 and r4 differ in behaviour, so if doGet reports r3 the deployed copy is
- * the one that can stamp job_id a day off received_at. Bump this stamp on every
- * behavioural change, not just schema changes — that is the whole point of it.
+ * Each revision differs in behaviour, so an older stamp reported by doGet means
+ * the deployed copy is stale. Bump this on every behavioural change, not just
+ * schema changes — that is the whole point of it.
  *
  * Repo source of truth: /apps-script/webhook.gs
  * Column meanings and ownership: /docs/SCHEMA.md — that file is authoritative.
- * If the stamp in the Apps Script editor does not match the repo, what is
- * deployed is stale.
  * ==================================================================
  *
- * ROUTING
- *   reservation  ->  resolve lead_id  ->  upsert LEADS  ->  append JOBS
- *   everything else (quote_emailed, waitlist_zip, custom_quote_request)  ->  EVENTS
+ * ROUTING — a reservation touches four tabs across TWO workbooks
+ *   1. LEADS       upsert the person          (Leads MASTER)
+ *   2. JOBS        append the booking         (Leads MASTER)
+ *   3. PROPERTIES  upsert the address         (Leads MASTER)
+ *   4. AVAILABILITY flip the slot to booked   (OPS workbook, by id)
+ *   Everything else (quote_emailed, waitlist_zip, custom_quote_request) -> EVENTS.
  *
- *   Tabs this script is ALLOWED to write: JOBS, LEADS, EVENTS.
- *   PROPERTIES, RAW_INTAKE, OUTREACH_LOG and DASHBOARD are hard-blocked by
- *   assertWritable() — a coding mistake throws rather than corrupting them.
+ *   ONLY STEP 2 CAN FAIL THE REQUEST. Steps 1, 3 and 4 run after the booking is
+ *   safely recorded; each failure is reported in the notification email and
+ *   none of them is ever raised to the customer. A booking is worth more than
+ *   any bookkeeping attached to it.
+ *
+ * WRITE PERMISSIONS
+ *   Freely writable:  JOBS, LEADS, EVENTS.
+ *   Hard-blocked:     RAW_INTAKE, OUTREACH_LOG, DASHBOARD, and the Ops tabs
+ *                     CLEANERS, SCHEDULE, OPS_DASHBOARD. assertWritable()
+ *                     throws for all of them.
+ *   Narrow exceptions: PROPERTIES via assertPropertiesWritable() and
+ *                     AVAILABILITY via assertAvailabilityWritable(). Each
+ *                     refuses any tab other than its own, so the allowance
+ *                     cannot widen. assertWritable() still refuses both.
  *   Tab names normalize, so underscores vs. spaces cannot defeat the guard.
  *
  * THREE INVARIANTS
@@ -99,7 +112,14 @@ function notifyEmail() {
  * Compared through normalizeTabName(), so spacing and punctuation cannot defeat
  * the guard: "RAW_INTAKE", "RAW INTAKE" and "raw-intake" all match.
  */
-const PROTECTED_TABS = ["PROPERTIES", "RAW_INTAKE", "OUTREACH_LOG", "DASHBOARD"];
+const PROTECTED_TABS = [
+  // Leads MASTER
+  "PROPERTIES", "RAW_INTAKE", "OUTREACH_LOG", "DASHBOARD",
+  // Ops workbook — reachable by id now that availability write-back exists.
+  // OPS_DASHBOARD normalises to OPS_DASHBOARD, not DASHBOARD, so it needs its
+  // own entry rather than relying on the one above.
+  "CLEANERS", "SCHEDULE", "OPS_DASHBOARD",
+];
 
 /** Columns ops owns on JOBS. Never written, not even blank-filled. */
 const OPS_OWNED_COLUMNS = ["completed_date", "cleaner", "duration_min", "photos_passed", "payment_status"];
@@ -209,6 +229,66 @@ const LEADS_LAST_TOUCH  = "last_touch";
  */
 const LEADS_IMMUTABLE_ON_MATCH = [LEADS_FIRST_TOUCH];
 
+/* ============================================================
+   PROPERTIES — the durable asset
+
+   Customers are transient; addresses are not. property_key has been generated
+   on every booking as a join key while the tab stayed empty, so the join had
+   nothing to join to.
+
+   PROPERTIES stays on PROTECTED_TABS. This is a deliberate, narrow exception:
+   upsertProperty() is the only writer, via assertPropertiesWritable(), which
+   refuses any tab that is not PROPERTIES. assertWritable() still throws for it,
+   so no other code path can reach it even by accident.
+
+   Live header row (17 cols), confirmed 2026-07-28:
+     property_key | service_address | unit | neighborhood | zip | property_type |
+     beds | baths | deed_date | sale_price | deed_type | buyer_name |
+     first_clean_min | last_service_date | photo_folder | known_issues | notes
+
+   A booking only knows six of those. The rest are deed data (MAN, promoted from
+   RAW_INTAKE) or measured after a job (OPS). Notably last_service_date is NOT
+   written here: a booking is a future intention, not a service that happened.
+   ============================================================ */
+const PROPERTIES_TAB = "PROPERTIES";
+
+/** Payload keys the webhook may write to PROPERTIES. Nothing else. */
+const PROPERTIES_FIELDS = ["property_key", "address", "unit", "zip", "bedrooms", "bathrooms"];
+
+/** Payload key -> PROPERTIES header, where the two differ. */
+const PROPERTIES_HEADER_MAP = {
+  address:   "service_address",
+  bedrooms:  "beds",
+  bathrooms: "baths",
+};
+
+function propertiesHeaderFor(field) {
+  return PROPERTIES_HEADER_MAP[field] || field;
+}
+
+
+/* ============================================================
+   OPS WORKBOOK — availability write-back
+
+   A different spreadsheet from Leads MASTER, reached by id. Nothing marked a
+   slot as taken, so a second visitor could book a time already sold; every
+   published slot is one cleaner deep, which makes that a real conflict rather
+   than a queue.
+
+   Only AVAILABILITY is writable, and only its status and job_id cells. The Ops
+   workbook's other tabs are on the protected list, and
+   assertAvailabilityWritable() refuses anything that is not AVAILABILITY.
+
+   Live header row (7 cols), confirmed 2026-07-28:
+     date | start_time | cleaner_id | status | job_id | week_of | notes
+   Observed status values: open, booked, held. `held` is the operator's and is
+   never touched — only open -> booked.
+   ============================================================ */
+const OPS_SPREADSHEET_ID = "1MhaQGxwTZvg7HF94WWpeof5A6P9GCa8Fq7hkZKqxwW4";
+const AVAILABILITY_TAB   = "AVAILABILITY";
+const SLOT_OPEN          = "open";
+const SLOT_BOOKED        = "booked";
+
 /** EVENTS is ours, so its schema is fixed here rather than inferred per payload. */
 const EVENTS_HEADERS = [
   "received_at", "submitted_at", "submission_id", "event_type", "event",
@@ -263,8 +343,24 @@ function doPost(e) {
     const record = buildJobRecord(data, sched, leadId, jobs);
     const write  = writeRow(jobs, record);
 
+    /* Everything below happens AFTER the booking is safely recorded. None of it
+       can fail the booking; each failure is reported in the notification. */
+
+    /* PROPERTIES — the durable asset the join key has been pointing at. */
+    let propertyResult;
     try {
-      sendReservationEmail(data, sched, leadId, leadResult);
+      propertyResult = upsertProperty(ss, data, record.property_key);
+    } catch (propErr) {
+      propertyResult = { ok: false, action: "failed", error: String(propErr) };
+      console.error("PROPERTIES upsert failed (JOBS row still written): " + propErr);
+    }
+
+    /* Ops AVAILABILITY — stop the slot being sold twice. Reads at write time,
+       inside the script lock doPost already holds. Never throws. */
+    const slotResult = bookAvailabilitySlot(sched, record.job_id);
+
+    try {
+      sendReservationEmail(data, sched, leadId, leadResult, propertyResult, slotResult);
     } catch (mailErr) {
       console.error("Email send failed (row was still written): " + mailErr);
     }
@@ -276,6 +372,8 @@ function doPost(e) {
       lead_id: leadId,
       job_id: record.job_id,
       lead_action: leadResult.action,
+      property_action: propertyResult.action,
+      slot_action: slotResult.action,
       dropped_fields: write.noColumn,
       row: jobs.getLastRow(),
     });
@@ -313,7 +411,7 @@ function handleEvent(ss, data, eventType) {
 
 /** Health check — open the /exec URL in a browser. */
 function doGet() {
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-07-27 SCHEMA.md r4" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-07-28 r5" });
 }
 
 
@@ -508,6 +606,199 @@ function warnIfTextDate(currentValue, field) {
 
 
 /* ============================================================
+   5b. PROPERTIES UPSERT
+   One row per address. Header-driven, blank-fill only, never widens the tab.
+   ============================================================ */
+
+/**
+ * Create or complete the PROPERTIES row for this booking's address.
+ *
+ * Blank cells only, exactly like the LEADS upsert. An operator who has typed a
+ * neighbourhood, a property type or a known issue must never have it replaced
+ * by whatever a customer typed into a booking form.
+ *
+ * Never fatal. A booking is worth more than a property record, so a failure
+ * here is reported in the notification and the JOBS row is written regardless.
+ */
+function upsertProperty(ss, data, propertyKey) {
+  if (!isSet(propertyKey)) {
+    return { ok: true, action: "skipped", reason: "no property_key (no address given)" };
+  }
+
+  const sheet = ss.getSheetByName(PROPERTIES_TAB);
+  if (!sheet) throw new Error('Tab "' + PROPERTIES_TAB + '" not found.');
+  assertPropertiesWritable(PROPERTIES_TAB);
+
+  const headers = sheetHeaders(sheet);
+  if (!headers.length) throw new Error('Tab "' + PROPERTIES_TAB + '" has no header row.');
+
+  const col = {}, missing = [];
+  PROPERTIES_FIELDS.forEach(function (f) {
+    const i = headers.indexOf(propertiesHeaderFor(f));
+    if (i === -1) missing.push(propertiesHeaderFor(f)); else col[f] = i;
+  });
+  if (missing.length) console.log("PROPERTIES has no column for: " + missing.join(", ") + " — skipped.");
+
+  if (col.property_key === undefined) {
+    throw new Error('PROPERTIES has no "property_key" column — cannot match rows.');
+  }
+
+  const incoming = {
+    property_key: propertyKey,
+    address:      data.address || "",     // -> service_address
+    unit:         data.unit || "",
+    zip:          data.zip  || "",
+    bedrooms:     valOrBlank(data.bedrooms),
+    bathrooms:    valOrBlank(data.bathrooms),
+  };
+
+  const lastRow  = sheet.getLastRow();
+  const existing = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, headers.length).getValues() : [];
+
+  const needle = String(propertyKey).trim().toLowerCase();
+  let rowIndex = -1;
+  for (let i = 0; i < existing.length; i++) {
+    if (String(existing[i][col.property_key]).trim().toLowerCase() === needle) { rowIndex = i + 2; break; }
+  }
+
+  /* ---- No match: create ---- */
+  if (rowIndex === -1) {
+    const row = new Array(headers.length).fill("");
+    const written = [];
+    Object.keys(incoming).forEach(function (f) {
+      if (col[f] !== undefined && isSet(incoming[f])) { row[col[f]] = incoming[f]; written.push(f); }
+    });
+    sheet.appendRow(row);
+    return { ok: true, action: "created", property_key: propertyKey,
+             row: sheet.getLastRow(), fields: written, missing: missing };
+  }
+
+  /* ---- Match: fill blanks only ---- */
+  const current = existing[rowIndex - 2];
+  const filled = [];
+  Object.keys(incoming).forEach(function (f) {
+    if (col[f] === undefined) return;
+    if (isSet(current[col[f]])) return;            // never overwrite the operator
+    if (!isSet(incoming[f])) return;
+    sheet.getRange(rowIndex, col[f] + 1).setValue(incoming[f]);
+    filled.push(f);
+  });
+
+  return { ok: true, action: "matched", property_key: propertyKey,
+           row: rowIndex, fields: filled, missing: missing };
+}
+
+
+/* ============================================================
+   5c. AVAILABILITY WRITE-BACK  (Ops workbook)
+   ============================================================ */
+
+/**
+ * Mark the booked slot as taken so the next visitor cannot buy it twice.
+ *
+ * CONCURRENCY: doPost already holds the script lock for the whole execution, so
+ * this match-and-write is serialised against other runs of this script. A second
+ * waitLock() here would be redundant. What matters is that the read happens
+ * HERE, at write time, rather than trusting the client — the feed is cached for
+ * five minutes, so the visitor's view of availability is stale by construction.
+ *
+ * CONFLICT IS NOT AN ERROR. If no open row matches, someone took the slot inside
+ * that cache window. The booking is still written and the notification subject
+ * is flagged; a human resolves it. Refusing the booking would punish the
+ * customer for our caching.
+ *
+ * Returns { ok, action: booked|conflict|skipped|failed, ... }. Never throws.
+ */
+function bookAvailabilitySlot(sched, jobId) {
+  if (sched.shape !== "slot") {
+    return { ok: true, action: "skipped", reason: "not a specific slot (" + sched.shape + ")" };
+  }
+
+  try {
+    const ops = SpreadsheetApp.openById(OPS_SPREADSHEET_ID);
+    const av  = ops.getSheetByName(AVAILABILITY_TAB);
+    if (!av) throw new Error('Ops workbook "' + ops.getName() + '" has no ' + AVAILABILITY_TAB + ' tab.');
+    assertAvailabilityWritable(AVAILABILITY_TAB);
+
+    const headers = sheetHeaders(av);
+    const iDate = headers.indexOf("date"),
+          iTime = headers.indexOf("start_time"),
+          iStat = headers.indexOf("status"),
+          iJob  = headers.indexOf("job_id");
+
+    const missing = [];
+    if (iDate === -1) missing.push("date");
+    if (iTime === -1) missing.push("start_time");
+    if (iStat === -1) missing.push("status");
+    if (missing.length) {
+      throw new Error(AVAILABILITY_TAB + " is missing header(s): " + missing.join(", ") +
+                      ". Row 1 reads: " + headers.join(" | "));
+    }
+
+    const lastRow = av.getLastRow();
+    if (lastRow < 2) return { ok: true, action: "conflict", reason: "no availability rows" };
+
+    /* Read at write time, not from the customer's cached view. */
+    const rows = av.getRange(2, 1, lastRow - 1, headers.length).getValues();
+
+    for (let r = 0; r < rows.length; r++) {
+      const row = rows[r];
+      if (String(row[iStat]).trim().toLowerCase() !== SLOT_OPEN) continue;   // never touch `held`
+      if (slotDateKey(row[iDate]) !== sched.date) continue;
+      if (slotTimeLabel(row[iTime]) !== sched.time) continue;
+
+      const sheetRow = r + 2;
+      av.getRange(sheetRow, iStat + 1).setValue(SLOT_BOOKED);
+      if (iJob !== -1 && isSet(jobId)) av.getRange(sheetRow, iJob + 1).setValue(jobId);
+
+      return { ok: true, action: "booked", row: sheetRow,
+               cleaner: headers.indexOf("cleaner_id") !== -1 ? row[headers.indexOf("cleaner_id")] : "" };
+    }
+
+    return { ok: true, action: "conflict",
+             reason: 'no open row for ' + sched.date + ' ' + sched.time +
+                     ' — taken inside the 5-minute feed cache, or removed' };
+
+  } catch (err) {
+    console.error("AVAILABILITY write-back failed: " + err);
+    return { ok: false, action: "failed", error: String(err) };
+  }
+}
+
+/**
+ * Date cell -> "YYYY-MM-DD".
+ *
+ * MUST match ymd() in /apps-script/availability.gs. These are separate script
+ * projects so the code cannot be shared, and if the two ever disagree the match
+ * silently fails and every booking reports a conflict. Local getters, no
+ * timezone conversion, exactly as the feed does it.
+ */
+function slotDateKey(v) {
+  if (!(v instanceof Date)) return String(v).trim();
+  return v.getFullYear() + "-" +
+         ("0" + (v.getMonth() + 1)).slice(-2) + "-" +
+         ("0" + v.getDate()).slice(-2);
+}
+
+/**
+ * start_time cell -> "9:00 AM".
+ * MUST match parseTime()/clockLabel() in /apps-script/availability.gs.
+ */
+function slotTimeLabel(v) {
+  if (v instanceof Date) return clockLabelFor(v.getHours(), v.getMinutes());
+  const m = String(v == null ? "" : v).trim().match(/^(\d{1,2}):(\d{2})\s*([AP])\.?M\.?$/i);
+  if (!m) return String(v).trim();
+  const h24 = (+m[1]) % 12 + (/p/i.test(m[3]) ? 12 : 0);
+  return clockLabelFor(h24, +m[2]);
+}
+
+function clockLabelFor(h, mi) {
+  const h12 = (h % 12 === 0) ? 12 : (h % 12);
+  return h12 + ":" + ("0" + mi).slice(-2) + " " + (h < 12 ? "AM" : "PM");
+}
+
+
+/* ============================================================
    6. SCHEDULING
    ============================================================ */
 
@@ -669,6 +960,28 @@ function assertWritable(name) {
 }
 
 /**
+ * The ONE allowance for PROPERTIES, used only by upsertProperty().
+ *
+ * Written as a function that refuses everything except PROPERTIES rather than
+ * as a flag on assertWritable(), so the exception cannot widen. Passing any
+ * other tab name here throws — including the tabs it was meant to protect.
+ */
+function assertPropertiesWritable(name) {
+  if (normalizeTabName(name) !== normalizeTabName(PROPERTIES_TAB)) {
+    throw new Error('assertPropertiesWritable("' + name + '") — this allowance exists ' +
+                    'only for ' + PROPERTIES_TAB + '. Use assertWritable().');
+  }
+}
+
+/** The same narrow allowance for the Ops AVAILABILITY tab. */
+function assertAvailabilityWritable(name) {
+  if (normalizeTabName(name) !== normalizeTabName(AVAILABILITY_TAB)) {
+    throw new Error('assertAvailabilityWritable("' + name + '") — this allowance exists ' +
+                    'only for ' + AVAILABILITY_TAB + '. Use assertWritable().');
+  }
+}
+
+/**
  * @param map  key->header translation. HEADER_MAP is JOBS-specific, so EVENTS
  *             passes {} and matches on the raw payload names in its own header
  *             row. Applying the JOBS map everywhere silently dropped bedrooms,
@@ -753,16 +1066,43 @@ function eventsTab(ss) {
    9. EMAILS
    ============================================================ */
 
-function sendReservationEmail(data, sched, leadId, leadResult) {
-  const warn = (leadResult && leadResult.ok === false)
-    ? "\n*** LEADS UPSERT FAILED — the JOBS row was written anyway. ***\n" +
-      "*** " + leadResult.error + " ***\n" +
-      "*** Add the person to LEADS by hand. ***\n\n"
-    : "";
+function sendReservationEmail(data, sched, leadId, leadResult, propertyResult, slotResult) {
+  propertyResult = propertyResult || { action: "n/a" };
+  slotResult     = slotResult     || { action: "n/a" };
+
+  /* Anything needing a human goes at the very top, before the booking detail.
+     Buried at the bottom it would be read after the reader has decided the
+     email is routine. */
+  let warn = "";
+  if (leadResult && leadResult.ok === false) {
+    warn += "*** LEADS UPSERT FAILED — the JOBS row was written anyway. ***\n" +
+            "*** " + leadResult.error + " ***\n" +
+            "*** Add the person to LEADS by hand. ***\n\n";
+  }
+  if (slotResult.action === "conflict") {
+    warn += "*** SLOT CONFLICT — this time was already taken. ***\n" +
+            "*** " + (slotResult.reason || "") + " ***\n" +
+            "*** The booking IS recorded. Call the customer and move them, or ***\n" +
+            "*** find a second cleaner for the slot. They have not been told. ***\n\n";
+  }
+  if (slotResult.action === "failed") {
+    warn += "*** AVAILABILITY WRITE-BACK FAILED — the slot is still marked open. ***\n" +
+            "*** " + slotResult.error + " ***\n" +
+            "*** Mark it booked by hand or it can be sold again. ***\n\n";
+  }
+  if (propertyResult.ok === false) {
+    warn += "*** PROPERTIES UPSERT FAILED — no property record for this address. ***\n" +
+            "*** " + propertyResult.error + " ***\n\n";
+  }
+
+  const flags = [];
+  if (petsFlag(data))                          flags.push("PETS");
+  if (leadResult && leadResult.ok === false)   flags.push("LEADS WRITE FAILED");
+  if (slotResult.action === "conflict")        flags.push("SLOT CONFLICT");
+  if (slotResult.action === "failed")          flags.push("SLOT NOT MARKED");
 
   const subject = "Serve Reservation — " + (data.name || "Unknown") + " · " + homeSummary(data) +
-                  (petsFlag(data) ? " · PETS" : "") +
-                  ((leadResult && leadResult.ok === false) ? " · LEADS WRITE FAILED" : "");
+                  (flags.length ? " · " + flags.join(" · ") : "");
 
   const body =
     warn +
@@ -775,9 +1115,14 @@ function sendReservationEmail(data, sched, leadId, leadResult) {
     "Address: " + (data.address || "") + (isSet(data.unit) ? ", " + data.unit : "") + "\n" +
     "ZIP:     " + (data.zip || "") + " (" + (data.zip_tier || "") + ")\n\n" +
     "— RECORDS —\n" +
-    "lead_id:  " + leadId + "  (" + (leadResult ? leadResult.action : "?") + ")\n" +
-    "job_id:   " + makeJobId(data, sched) + "\n" +
-    "property: " + propertyKey(data) + "\n\n" +
+    "lead_id:    " + leadId + "  (" + (leadResult ? leadResult.action : "?") + ")\n" +
+    "job_id:     " + makeJobId(data, sched) + "\n" +
+    "property:   " + propertyKey(data) + "  (" + propertyResult.action + ")\n" +
+    "slot:       " + slotResult.action +
+      (slotResult.action === "booked"
+        ? " — AVAILABILITY row " + slotResult.row +
+          (isSet(slotResult.cleaner) ? ", cleaner " + slotResult.cleaner : "")
+        : (slotResult.reason ? " — " + slotResult.reason : "")) + "\n\n" +
     "— SERVICE —\n" +
     "Service:    " + serviceLabel(data) + "\n" +
     "Home:       " + homeSummary(data) + "\n" +
