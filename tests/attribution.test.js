@@ -5,7 +5,19 @@ const fs = require('fs');
 const vm = require('vm');
 
 const JS = fs.readFileSync(require('path').join(REPO_ROOT, 'script.js'), 'utf8');
-const slice = JS.slice(JS.indexOf('const SRC_SEGMENTS'), JS.indexOf('/* --- State --- */'));
+/* Two regions, because attribution now lives at module scope — the hero skin
+   needs it, so it cannot stay inside the booking IIFE — while newSubmissionId
+   and detectPets are still IIFE-local, being used only by the booking flow.
+   Splicing both keeps this testing the real code rather than a copy. */
+const modStart  = JS.indexOf('const SRC_SEGMENTS');
+const modEnd    = JS.indexOf('/* Read once per page load.');
+const iifeStart = JS.indexOf('    /* One id per submission');
+const iifeEnd   = JS.indexOf('    /* --- State --- */');
+if ([modStart, modEnd, iifeStart, iifeEnd].some(i => i === -1)) {
+  throw new Error('could not slice script.js — markers moved: ' +
+    JSON.stringify({ modStart, modEnd, iifeStart, iifeEnd }));
+}
+const slice = JS.slice(modStart, modEnd) + '\n' + JS.slice(iifeStart, iifeEnd);
 
 function fakeStorage() {
   const m = new Map();
@@ -28,33 +40,32 @@ const t = (label, got, want) => {
   if (!okp) { console.log('        expected ' + JSON.stringify(want)); bad++; }
 };
 
-console.log('=== segment derivation from the prefix table ===');
+/* Segment DERIVATION is owned by segment-and-skins.test.js — it is the intent
+   taxonomy and is asserted there alongside the hero skins that consume it.
+   Duplicating the table here is how two tests end up disagreeing about the
+   answer. This file owns persistence: what survives a refresh, a second tag,
+   and a hostile storage implementation. */
 const s = load('', fakeStorage());
-[['qr-allston-01','qr_code'], ['poster_back_bay_3','poster'], ['flyer/comm-ave','flyer'],
- ['ig-story-07','social'], ['fb-group-jp','social'], ['nd-brighton','nextdoor'],
- ['ref-jordan-m','referral'], ['gmb','google_business'], ['door-hanger-01','door_hanger'],
- ['mystery-tag','other'], [null,'direct'], ['','direct']].forEach(([src, want]) => {
-  t('src=' + JSON.stringify(src), s.segmentFor(src), want);
-});
 
-console.log('\n=== A1. does src survive a refresh? (the question you asked) ===');
+console.log('=== A1. does src survive a refresh? ===');
 const st1 = fakeStorage();
-const first = load('?src=qr-allston-01&utm_source=poster', st1).readAttribution();
-t('landing: src captured',       first.src,       'qr-allston-01');
-t('landing: first touch stored', first.src_first, 'qr-allston-01');
-t('landing: segment',            first.segment,   'qr_code');
+const first = load('?src=dh-bh-01&utm_source=poster', st1).readAttribution();
+t('landing: src captured',       first.src,       'dh-bh-01');
+t('landing: first touch stored', first.src_first, 'dh-bh-01');
+t('landing: segment',            first.segment,   'pro');
 // Refresh = same session, no query string.
 const refreshed = load('', st1).readAttribution();
-t('after refresh: src survives',        refreshed.src,       'qr-allston-01');
+t('after refresh: src survives',        refreshed.src,       'dh-bh-01');
 t('after refresh: utm survives',        refreshed.utm_source,'poster');
-t('after refresh: first touch survives',refreshed.src_first, 'qr-allston-01');
+t('after refresh: first touch survives',refreshed.src_first, 'dh-bh-01');
 
 console.log('\n=== A2. second tagged link mid-session (the real gap) ===');
-const second = load('?src=ig-story-07', st1).readAttribution();
-t('last touch moves to the new tag', second.src,       'ig-story-07');
-t('FIRST touch is NOT overwritten',  second.src_first, 'qr-allston-01');
-t('chain records both, in order',    second.src_chain, 'qr-allston-01>ig-story-07');
-t('segment still reflects first touch', second.segment, 'qr_code');
+const second = load('?src=deed-batch-04', st1).readAttribution();
+t('last touch moves to the new tag', second.src,       'deed-batch-04');
+t('FIRST touch is NOT overwritten',  second.src_first, 'dh-bh-01');
+t('chain records both, in order',    second.src_chain, 'dh-bh-01>deed-batch-04');
+// A deed tag arriving second must NOT reclassify a pro lead as a mover.
+t('segment still reflects first touch', second.segment, 'pro');
 console.log('  sessionStorage: ' + JSON.stringify(st1._dump()));
 
 console.log('\n=== A3. no tag at all ===');

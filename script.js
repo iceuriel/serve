@@ -140,6 +140,155 @@ function computeQuote(input) {
 
 
 /* ============================================================
+   ATTRIBUTION — src / segment / UTM
+   `src` is the tag printed on a poster, QR code, or door hanger:
+   servecleaning.com/?src=dh-bh-01
+
+   SEGMENT IS AN INTENT TAXONOMY, NOT A CHANNEL ONE.
+
+   Channel is already recorded twice — `source` holds the full first-touch
+   tag and `src_chain` holds every tag of the session — so recording it a
+   third time here would say nothing new. `segment` answers the different
+   question: what does this person actually need? That is what drives which
+   hero renders and which urgency copy applies.
+
+       movein   just closed on a home. Needs a first clean before moving in,
+                buys once, decides fast, price is not the objection.
+       pro      lives here already. The pitch is getting weekends back, and
+                the goal is a recurring plan, not a single job.
+       direct   intent unknown. Never guess it — the default hero makes no
+                assumption, which is the correct behaviour when we know
+                nothing.
+
+   EDIT ME: one row per tag prefix you print. Matching is on the first
+   segment of the tag, split on - _ . / and case-insensitive, so
+   `dh-bh-01`, `DH_backbay` and `dh` all match `dh`.
+
+   An unrecognised tag falls to `direct` on the same reasoning as referral:
+   we do not know the intent, and inventing one puts a wrong hero in front
+   of a real customer. Nothing is lost — `source` keeps the full tag, so any
+   row can be reclassified later once the tag's meaning is settled.
+   ============================================================ */
+const SRC_SEGMENTS = [
+    // Deed lists and recent-buyer outreach — they just closed.
+    ['deed',   'movein'],
+    ['db',     'movein'],   // deed batch
+    ['mv',     'movein'],
+
+    // Neighbourhood physical media in dense professional areas.
+    ['dh',     'pro'],      // door hanger
+    ['poster', 'pro'],
+    ['qr',     'pro'],
+    ['flyer',  'pro'],
+    ['eddm',   'pro'],      // every-door direct mail
+
+    // Cold email to the professional segment.
+    ['email',  'pro'],
+    ['em',     'pro'],
+
+    // Referral — a real person sent them, but we do not know why.
+    ['ref',    'direct'],
+];
+
+const SEGMENTS = ['movein', 'pro', 'direct'];
+
+function segmentFor(src) {
+    if (!src) return 'direct';
+    const head = String(src).toLowerCase().split(/[-_./]/)[0];
+    const hit = SRC_SEGMENTS.find(pair => pair[0] === head);
+    return hit ? hit[1] : 'direct';
+}
+
+/**
+ * Read once per page load, persist for the session.
+ *
+ * `src` / `utm_*` keep their original last-touch behaviour: a URL param wins,
+ * otherwise the stored value carries through a refresh or a back-button hop.
+ * Layered on top: `serve_src` is the FIRST tag of the session and is never
+ * overwritten, and `serve_src_chain` records every distinct tag in order — so
+ * a second tagged link can no longer erase the one that actually earned the visit.
+ */
+function readAttribution() {
+    let saved = {};
+    try { saved = JSON.parse(sessionStorage.getItem('serve_attr') || '{}'); } catch (_) {}
+    const params = new URLSearchParams(location.search);
+    const keys = ['src', 'utm_source', 'utm_medium', 'utm_campaign'];
+    const attr = {};
+    keys.forEach(k => { attr[k] = params.get(k) || saved[k] || null; });
+    try { sessionStorage.setItem('serve_attr', JSON.stringify(attr)); } catch (_) {}
+
+    const urlSrc = params.get('src');
+    let firstSrc = null;
+    let chain = [];
+    try {
+        firstSrc = sessionStorage.getItem('serve_src');
+        if (!firstSrc && attr.src) {
+            firstSrc = attr.src;
+            sessionStorage.setItem('serve_src', firstSrc);   // first touch — write once
+        }
+        chain = (sessionStorage.getItem('serve_src_chain') || '').split('>').filter(Boolean);
+        if (urlSrc && chain[chain.length - 1] !== urlSrc) {
+            chain.push(urlSrc);
+            sessionStorage.setItem('serve_src_chain', chain.join('>'));
+        }
+    } catch (_) { /* private mode / storage disabled — degrade to last-touch only */ }
+
+    attr.src_first = firstSrc || attr.src || null;
+    attr.src_chain = chain.length ? chain.join('>') : (attr.src || null);
+    attr.segment   = segmentFor(attr.src_first);
+    return attr;
+}
+
+/* Read once per page load. The hero skin and the booking flow read this same
+   object, so `segment` can never disagree between what a visitor is shown and
+   what is written to the sheet. */
+const SERVE_ATTRIBUTION = readAttribution();
+
+
+/* ============================================================
+   HERO SKIN — headline varies by intent segment
+
+   Same page, same offer, same CTA. Only the headline changes, because that is
+   the line deciding whether someone reads the second one.
+
+   Selection is FIRST touch, never last. Someone who arrives on a deed link and
+   later scans a poster QR is still a mover — the poster did not change why they
+   need a clean, and flipping the hero mid-session would be disorienting.
+
+   `direct` has no entry and gets the markup as authored. Any failure — unknown
+   segment, storage blocked, missing element — leaves the default in place,
+   which is why the default lives in the HTML rather than being rendered here.
+
+   Redirect stubs /movein and /clean land here with a src tag attached, so the
+   skin and the attribution both come from the one normal first-touch path.
+   See _redirects.
+   ============================================================ */
+const HERO_SKINS = {
+    movein: {
+        headline: 'Just closed on a new home? It was cleaned for the last owner — not for you. Start fresh with Serve.',
+    },
+    pro: {
+        headline: 'Come back Friday to a clean home. Get your weekends back with Serve.',
+    },
+};
+
+function applyHeroSkin(segment) {
+    try {
+        const skin = HERO_SKINS[segment];
+        if (!skin) return;                                  // 'direct' and anything unexpected
+        const el = document.querySelector('.hero__headline');
+        if (!el) return;
+        el.textContent = skin.headline;
+        document.body.setAttribute('data-segment', segment);   // hook for styling / analytics
+    } catch (_) {
+        /* Never let a headline swap break the page. The authored hero stands. */
+    }
+}
+
+applyHeroSkin(SERVE_ATTRIBUTION.segment);
+
+
+/* ============================================================
    Booking Flow — Build -> Price -> Reserve
    ============================================================ */
 (function () {
@@ -209,76 +358,6 @@ function computeQuote(input) {
         'Inside the oven &mdash; included, not an add-on',
     ];
 
-    /* ============================================================
-       ATTRIBUTION — src / segment / UTM
-       `src` is the tag printed on a poster, QR code, or link:
-       servecleaning.com/?src=qr-allston-01
-
-       EDIT ME: add one row per tag prefix you print. Matching is on the first
-       segment of the tag (split on - _ . /), case-insensitive. A tag that
-       matches nothing lands in 'other'; no ?src at all is 'direct'.
-       ============================================================ */
-    const SRC_SEGMENTS = [
-        ['qr',     'qr_code'],
-        ['poster', 'poster'],
-        ['flyer',  'flyer'],
-        ['door',   'door_hanger'],
-        ['ig',     'social'],
-        ['fb',     'social'],
-        ['tt',     'social'],
-        ['nd',     'nextdoor'],
-        ['ref',    'referral'],
-        ['gmb',    'google_business'],
-        ['email',  'email'],
-    ];
-
-    function segmentFor(src) {
-        if (!src) return 'direct';
-        const head = String(src).toLowerCase().split(/[-_./]/)[0];
-        const hit = SRC_SEGMENTS.find(pair => pair[0] === head);
-        return hit ? hit[1] : 'other';
-    }
-
-    /**
-     * Read once per page load, persist for the session.
-     *
-     * `src` / `utm_*` keep their original last-touch behaviour: a URL param wins,
-     * otherwise the stored value carries through a refresh or a back-button hop.
-     * Layered on top: `serve_src` is the FIRST tag of the session and is never
-     * overwritten, and `serve_src_chain` records every distinct tag in order — so
-     * a second tagged link can no longer erase the one that actually earned the visit.
-     */
-    function readAttribution() {
-        let saved = {};
-        try { saved = JSON.parse(sessionStorage.getItem('serve_attr') || '{}'); } catch (_) {}
-        const params = new URLSearchParams(location.search);
-        const keys = ['src', 'utm_source', 'utm_medium', 'utm_campaign'];
-        const attr = {};
-        keys.forEach(k => { attr[k] = params.get(k) || saved[k] || null; });
-        try { sessionStorage.setItem('serve_attr', JSON.stringify(attr)); } catch (_) {}
-
-        const urlSrc = params.get('src');
-        let firstSrc = null;
-        let chain = [];
-        try {
-            firstSrc = sessionStorage.getItem('serve_src');
-            if (!firstSrc && attr.src) {
-                firstSrc = attr.src;
-                sessionStorage.setItem('serve_src', firstSrc);   // first touch — write once
-            }
-            chain = (sessionStorage.getItem('serve_src_chain') || '').split('>').filter(Boolean);
-            if (urlSrc && chain[chain.length - 1] !== urlSrc) {
-                chain.push(urlSrc);
-                sessionStorage.setItem('serve_src_chain', chain.join('>'));
-            }
-        } catch (_) { /* private mode / storage disabled — degrade to last-touch only */ }
-
-        attr.src_first = firstSrc || attr.src || null;
-        attr.src_chain = chain.length ? chain.join('>') : (attr.src || null);
-        attr.segment   = segmentFor(attr.src_first);
-        return attr;
-    }
-
     /* One id per submission. Sent as submission_id so the Apps Script can skip a
        row it has already written — which is what makes the Addition E retry safe. */
     function newSubmissionId() {
@@ -313,7 +392,7 @@ function computeQuote(input) {
         slotDate: null,
         slotTime: null,
         quote: null,
-        attribution: readAttribution(),
+        attribution: SERVE_ATTRIBUTION,   // shared with the hero skin
     };
 
     /* ============================================================

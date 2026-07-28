@@ -1444,6 +1444,28 @@ a {
     line-height: 1.6;
 }
 
+/* The 15-minute promise. Quieter than the confirmation itself, but it has to be
+   readable — it is the only thing telling a customer that silence is a fault. */
+.flow-confirm__promise {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid #86efac;
+    font-size: 0.95rem !important;
+}
+
+.flow-confirm__promise a {
+    color: #166534;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    font-weight: 600;
+}
+
+.flow-confirm__promise a:focus-visible {
+    outline: 2px solid #166534;
+    outline-offset: 3px;
+    border-radius: 2px;
+}
+
 
 /* ============================================================
    BOOKING FLOW — Responsive (640px+)

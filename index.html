@@ -461,6 +461,21 @@
                     <div class="flow-confirm__mark" aria-hidden="true">&check;</div>
                     <h2>You're on the schedule.</h2>
                     <p id="confirm-copy">We'll reach out shortly to confirm your exact arrival window.</p>
+
+                    <!-- The 15-minute promise is the tripwire for a silent write failure.
+                         If the sheet write fails, no row is created and no notification
+                         email is sent either — so without a stated expectation the
+                         customer waits for a cleaner who was never booked, and finds out
+                         on the day. A precise window turns silence into something they
+                         notice and act on.
+                         TODO(twilio): add the Serve number here once provisioned, so the
+                         fallback is a text rather than an email. Contact details must
+                         match the footer exactly — see tests/static-checks. -->
+                    <p class="flow-confirm__promise">
+                        You'll get a confirmation email within 15 minutes. If it doesn't arrive,
+                        email <a href="mailto:servehomecleaning@gmail.com">servehomecleaning@gmail.com</a>
+                        and we'll sort it out.
+                    </p>
                 </div>
             </div>
 

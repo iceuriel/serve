@@ -1,0 +1,16 @@
+# Vanity URLs for printed material and campaigns.
+#
+# Read from the publish directory by both Cloudflare and Netlify.
+#
+# Each lands on the index page carrying a src tag, so the hero skin and the
+# attribution both come from the ONE normal first-touch path — there is no
+# second mechanism that could disagree with the sheet. The prefix is what
+# selects the segment, per SRC_SEGMENTS in script.js:
+#
+#   deed- -> movein      dh- -> pro       (no tag) -> direct
+#
+# 302, not 301: these are marketing URLs and a permanently cached redirect is
+# painful to undo once browsers have it.
+
+/movein   /?src=deed-movein   302
+/clean    /?src=dh-clean      302
