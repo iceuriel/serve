@@ -10,6 +10,11 @@
  * the deployed copy is stale. Bump this on every behavioural change, not just
  * schema changes — that is the whole point of it.
  *
+ * Editor-only functions (testPayload, cleanupTestRows, reportLeadsSchema,
+ * findOpenSlot) do NOT bump the stamp. They never run in a deployment, so a
+ * change to them cannot make a deployed copy stale, and bumping would raise a
+ * false alarm on a request path that is byte-identical.
+ *
  * Repo source of truth: /apps-script/webhook.gs
  * Column meanings and ownership: /docs/SCHEMA.md — that file is authoritative.
  * ==================================================================
@@ -90,10 +95,13 @@
  *      getLastColumn, getRange().getValues() and console.log, nothing else. It
  *      creates no tab, no column and no cell, and sends no email. Confirms this
  *      project is attached to the workbook you think it is.
- *   2. Run testPayload(). Writes both scheduling shapes, a repeat-customer
- *      booking and an idempotency replay. From r5 this ALSO writes PROPERTIES
- *      and flips an AVAILABILITY row, so expect test rows in three tabs across
- *      two workbooks. Delete them afterwards.
+ *   2. Run testPayload(). Writes both scheduling shapes, a repeat customer, a
+ *      move-out, a same-slot clash and an idempotency replay, across four tabs
+ *      in two workbooks. IT LEAVES THE ROWS IN PLACE ON PURPOSE — the log only
+ *      proves the calls returned ok, and everything worth checking (notes
+ *      populated, pets_flag, add_on_rev 0 on a move-out, source_history
+ *      appended) is visible in the sheet or nowhere. The log prints exactly
+ *      what to look at. Run cleanupTestRows() when you are done.
  *   3. Authorize when prompted. r5 opens a second spreadsheet by id, which is a
  *      new scope — an existing deployment WILL re-prompt.
  *   4. Deploy. For the EXISTING deployment use
@@ -1543,8 +1551,49 @@ function testPayload() {
   console.log("idempotency replay -> " +
               doPost({ postData: { contents: JSON.stringify(slot) } }).getContent());
 
+  /* DELIBERATELY NOT CLEANING UP HERE.
+     An earlier version called cleanupTestRows() at the end. It deleted the rows
+     about six seconds after writing them — before anyone could look at the
+     sheet, which is the entire reason to run this by hand. The execution log
+     only proves the calls returned ok; it says nothing about whether `notes` is
+     populated, whether pets_flag is TRUE, or whether add_on_rev is 0 on the
+     move-out. Those are visible in the sheet or nowhere. */
   console.log("");
-  cleanupTestRows();
+  console.log("=== ROWS ARE STILL IN THE SHEETS — GO AND LOOK ===");
+  console.log("");
+  console.log("JOBS — the five rows tagged " + TEST_PREFIX + stamp);
+  console.log("  notes           populated on EVERY row, both scheduling shapes.");
+  console.log("                  This is the bug the whole rebuild started from.");
+  console.log("  customer_notes  the customer's words only, never merged into notes.");
+  console.log("  pets_flag       TRUE on the dog rows, FALSE on the no-pets one.");
+  console.log("  add_on_rev      0 on the move-out row, NOT 85 — fridge and oven are");
+  console.log("                  bundled into that multiplier.");
+  console.log("  scheduled_date  filled on the slot row, blank on the preference rows.");
+  console.log("  start_time      a real window on the slot row, the preference label");
+  console.log("                  on the others — never blank.");
+  console.log("  ops columns     completed_date, cleaner, duration_min, photos_passed,");
+  console.log("                  payment_status all still empty.");
+  console.log("");
+  console.log("LEADS — four rows, one per distinct email");
+  console.log("  the repeat booking did NOT create a fifth: same person, matched.");
+  console.log("  source_history  'dh-bh-01, ref-jordan-m' on the repeat customer.");
+  console.log("  first_touch     a real date, IDENTICAL before and after the repeat.");
+  console.log("  last_touch      a real date, LATER than first_touch on that row.");
+  console.log("  operator columns (status, dnc_scrub, ltv, notes...) still empty.");
+  console.log("");
+  console.log("PROPERTIES — exactly ONE row for " + TEST_ADDRESS);
+  console.log("  five bookings, one property. beds/baths/zip filled, deed and");
+  console.log("  operator columns untouched.");
+  if (open) {
+    console.log("");
+    console.log("OPS / AVAILABILITY row " + open.row + " — status 'booked', job_id set.");
+    console.log("  The clash booking did NOT flip a second row.");
+  }
+  console.log("");
+  console.log("Also check your inbox: 5 emails, one subject with · SLOT CONFLICT.");
+  console.log("");
+  console.log(">>> WHEN YOU ARE DONE LOOKING, RUN  cleanupTestRows()  <<<");
+  console.log("    It removes every row above and reopens the slot.");
 }
 
 /**
