@@ -1,11 +1,148 @@
-# SERVE — Build handoff, 2026-07-27
+# SERVE — Build handoff
 
 **Purpose:** hand the current state of the system to another person or another
 assistant with no access to this repo. Self-contained on purpose.
 
-**State:** merged to `master` and live. Merge commit `487bb1f`, docs `a96a2f4`.
 **Companion doc:** `/docs/SCHEMA.md` — authoritative for every column's meaning
 and who writes it. This file is the narrative; that file is the contract.
+
+**Latest session: 2026-07-28.** Jump to
+[what changed on 2026-07-28](#session-2026-07-28) for the current state. The
+sections below it describe the 2026-07-27 build and remain accurate except where
+that section supersedes them.
+
+---
+
+## Session 2026-07-28
+
+Seven planned tasks, plus an unplanned privacy migration that took priority.
+
+### The site moved hosts and the repo went private
+
+**This was not planned work.** While adding `/tests` I checked what the GitHub
+Pages workflow published and found `path: .` — the whole repository. Verified
+live: `servecleaning.com/IDENTITY.md` returned HTTP 200. A personal profile —
+name, university, employers, business strategy — was readable on the business's
+own marketing domain, along with `CLAUDE.md`, the data schema and the Apps
+Script source. It had been that way since the repo was first published.
+
+The repo was also public, so deleting files would not have removed them from
+history, and the free plan requires a public repo for Pages.
+
+What was done, in order, with no downtime:
+
+1. `IDENTITY.md` moved out of the repo to `~/.claude/serve-private/`.
+2. The notification address moved from a hardcoded constant to a Script
+   Property, read by `notifyEmail()` with a fallback to the executing account.
+3. Every personal identifier purged from **all 47 commits on both branches**
+   with `git filter-branch`, verified term by term, then force-pushed. A mirror
+   backup was taken first.
+4. Site rebuilt onto **Cloudflare Workers** with an allow-list publish. DNS was
+   already on Cloudflare, which made this simpler than the Netlify route
+   originally recommended — that recommendation rested on avoiding a nameserver
+   move that had already happened.
+5. GitHub repo made **private**. Cloudflare keeps deploying via OAuth.
+6. GitHub Pages workflow and `CNAME` removed — a dormant workflow would
+   re-publish the repo root on the next push, which is the dangerous kind.
+
+**A near-miss worth knowing:** the first Cloudflare deploy read **2235 files**
+from the repo root and only failed because a 122 MiB binary in `node_modules`
+exceeded the asset size limit. `wrangler deploy` auto-detects the output
+directory as `.` when unconfigured. Had the repo been slightly smaller,
+everything would have gone straight back up. `wrangler.jsonc` now pins
+`assets.directory: "./_site"` and that is the single most load-bearing file in
+the repo for privacy.
+
+Four mechanisms now enforce this and all four matter:
+`scripts/build-site.sh` (the allow-list), `wrangler.jsonc` (the asset pin),
+`.gitignore`, and `tests/privacy.test.js`, which fails `npm test` if any of the
+others drift.
+
+### The test suite is now in the repo
+
+Eight harnesses from the previous build lived only in a temporary scratchpad.
+They are now `/tests`, run by `npm test`, with repo-relative paths so they work
+from a clean clone. **Eleven files, no dependencies, no framework** — they
+execute the real source, including running each `.gs` inside a `vm` with
+simulated Sheets and an audited write trail, so a test can assert *how many*
+writes happened and to which cells.
+
+`gs-harness.js` was deliberately not carried over: it asserted the pre-Part-7
+contract where `notes` was a blob holding pets and contact details. That was
+replaced on purpose, so the file tested a contract that no longer exists.
+
+### `segment` is an intent taxonomy
+
+Resolved to `movein · pro · direct`. Channel was already recorded twice —
+`source` holds the full first-touch tag, `src_chain` holds every tag — so a
+third channel field said nothing new. `segment` now answers what the person
+*needs*, which is what selects the hero. Full prefix table in `SCHEMA.md`.
+
+No backfill was needed: `JOBS.segment` held `direct ×1` and blank ×12, with no
+channel values anywhere.
+
+### Hero skins and vanity URLs
+
+Two headline variants selected by **first** touch — a visitor who arrives on a
+deed link and later scans a poster QR keeps the mover headline, because the
+poster did not change why they need a clean. Only the headline varies; the CTA
+is `Instant quote` everywhere, asserted by test. The default hero lives in the
+HTML rather than being rendered by JS, so an unknown segment, blocked storage or
+a missing element all leave the authored page standing.
+
+`/movein` and `/clean` redirect to the index carrying a `src` tag, so the skin
+and the attribution come from the one normal first-touch path rather than a
+second mechanism that could disagree with the sheet.
+
+Attribution moved to module scope so the hero and the booking flow read one
+`SERVE_ATTRIBUTION` object. `segment` cannot differ between what a visitor sees
+and what is written.
+
+### The 15-minute promise
+
+The confirmation panel now says a confirmation email arrives within 15 minutes,
+with the footer's existing address as the fallback. No phone number was added;
+a `TODO(twilio)` marks the swap.
+
+The 15 minutes is the whole point. When a write fails there is no row **and** no
+notification email, so from the customer's side a failed booking is
+indistinguishable from a successful one — forever. A stated window turns silence
+into something they notice and act on.
+
+### PROPERTIES and slot write-back
+
+Both described fully in `SCHEMA.md`. The shape worth remembering:
+
+**A reservation now touches four tabs across two workbooks**, and **only the
+JOBS write can fail the request.** LEADS, PROPERTIES and AVAILABILITY all run
+after the booking is safely recorded; each failure is reported in the
+notification subject and none reaches the customer.
+
+`PROPERTIES` and `AVAILABILITY` stay on the protected list. Each has a narrow
+allowance — `assertPropertiesWritable()`, `assertAvailabilityWritable()` — that
+throws for any tab other than its own, so the exception cannot widen.
+
+**A slot conflict is not an error.** If someone takes a slot inside the
+five-minute feed cache, the booking is still written and the subject carries
+`· SLOT CONFLICT`. Refusing it would punish the customer for our caching.
+
+### Two things the live runs taught us
+
+**The test fixture was dead.** `testPayload` hardcoded `2026-08-14` at
+`"9-11 AM"` — a date and a window-style time that never existed in
+`AVAILABILITY`, which publishes single start times. Every run reported a
+conflict and the happy path was never exercised once. It now reads the sheet and
+books a genuinely open slot, preferring a future one.
+
+**Auto-cleanup destroyed the evidence.** A version of `testPayload` deleted its
+rows six seconds after writing them, before anyone could look at the sheet —
+which is the entire reason to run it by hand. The log only proves the calls
+returned ok; whether `notes` is populated is visible in the sheet or nowhere.
+It now leaves the rows and prints a checklist; `cleanupTestRows()` is run
+separately when you are done.
+
+Both were caught because Uriel questioned output that looked wrong. Neither was
+a bug in the writes — both were instrumentation that hid the truth.
 
 ---
 
@@ -15,7 +152,8 @@ Serve is an early-stage home cleaning business in Greater Boston. No platform, n
 backend, no database. The whole product is:
 
 - **A single static page** — `index.html` + `script.js` + `style.css`, vanilla,
-  no frameworks, served by GitHub Pages at `servecleaning.com`.
+  no frameworks, served by Cloudflare Workers at `servecleaning.com` from a
+  PRIVATE GitHub repo, publishing an allow-list (see the 2026-07-28 section).
 - **Two Google Apps Script web apps**, each bound to a different spreadsheet.
 - **Two Google Sheets** doing the work a database would.
 
@@ -199,7 +337,7 @@ not depend on a project setting nobody remembers to check.
 | Spreadsheet | Leads MASTER | Ops |
 | Constant | `SHEETS_URL`, `script.js` ~155 | `AVAILABILITY_SOURCE_URL`, `script.js` ~174 |
 | Deployment id starts | `AKfycbxVWfrn2Mos…` | `AKfycbzumNZZ9KI5…` |
-| Version | `2026-07-27 SCHEMA.md r4` | `2026-07-27 avail r2` |
+| Version | `2026-07-28 r6` | `2026-07-27 avail r2` |
 | Dry-run in editor | `reportLeadsSchema()` → `testPayload()` | `testAvailability()` |
 
 Both deployed **Execute as: Me**, **Access: Anyone**. Anything else and the
@@ -245,56 +383,29 @@ most of its effort eliminating.
 
 Roughly in priority order.
 
-### 5a. Slot write-back — double-booking is possible today · HIGHEST
+### 5a. Clear the stale `open` rows in AVAILABILITY · trivial, do it first
 
-Nothing marks a slot as taken. `status` in `AVAILABILITY` is the only source of
-truth for whether a slot is free, and the booking flow only reads it. After every
-reservation somebody must set that row to `booked` by hand, or the same slot
-stays bookable by the next visitor.
+Not code. `AVAILABILITY` accumulates past-dated rows that stay `open` forever
+because nothing expires them. Customers never see them — the feed's 18-hour lead
+time hides them — but anything scanning for "an open slot" finds them first, as
+`testPayload` did on 2026-07-28 when it booked a slot three days in the past.
+Delete or close them.
 
-Every slot currently published is **one cleaner deep**, so a single booking
-exhausts it and the second customer is a real conflict, not a queue.
+### 5b. Nothing releases a slot on cancellation · next real build
 
-The fix: have the webhook flip the matching `AVAILABILITY` row. That needs it to
-reach the **Ops** spreadsheet as well as Leads MASTER — `SpreadsheetApp.openById`
-with the Ops ID added to config. Watch for: matching the right row (date + time +
-an open cleaner), and what to do when two people book the same slot within the
-5-minute cache window. A script lock plus a re-read at write time is probably
-enough at this volume.
+Write-back marks a slot `booked`, but if a booking is cancelled the row stays
+booked forever. The `job_id` written back is the handle for undoing it; no code
+does that yet. This is the natural follow-on to the write-back and gets more
+urgent as soon as a real customer cancels.
 
-### 5b. The `segment` vocabulary conflict · quick, blocked on a decision
+### 5c. Slot depth is one cleaner deep · roster, not code
 
-`SCHEMA.md` defines `segment` as `movein · pro · direct`. The site currently
-emits a channel taxonomy instead — `qr_code`, `poster`, `flyer`, `door_hanger`,
-`social`, … — because the real mapping was lost to a truncated paste.
+Write-back prevents a slot being sold twice, but with a single `open` row per
+time a conflict is still a genuine clash rather than a queue. More
+`AVAILABILITY` rows per time means `open: 2+` and real resilience. You cannot
+publish depth that does not exist, so this resolves as the roster fills.
 
-Both are internally consistent; they answer different questions. Nothing is lost
-either way, since `source` keeps the full first-touch tag and `src_chain` keeps
-every tag, so `segment` is recomputable for every historical row.
-
-**To resolve:** say which `src` prefixes mean `movein` and which mean `pro`.
-`SRC_SEGMENTS` in `script.js` (~line 226) becomes that table with `direct` as the
-default. Two lines.
-
-### 5c. Preserve the test harnesses · cheap, high regret if skipped
-
-This build was validated by eight Node harnesses that exercise the real code —
-the payload builder, the attribution logic, the Apps Script against a simulated
-sheet, and the availability feed's output fed through the site's own filter.
-They caught several genuine bugs.
-
-**They currently live in a temporary scratchpad and will be lost.** Moving them
-to `/tests` with a one-line npm script would make every future change cheap to
-verify instead of re-derived from scratch. Nothing else in the repo is tested.
-
-### 5d. `PROPERTIES` is never written
-
-`property_key` (`ZIP-ADDRESS-UNIT`, normalized) is generated on every booking as
-a join key, but no property record is ever created. The tab is the intended
-durable asset — customers are transient, addresses aren't — and it is currently
-empty. Worth doing before there is enough job history to backfill painfully.
-
-### 5e. Finish the LEADS schema
+### 5d. Finish the LEADS schema
 
 Five columns are still `TO DEFINE`: `source_detail`, `contacted_via`, `status`,
 `first_variant`, `dnc_scrub`. The rule in `SCHEMA.md`: scroll the column — if it
@@ -304,20 +415,32 @@ meaning is unresolved.
 
 `ltv` also has no formula. It should sum `final_price` in JOBS per `lead_id`.
 
+### 5e. `PROPERTIES` is only half populated
+
+The webhook now writes six columns on every booking, but `neighborhood`,
+`property_type` and the deed fields still come from nowhere. Promoting
+`RAW_INTAKE` rows into `PROPERTIES` is the obvious next step — the deed data is
+already sitting there.
+
 ### 5f. Operational, not code
 
-- **Cleaner capacity.** Every published slot is one deep. More `AVAILABILITY`
-  rows per slot means `open: 2+` and real resilience to a double booking.
-- **Stale slots.** Nothing expires a slot that has passed; the 18-hour lead time
-  handles the near edge, but rows accumulate.
 - **The 5-minute cache.** A row added to `AVAILABILITY` takes up to five minutes
-  to appear. `?nocache=1` bypasses it.
+  to appear on the site. `?nocache=1` bypasses it for checking.
+- **Test rows.** `testPayload()` leaves its rows deliberately so you can inspect
+  them. Run `cleanupTestRows()` afterwards or they accumulate.
 
-### 5g. Unrecovered from the original spec
+### 5g. The real ceiling, when you get there
 
-Part of the original build instructions was lost to a truncated paste — the
-"skins" and "redirects" sub-items of Task 1. They were never recovered and never
-built. If they mattered, they need re-specifying.
+Hosting and schema are solved for now. The thing that will actually break is
+**Google Sheets as the database** — no transactions, no real locking, no
+relational integrity. The slot write-back papers over the worst symptom.
+
+Do not move early: Sheets is readable, the ops team is one person, and data can
+be fixed by hand. **The signal is when manual correction becomes weekly rather
+than occasional.** At that point the booking webhook becomes a real endpoint
+over a real database — Supabase or Postgres — with Sheets demoted to a read-only
+view. Cloudflare Workers was chosen partly so that step is a file in this repo
+rather than a fourth vendor.
 
 ---
 
