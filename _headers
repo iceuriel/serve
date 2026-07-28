@@ -20,6 +20,12 @@
 # classic script without a declared charset only inherits the document encoding
 # by convention. Undeclared, those render as mojibake on the two strings a
 # customer is most likely to be looking at.
+# Both paths: "/" and "/index.html" are matched separately, and almost every
+# real visitor arrives on "/".
+/
+  Content-Type: text/html; charset=utf-8
+  Cache-Control: public, max-age=0, must-revalidate
+
 /index.html
   Content-Type: text/html; charset=utf-8
   Cache-Control: public, max-age=0, must-revalidate

@@ -90,19 +90,22 @@ t('recipient read from Script Properties',
   /PropertiesService\.getScriptProperties\(\)\.getProperty\("NOTIFY_EMAIL"\)/.test(wh));
 t('no hardcoded NOTIFY_EMAIL constant', !/const\s+NOTIFY_EMAIL\s*=\s*["']/.test(wh));
 
-/* ---------- 4. the deploy artifact is an allow-list ---------- */
-console.log('\n=== 4. deploy workflow publishes an allow-list ===');
-const wf = fs.readFileSync(path.join(REPO_ROOT, '.github', 'workflows', 'deploy-pages.yml'), 'utf8');
-t('does NOT upload the whole repo', !/path:\s*\.\s*$/m.test(wf));
-t('uploads a staged directory', /path:\s*\.\/_site/.test(wf));
-t('has a guard step that fails on private file types', /Fail if anything private/.test(wf));
-
-['index.html', 'script.js', 'style.css', 'images', 'CNAME'].forEach(a =>
-  t('artifact includes ' + a, wf.includes(a)));
-['docs', 'tests', 'apps-script', 'CLAUDE.md', 'package.json'].forEach(p => {
-  const staged = new RegExp('cp\\s+(-r\\s+)?[^\\n]*\\b' + p.replace('.', '\\.') + '\\b[^\\n]*_site').test(wf);
-  t('artifact excludes ' + p, !staged);
+/* ---------- 4. no dormant publisher can wake up and republish ---------- */
+console.log('\n=== 4. no second publish path exists ===');
+/* The GitHub Pages workflow was removed at the Cloudflare cutover. A dormant
+   workflow is dangerous: pushing to master would re-publish the repo root from
+   a config nobody is looking at any more. If one is ever re-added, it must use
+   the same allow-list. */
+const wfDir = path.join(REPO_ROOT, '.github', 'workflows');
+const workflows = fs.existsSync(wfDir) ? fs.readdirSync(wfDir) : [];
+t('no GitHub Pages workflow (Cloudflare is the only publisher)',
+  !workflows.some(f => /pages/i.test(f)), workflows);
+workflows.forEach(f => {
+  const y = fs.readFileSync(path.join(wfDir, f), 'utf8');
+  t(f + ' does not upload the repo root', !/path:\s*\.\s*$/m.test(y));
 });
+t('no CNAME file (GitHub Pages artifact, misleading on Cloudflare)',
+  !fs.existsSync(path.join(REPO_ROOT, 'CNAME')));
 
 /* ---------- 4b. the shared build script is an allow-list ---------- */
 console.log('\n=== 4b. scripts/build-site.sh publishes an allow-list ===');
