@@ -104,6 +104,24 @@ t('has a guard step that fails on private file types', /Fail if anything private
   t('artifact excludes ' + p, !staged);
 });
 
+/* ---------- 4b. the Netlify build is an allow-list too ---------- */
+console.log('\n=== 4b. Netlify publishes an allow-list ===');
+const ntPath = path.join(REPO_ROOT, 'netlify.toml');
+if (!fs.existsSync(ntPath)) {
+  console.log('  --    no netlify.toml; skipping (not the active host)');
+} else {
+  const nt = fs.readFileSync(ntPath, 'utf8');
+  t('publishes a staged directory, not the repo root', /publish\s*=\s*"_site"/.test(nt));
+  t('does NOT publish the repo root', !/publish\s*=\s*"\.?"/.test(nt));
+  t('build guards against private file types', /ERROR: private-looking files/.test(nt));
+  ['index.html', 'script.js', 'style.css', 'images'].forEach(a =>
+    t('stages ' + a, new RegExp('cp\\s+(-r\\s+)?[^\\n]*' + a.replace('.', '\\.')).test(nt)));
+  ['docs', 'apps-script', 'tests'].forEach(p =>
+    t('never stages ' + p, !new RegExp('cp\\s+(-r\\s+)?[^\\n]*\\b' + p + '\\b[^\\n]*_site').test(nt)));
+  t('index.html revalidates so a booking fix cannot sit in caches',
+    /for = "\/index\.html"[\s\S]{0,120}must-revalidate/.test(nt));
+}
+
 /* ---------- 5. optional local pattern list ---------- */
 console.log('\n=== 5. local pattern list (tests/.private-patterns) ===');
 const ppPath = path.join(__dirname, '.private-patterns');

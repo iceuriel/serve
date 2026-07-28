@@ -1,0 +1,65 @@
+# Netlify build configuration.
+#
+# The site has no build step — it is three files and an images folder. This
+# config exists for ONE reason: to publish an ALLOW-LIST rather than the repo.
+#
+# Publishing the repo root is what put engineering docs, the Apps Script source
+# and a personal profile on servecleaning.com under GitHub Pages. Netlify would
+# do exactly the same if `publish` were ".". Staging into _site means a new file
+# is private by default and has to be added here deliberately.
+#
+# Adding an asset to the site means adding it to the copy line below.
+
+[build]
+  publish = "_site"
+  command = """
+    set -e
+    rm -rf _site && mkdir -p _site
+    cp index.html script.js style.css _site/
+    cp -r images _site/
+    echo '--- published files ---'
+    find _site -type f | sort
+    if find _site -type f \\( -name '*.md' -o -name '*.gs' -o -name '*.json' -o -name '*.toml' \\) | grep -q .; then
+      echo 'ERROR: private-looking files staged for publication'
+      exit 1
+    fi
+  """
+
+# Static assets, long cache. index.html must revalidate or a booking-flow fix
+# sits in browser caches for hours — that is how a stale SHEETS_URL keeps
+# POSTing to a retired endpoint.
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/script.js"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/style.css"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/images/*"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"
+
+# Belt and braces: even if a private file were ever staged, refuse to serve it.
+[[redirects]]
+  from = "/docs/*"
+  to = "/404.html"
+  status = 404
+
+[[redirects]]
+  from = "/apps-script/*"
+  to = "/404.html"
+  status = 404
+
+[[redirects]]
+  from = "/tests/*"
+  to = "/404.html"
+  status = 404
