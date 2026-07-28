@@ -13,13 +13,23 @@
 # The booking flow must never be served stale. script.js carries the webhook
 # and availability endpoint URLs; a cached copy keeps POSTing to an endpoint
 # that may have been retired, and the customer sees success either way.
+#
+# charset=utf-8 is explicit because Cloudflare serves text/javascript with no
+# charset, unlike GitHub Pages. script.js contains user-facing non-ASCII — the
+# "✓ We serve <zip>" confirmation and the "Reserving…" button label — and a
+# classic script without a declared charset only inherits the document encoding
+# by convention. Undeclared, those render as mojibake on the two strings a
+# customer is most likely to be looking at.
 /index.html
+  Content-Type: text/html; charset=utf-8
   Cache-Control: public, max-age=0, must-revalidate
 
 /script.js
+  Content-Type: text/javascript; charset=utf-8
   Cache-Control: public, max-age=0, must-revalidate
 
 /style.css
+  Content-Type: text/css; charset=utf-8
   Cache-Control: public, max-age=0, must-revalidate
 
 # Photos are content-stable and heavy. Cache them properly.

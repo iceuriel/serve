@@ -157,6 +157,18 @@ t('images are cached', /\/images\/\*[\s\S]{0,120}max-age=\d{4,}/.test(hd));
 t('nosniff set', /X-Content-Type-Options:\s*nosniff/.test(hd));
 t('referrer policy set', /Referrer-Policy:/.test(hd));
 
+/* script.js contains user-facing non-ASCII (a check mark and an ellipsis).
+   Cloudflare serves text/javascript with no charset, so it must be declared
+   here or those strings can render as mojibake. */
+['/index.html', '/script.js', '/style.css'].forEach(p => {
+  const block = hd.split(/\n(?=\/)/).find(b => b.trim().startsWith(p));
+  t('charset declared for ' + p, !!block && /charset=utf-8/i.test(block));
+});
+const siteJs = fs.readFileSync(path.join(REPO_ROOT, 'script.js'), 'utf8');
+const nonAscii = (siteJs.match(/textContent\s*=\s*'[^']*[^\x00-\x7F][^']*'/g) || []);
+t('non-ASCII UI strings exist, so the charset header is load-bearing',
+  nonAscii.length > 0, nonAscii.map(s => s.slice(0, 46)));
+
 /* ---------- 5. optional local pattern list ---------- */
 console.log('\n=== 5. local pattern list (tests/.private-patterns) ===');
 const ppPath = path.join(__dirname, '.private-patterns');
