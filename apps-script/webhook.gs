@@ -64,17 +64,43 @@
  *   this away.
  *
  * SETUP
- *   1. Fill SPREADSHEET_ID and JOBS_TAB below. Set NOTIFY_EMAIL as a Script
- *      Property (Project Settings), not in this file — it is version controlled.
- *   2. Run reportLeadsSchema() once — it prints the LEADS header row and tells
- *      you exactly which fields this script can and cannot write there.
- *      It is strictly READ-ONLY: getSheets, getSheetByName, getLastColumn,
- *      getRange().getValues() and console.log, nothing else. It creates no tab,
- *      no column and no cell, and sends no email. Safe on a live workbook.
- *   3. Run testPayload() — writes both scheduling shapes, a repeat-customer
- *      booking, and an idempotency replay.
- *   4. Deploy > New deployment > Web app > Execute as: Me > Access: Anyone.
- *      Paste the /exec URL into SHEETS_URL in script.js (line ~155).
+ *
+ *   THE CONSTANTS BELOW ARE ALREADY CORRECT FOR THE LIVE DEPLOYMENT.
+ *   Read this before changing any of them.
+ *
+ *   SPREADSHEET_ID   Leave it "". This project is BOUND to Leads MASTER — it was
+ *                    opened from inside that sheet via Extensions > Apps Script —
+ *                    and "" means "use the spreadsheet I am attached to", which
+ *                    is already the right one. Fill it in ONLY for a standalone
+ *                    project created from script.google.com. Setting it to the
+ *                    wrong id points every write at another workbook.
+ *   JOBS_TAB         Already "JOBS", which matches the live tab. Change only if
+ *                    the tab itself is renamed.
+ *   OPS_SPREADSHEET_ID  Already filled in — the Ops workbook is a DIFFERENT
+ *                    spreadsheet, so it can only be reached by id. Safe to keep
+ *                    in the file: the repo is private, and a spreadsheet id is
+ *                    not a credential. Opening it still requires permission.
+ *   NOTIFY_EMAIL     NOT in this file. Set it as a Script Property:
+ *                    Project Settings > Script Properties > add NOTIFY_EMAIL.
+ *                    Unset, it falls back to the account the script runs as.
+ *
+ *   THEN, IN ORDER
+ *   1. Run reportLeadsSchema(). Read-only — getSheets, getSheetByName,
+ *      getLastColumn, getRange().getValues() and console.log, nothing else. It
+ *      creates no tab, no column and no cell, and sends no email. Confirms this
+ *      project is attached to the workbook you think it is.
+ *   2. Run testPayload(). Writes both scheduling shapes, a repeat-customer
+ *      booking and an idempotency replay. From r5 this ALSO writes PROPERTIES
+ *      and flips an AVAILABILITY row, so expect test rows in three tabs across
+ *      two workbooks. Delete them afterwards.
+ *   3. Authorize when prompted. r5 opens a second spreadsheet by id, which is a
+ *      new scope — an existing deployment WILL re-prompt.
+ *   4. Deploy. For the EXISTING deployment use
+ *         Deploy > Manage deployments > pencil > Version: New version
+ *      which keeps the URL. "New deployment" mints a DIFFERENT /exec URL and the
+ *      site would keep talking to the old one.
+ *   5. Open the /exec URL. It must report this file's version stamp. Anything
+ *      older means the editor was saved but not redeployed.
  *
  * The site POSTs Content-Type text/plain so the request stays CORS-simple and
  * the browser can read the reply. Keep returning { status: "ok" } — the success
