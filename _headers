@@ -1,0 +1,27 @@
+# Response headers for the published site.
+#
+# Read from the publish directory by BOTH Cloudflare Pages and Netlify, so the
+# behaviour is identical whichever host is live. scripts/build-site.sh copies
+# this file into _site/.
+
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: DENY
+  Permissions-Policy: geolocation=(), microphone=(), camera=()
+
+# The booking flow must never be served stale. script.js carries the webhook
+# and availability endpoint URLs; a cached copy keeps POSTing to an endpoint
+# that may have been retired, and the customer sees success either way.
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate
+
+/script.js
+  Cache-Control: public, max-age=0, must-revalidate
+
+/style.css
+  Cache-Control: public, max-age=0, must-revalidate
+
+# Photos are content-stable and heavy. Cache them properly.
+/images/*
+  Cache-Control: public, max-age=604800

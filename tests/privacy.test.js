@@ -114,17 +114,26 @@ const bs = fs.readFileSync(path.join(REPO_ROOT, 'scripts', 'build-site.sh'), 'ut
 t('guards against private file types', /ERROR: private-looking files/.test(bs));
 t('fails the build on a guard hit', /exit 1/.test(bs));
 
-console.log('\n=== 4c. every host calls that one script ===');
+console.log('\n=== 4c. host configs defer to that one script ===');
 const ntPath = path.join(REPO_ROOT, 'netlify.toml');
 if (fs.existsSync(ntPath)) {
   const nt = fs.readFileSync(ntPath, 'utf8');
   t('netlify.toml publishes _site', /publish\s*=\s*"_site"/.test(nt));
   t('netlify.toml calls build-site.sh', /scripts\/build-site\.sh/.test(nt));
-  t('index.html revalidates so a booking fix cannot sit in caches',
-    /for = "\/index\.html"[\s\S]{0,140}must-revalidate/.test(nt));
 } else {
-  console.log('  --    no netlify.toml (not the active host)');
+  console.log('  --    no netlify.toml');
 }
+
+/* _headers is read from the publish dir by both Cloudflare Pages and Netlify. */
+console.log('\n=== 4d. response headers are portable and correct ===');
+const hd = fs.readFileSync(path.join(REPO_ROOT, '_headers'), 'utf8');
+t('_headers is staged by the build', /cp _headers/.test(bs));
+t('index.html must revalidate — a stale script.js keeps POSTing to a dead endpoint',
+  /\/index\.html[\s\S]{0,120}must-revalidate/.test(hd));
+t('script.js must revalidate', /\/script\.js[\s\S]{0,120}must-revalidate/.test(hd));
+t('images are cached', /\/images\/\*[\s\S]{0,120}max-age=\d{4,}/.test(hd));
+t('nosniff set', /X-Content-Type-Options:\s*nosniff/.test(hd));
+t('referrer policy set', /Referrer-Policy:/.test(hd));
 
 /* ---------- 5. optional local pattern list ---------- */
 console.log('\n=== 5. local pattern list (tests/.private-patterns) ===');

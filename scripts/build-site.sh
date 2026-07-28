@@ -28,6 +28,10 @@ mkdir -p "$OUT"
 cp index.html script.js style.css "$OUT"/
 cp -r images "$OUT"/
 
+# Response headers. Both Cloudflare Pages and Netlify read _headers from the
+# publish directory, so caching and security headers stay identical across hosts.
+cp _headers "$OUT"/
+
 echo "--- published files ---"
 find "$OUT" -type f | sort
 
