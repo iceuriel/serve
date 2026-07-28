@@ -24,3 +24,6 @@ Thumbs.db
 
 # Build output staged by the Pages workflow
 _site/
+
+# Wrangler / Cloudflare local state
+.wrangler/

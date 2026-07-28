@@ -114,7 +114,29 @@ const bs = fs.readFileSync(path.join(REPO_ROOT, 'scripts', 'build-site.sh'), 'ut
 t('guards against private file types', /ERROR: private-looking files/.test(bs));
 t('fails the build on a guard hit', /exit 1/.test(bs));
 
-console.log('\n=== 4c. host configs defer to that one script ===');
+/**
+ * The live publish path. `wrangler deploy` auto-detects the output directory as
+ * "." when unconfigured, which on the first attempt tried to publish 2235 files
+ * from the repo root and only failed on an unrelated size limit. This is the
+ * single most important assertion in this file.
+ */
+console.log('\n=== 4c. Cloudflare publishes _site, never the repo root ===');
+const wrPath = path.join(REPO_ROOT, 'wrangler.jsonc');
+if (!fs.existsSync(wrPath)) {
+  console.log('  --    no wrangler.jsonc (not the active host)');
+} else {
+  const raw = fs.readFileSync(wrPath, 'utf8');
+  // strip // comments so the config can be parsed as JSON
+  const wr = JSON.parse(raw.replace(/^\s*\/\/.*$/gm, ''));
+  t('assets.directory is set at all', !!(wr.assets && wr.assets.directory),
+    wr.assets);
+  t('assets.directory is ./_site, NOT the repo root',
+    wr.assets && /^\.\/?_site\/?$/.test(wr.assets.directory), wr.assets && wr.assets.directory);
+  t('no stray build output dir pointing at root',
+    !/"directory"\s*:\s*"\.?"/.test(raw));
+}
+
+console.log('\n=== 4d. other host configs defer to that one script ===');
 const ntPath = path.join(REPO_ROOT, 'netlify.toml');
 if (fs.existsSync(ntPath)) {
   const nt = fs.readFileSync(ntPath, 'utf8');
@@ -125,7 +147,7 @@ if (fs.existsSync(ntPath)) {
 }
 
 /* _headers is read from the publish dir by both Cloudflare Pages and Netlify. */
-console.log('\n=== 4d. response headers are portable and correct ===');
+console.log('\n=== 4e. response headers are portable and correct ===');
 const hd = fs.readFileSync(path.join(REPO_ROOT, '_headers'), 'utf8');
 t('_headers is staged by the build', /cp _headers/.test(bs));
 t('index.html must revalidate — a stale script.js keeps POSTing to a dead endpoint',

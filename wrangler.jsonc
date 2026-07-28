@@ -1,0 +1,25 @@
+{
+  // Cloudflare deployment config.
+  //
+  // THE CRITICAL LINE IS assets.directory.
+  //
+  // Without it, `wrangler deploy` auto-detects the output directory as "." and
+  // publishes the entire repository — on the first attempt it read 2235 files
+  // from the repo root and only failed because a 122 MiB binary in node_modules
+  // exceeded the asset size limit. Had the repo been slightly smaller, docs/,
+  // apps-script/ and tests/ would have gone live on servecleaning.com.
+  //
+  // scripts/build-site.sh stages the allow-list into _site. This file is what
+  // makes Cloudflare publish that, and only that.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "serve",
+  "compatibility_date": "2026-07-28",
+
+  "assets": {
+    "directory": "./_site"
+  },
+
+  "observability": {
+    "enabled": true
+  }
+}
