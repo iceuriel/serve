@@ -1,0 +1,9 @@
+{
+  "name": "serve-site",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Serve — static marketing site and booking flow for servecleaning.com. This file exists ONLY to run the test suite; the site itself has no build step and no dependencies, and nothing in /tests is referenced by index.html.",
+  "scripts": {
+    "test": "node tests/run-all.js"
+  }
+}
