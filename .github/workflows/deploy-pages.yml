@@ -29,10 +29,36 @@ jobs:
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
-      - name: Upload repository as artifact
+      # Build the artifact from an ALLOW-LIST, never the whole repo.
+      #
+      # The previous `path: .` published every tracked file to
+      # servecleaning.com — engineering docs, the Apps Script source, and a
+      # personal profile. A deny-list would silently leak the next file anyone
+      # adds; an allow-list fails closed instead.
+      #
+      # Adding a new asset to the site means adding it here. That is the point.
+      - name: Stage only the public site
+        run: |
+          mkdir -p _site
+          cp index.html script.js style.css _site/
+          cp -r images _site/
+          cp CNAME .nojekyll _site/
+          echo "--- artifact contents ---"
+          find _site -type f | sort
+
+      - name: Fail if anything private slipped into the artifact
+        run: |
+          if find _site -type f \( -name '*.md' -o -name '*.gs' -o -name '*.json' \) | grep -q .; then
+            echo "Private-looking files staged for publication:"
+            find _site -type f \( -name '*.md' -o -name '*.gs' -o -name '*.json' \)
+            exit 1
+          fi
+          echo "artifact clean"
+
+      - name: Upload site as artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: ./_site
 
       - name: Deploy to GitHub Pages
         id: deployment

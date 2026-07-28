@@ -51,7 +51,8 @@
  *   this away.
  *
  * SETUP
- *   1. Fill SPREADSHEET_ID, NOTIFY_EMAIL, JOBS_TAB below.
+ *   1. Fill SPREADSHEET_ID and JOBS_TAB below. Set NOTIFY_EMAIL as a Script
+ *      Property (Project Settings), not in this file — it is version controlled.
  *   2. Run reportLeadsSchema() once — it prints the LEADS header row and tells
  *      you exactly which fields this script can and cannot write there.
  *      It is strictly READ-ONLY: getSheets, getSheetByName, getLastColumn,
@@ -73,11 +74,25 @@
    ============================================================ */
 
 const SPREADSHEET_ID = "";                    // "" = use the bound spreadsheet
-const NOTIFY_EMAIL   = "ops@example.com";
 const JOBS_TAB       = "JOBS";
 
 const LEADS_TAB  = "LEADS";    // must already exist — never auto-created
 const EVENTS_TAB = "EVENTS";   // auto-created if missing
+
+/**
+ * Notification recipient. Deliberately NOT a constant in this file — the repo is
+ * version controlled and a personal address must not live in it.
+ *
+ * Set it once: Apps Script > Project Settings > Script Properties > add a
+ * property named NOTIFY_EMAIL. If unset it falls back to the account the script
+ * runs as, which is almost always the right person, so a missed setup step
+ * cannot silently stop notifications.
+ */
+function notifyEmail() {
+  var v = PropertiesService.getScriptProperties().getProperty("NOTIFY_EMAIL");
+  if (v && String(v).trim()) return String(v).trim();
+  return Session.getEffectiveUser().getEmail();
+}
 
 /**
  * Tabs this script must never touch, whatever else changes.
@@ -782,7 +797,7 @@ function sendReservationEmail(data, sched, leadId, leadResult) {
     "\nSubmission: " + (data.submission_id || "(none)") +
     "\nSubmitted:  " + firstSet(data.submitted_at, data.timestamp, "");
 
-  MailApp.sendEmail(NOTIFY_EMAIL, subject, body);
+  MailApp.sendEmail(notifyEmail(), subject, body);
 }
 
 function sendEventEmail(eventType, data) {
@@ -813,7 +828,7 @@ function sendEventEmail(eventType, data) {
     "\nLogged to the " + EVENTS_TAB + " tab." +
     "\nSubmitted: " + firstSet(data.submitted_at, data.timestamp, "");
 
-  MailApp.sendEmail(NOTIFY_EMAIL, subject, body);
+  MailApp.sendEmail(notifyEmail(), subject, body);
 }
 
 function attributionBlock(data) {

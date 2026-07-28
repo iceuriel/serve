@@ -15,7 +15,7 @@ narrative.
 4. Tab names use **underscores**, not spaces. Anything comparing tab names must normalize.
 
 **Writer legend:**
-`WH` = webhook.gs writes it · `OPS` = the operator fills by hand · `FX` = formula · `MAN` = manual import (deed batches, Apollo)
+`WH` = webhook.gs writes it · `OPS` = the operator fills it by hand · `FX` = formula · `MAN` = manual import (deed batches, Apollo)
 
 ---
 

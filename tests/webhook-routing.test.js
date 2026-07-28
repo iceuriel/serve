@@ -75,7 +75,8 @@ function build(leadsHeaders) {
       createTextOutput: s => ({ getContent: () => s, setMimeType() { return this; } }) },
     MailApp: { sendEmail: (to, subject, body) => mails.push({ to, subject, body }) },
     LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
-    Session: { getScriptTimeZone: () => 'America/New_York' },
+    Session: { getScriptTimeZone: () => 'America/New_York', getEffectiveUser: () => ({ getEmail: () => 'ops@example.com' }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: () => null }) },
     Utilities: { formatDate },
   };
   vm.createContext(sandbox);

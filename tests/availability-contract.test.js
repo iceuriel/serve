@@ -74,7 +74,8 @@ function buildAvail(rows, opts) {
   const sandbox = {
     console: { log: m => logs.push(String(m)), warn: m => logs.push('WARN ' + m), error: m => logs.push('ERR ' + m) },
     Date: ClockDate,
-    Session: { getScriptTimeZone: () => o.scriptTz || TZ },
+    Session: { getScriptTimeZone: () => o.scriptTz || TZ, getEffectiveUser: () => ({ getEmail: () => 'ops@example.com' }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: () => null }) },
     Utilities: { formatDate },
     CacheService: { getScriptCache: () => ({ get: k => cacheStore[k] || null, put: (k,v) => { cacheStore[k] = v; } }) },
     ContentService: { MimeType: { JSON: 'json' },

@@ -75,7 +75,8 @@ function build(tabNames) {
     ContentService: { MimeType: { JSON: 'json' }, createTextOutput: s => ({ getContent: () => s, setMimeType() { return this; } }) },
     MailApp: { sendEmail: (to, subject, body) => mails.push({ to, subject, body }) },
     LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
-    Session: { getScriptTimeZone: () => 'America/New_York' },
+    Session: { getScriptTimeZone: () => 'America/New_York', getEffectiveUser: () => ({ getEmail: () => 'ops@example.com' }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: () => null }) },
     Utilities: { formatDate },
   };
   vm.createContext(sandbox);
@@ -187,14 +188,14 @@ const sd = n => D.tabs.JOBS._rows[n][JOBS_36.indexOf('scheduled_date')];
 const nt = n => D.tabs.JOBS._rows[n][JOBS_36.indexOf('notes')];
 const sc = n => D.tabs.JOBS._rows[n][JOBS_36.indexOf('scheduling_type')];
 
-D.post(Object.assign({}, BASE, { submission_id: 's-slot', email: 'a@x.com',
+D.post(Object.assign({}, BASE, { submission_id: 's-slot', email: 'a@example.com',
   slot_date: '2026-08-14', slot_time: '9-11 AM' }));
-D.post(Object.assign({}, BASE, { submission_id: 's-pref', email: 'b@x.com',
+D.post(Object.assign({}, BASE, { submission_id: 's-pref', email: 'b@example.com',
   time_preference: 'earlier', schedule_preference: 'earlier',
   schedule_preference_label: 'Earlier in the Day' }));
-D.post(Object.assign({}, BASE, { submission_id: 's-label', email: 'c@x.com',
+D.post(Object.assign({}, BASE, { submission_id: 's-label', email: 'c@example.com',
   schedule_preference_label: 'Sometime next week' }));
-D.post(Object.assign({}, BASE, { submission_id: 's-none', email: 'd@x.com' }));
+D.post(Object.assign({}, BASE, { submission_id: 's-none', email: 'd@example.com' }));
 
 [1,2,3,4].forEach(r => console.log('  row' + r + ': type=' + sc(r) +
   ' | scheduled_date=' + JSON.stringify(sd(r)) + ' | start_time=' + JSON.stringify(st(r))));

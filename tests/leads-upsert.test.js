@@ -114,7 +114,8 @@ function build(leadsHeaders, seedLeads) {
     ContentService: { MimeType:{JSON:'json'}, createTextOutput: s => ({ getContent:()=>s, setMimeType(){return this;} }) },
     MailApp: { sendEmail: (to,subject,body) => mails.push({to,subject,body}) },
     LockService: { getScriptLock: () => ({ waitLock(){}, releaseLock(){} }) },
-    Session: { getScriptTimeZone: () => 'America/New_York' },
+    Session: { getScriptTimeZone: () => 'America/New_York', getEffectiveUser: () => ({ getEmail: () => 'ops@example.com' }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: () => null }) },
     Utilities: { formatDate },
   };
   vm.createContext(sandbox);
@@ -317,7 +318,7 @@ console.log('\n=== 8. timezone consistency ===');
 FORMAT_CALLS.length = 0;
 const G = build(LEADS_LIVE);
 // No slot_date, so makeJobId takes the "today" fallback branch.
-G.post(Object.assign({}, BASE, { submission_id: 'u-tz2', email: 'tz@x.com',
+G.post(Object.assign({}, BASE, { submission_id: 'u-tz2', email: 'tz@example.com',
   slot_date: null, slot_time: null, time_preference: 'earlier' }));
 
 const zones = [...new Set(FORMAT_CALLS.map(c => c.tz))];

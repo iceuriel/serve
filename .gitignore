@@ -1,0 +1,26 @@
+# Personal / non-project material must never enter this repo.
+# The repo is version controlled and, on the free plan, GitHub Pages requires it
+# to be public — so anything committed here is permanently public, including in
+# history. Keep personal context in ~/.claude/serve-private/ instead.
+IDENTITY.md
+*.personal.md
+.env
+.env.*
+secrets.json
+credentials.json
+
+# Local tooling state — contains absolute home paths and an account address.
+.claude/
+
+# Optional local list of name patterns for tests/privacy.test.js.
+# Kept out of the repo so the guard never publishes what it guards against.
+tests/.private-patterns
+
+# Tooling
+node_modules/
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# Build output staged by the Pages workflow
+_site/
