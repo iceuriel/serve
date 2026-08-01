@@ -20,7 +20,21 @@ const siteStart = SITE_SRC.indexOf('const HORIZON_DAYS');
 const siteEnd   = SITE_SRC.indexOf('/* Swap which time control is live');
 if (siteStart === -1 || siteEnd === -1) throw new Error('could not slice the site scheduler code');
 const siteSlice = SITE_SRC.slice(siteStart, siteEnd);
-const siteBox = { console, document: undefined };
+
+/* The site's filterSlots() compares each slot against "today". Left on the real
+   clock this test passes for a few days after the fixture dates and then starts
+   failing for reasons that have nothing to do with the code — which is worse
+   than no test, because a calendar-flaky suite trains you to ignore red.
+   Both sandboxes are pinned to the same instant. */
+const RealDate = Date;
+const NOW = new RealDate('2026-07-27T13:00:00Z');      // 9:00 AM EDT, Mon Jul 27
+class PinnedDate extends RealDate {
+  constructor(...a) { if (a.length === 0) super(NOW.getTime()); else super(...a); }
+  static now() { return NOW.getTime(); }
+  static [Symbol.hasInstance](x) { return x instanceof RealDate; }
+}
+
+const siteBox = { console, document: undefined, Date: PinnedDate };
 vm.createContext(siteBox);
 vm.runInContext(siteSlice, siteBox);
 const siteEval = expr => vm.runInContext(expr, siteBox);
@@ -29,7 +43,7 @@ console.log('sliced site scheduler code: ' + siteSlice.split('\n').length + ' li
 /* ---------- Apps Script sandbox ---------- */
 const TZ = 'America/New_York';
 const OFFSET_MIN = -240;                         // EDT, valid for these test dates
-const RealDate = Date;
+/* RealDate and NOW are declared above, alongside the pinned site clock. */
 const pad = (n, w) => String(n).padStart(w || 2, '0');
 
 function zoned(d, tz) {
@@ -51,8 +65,6 @@ function formatDate(d, tz, fmt) {
   throw new Error('harness: unhandled pattern ' + fmt);
 }
 
-/* NOW is fixed so lead-time and horizon maths are deterministic. */
-const NOW = new RealDate('2026-07-27T13:00:00Z');   // 9:00 AM EDT, Mon Jul 27
 
 function buildAvail(rows, opts) {
   const o = opts || {};
