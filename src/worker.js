@@ -113,7 +113,10 @@ async function handleSubmit(request, env) {
    GET /api/slots  ->  availability feed
    ============================================================ */
 async function handleSlots(request, env) {
-  if (request.method !== "GET") {
+  /* HEAD as well as GET: uptime monitors and link checkers use it, and the
+     runtime strips the body for us. Refusing it makes a healthy endpoint look
+     broken to anything that probes with HEAD. */
+  if (request.method !== "GET" && request.method !== "HEAD") {
     return json({ ok: false, error: "method_not_allowed" }, 405);
   }
   if (!env.AVAILABILITY_URL) {

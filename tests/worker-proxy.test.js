@@ -157,9 +157,16 @@ console.log('\n=== 5. GET /api/slots — degrades, never blocks booking ===');
   const b = JSON.parse(await noCfg.text());
   t('unconfigured feed also degrades to ok:false', noCfg.status === 200 && b.ok === false);
 
-  const wrongMethod = await w3.fetch(post('{}').clone ? new Request(
-    'https://servecleaning.com/api/slots', { method: 'POST', body: '{}' }) : get('/api/slots'), ENV);
+  const { worker: w4 } = loadWorker(ok(feed));
+  const wrongMethod = await w4.fetch(new Request(
+    'https://servecleaning.com/api/slots', { method: 'POST', body: '{}' }), ENV);
   t('POST to /api/slots rejected', wrongMethod.status === 405, wrongMethod.status);
+
+  /* Uptime monitors and link checkers probe with HEAD. Refusing it makes a
+     healthy endpoint look broken. */
+  const head = await w4.fetch(new Request(
+    'https://servecleaning.com/api/slots', { method: 'HEAD' }), ENV);
+  t('HEAD is allowed so monitors see a healthy endpoint', head.status === 200, head.status);
 }
 
 console.log('\n=== 6. the front end and the Worker agree on the paths ===');
