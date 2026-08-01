@@ -327,9 +327,17 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
        "Loading times…" with no way to submit, and the reservation POST must
        never leave them staring at "Reserving…". */
     const AVAILABILITY_TIMEOUT_MS = 5000;
+
+    /* Budget for the reservation POST.
+       The Worker gives up on Apps Script at 12s and answers with its own 502,
+       so 15s here is long enough to receive that rather than aborting blind.
+       Two attempts is cheap insurance — submission_id makes a retry safe — but
+       it puts the worst case near 30s, so the button reports progress instead
+       of sitting frozen. Most successes return in under five seconds. */
     const RESERVE_CONFIRM_TIMEOUT_MS = 15000;
     const RESERVE_MAX_ATTEMPTS = 2;
     const RESERVE_RETRY_DELAY_MS = 1200;
+    const RESERVE_SLOW_NOTICE_MS = 6000;
 
     const $ = (id) => document.getElementById(id);
 
@@ -1047,6 +1055,12 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
         reserveSubmit.disabled = true;
         reserveSubmit.textContent = 'Reserving…';
 
+        /* A retry can push the worst case near 30 seconds. Without this the
+           button just sits there and people assume it broke and leave. */
+        const slowNotice = setTimeout(function () {
+            if (reserveSubmitting) reserveSubmit.textContent = 'Still reserving — hold on…';
+        }, RESERVE_SLOW_NOTICE_MS);
+
         recompute();
         const q = state.quote;
         const p = basePayload('reservation', 'quote_reserved');
@@ -1102,6 +1116,7 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
            Now the endpoint is same-origin a genuine failure means something is
            actually broken, so saying so is both honest and rare. */
         postReservation(p).then(result => {
+            clearTimeout(slowNotice);
             if (result.confirmed) {
                 setView('confirmed');
                 return;

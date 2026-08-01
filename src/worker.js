@@ -44,7 +44,9 @@
 
 /* Apps Script /exec 302s to googleusercontent.com; fetch follows that by
    default. These caps stop a hung upstream holding a customer's browser. */
-const UPSTREAM_TIMEOUT_MS = { submit: 15000, slots: 8000 };
+/* Deliberately shorter than the browser's own 15s budget, so the customer gets
+   this Worker's explanatory 502 rather than their fetch aborting blind. */
+const UPSTREAM_TIMEOUT_MS = { submit: 12000, slots: 8000 };
 
 export default {
   async fetch(request, env, ctx) {
