@@ -294,34 +294,42 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
 (function () {
 
     /* ============================================================
-       ENDPOINTS — the only two URLs on the page. Both are Google
-       Apps Script web-app deployments (.../exec).
+       ENDPOINTS — both are SAME-ORIGIN paths on servecleaning.com.
+
+       They used to be script.google.com/macros/.../exec addresses. Corporate
+       proxies block that host by default — Apps Script is a known exfiltration
+       channel — so on a work laptop the page loaded, the quote calculated, and
+       the POST died with ERR_TUNNEL_CONNECTION_FAILED while the customer was
+       shown a green confirmation. The time-slot picker failed the same way and
+       silently fell back to the earlier/later radios.
+
+       src/worker.js now relays both from Cloudflare's edge, which is not behind
+       anyone's firewall. The browser only ever talks to the domain it already
+       loaded, so there is nothing left for a proxy to refuse.
+
+       Being same-origin also removes CORS entirely: no preflight, no text/plain
+       workaround, real JSON both ways. And the Apps Script URLs are no longer
+       readable in this file, which is served publicly.
+
+       The real /exec addresses live in wrangler.jsonc `vars`.
        ============================================================ */
 
-    /* Booking webhook — writes to LEADS MASTER and sends the notification
-       email. Repo source of truth for the receiving script: /apps-script/webhook.gs.
-       Redeploy that, then paste the new /exec URL here. */
-    const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbxVWfrn2Mos2-yO1AhDe20tpnFcAdc-nZ_6zb0qK02msdyJZVETgLQ77TvUnxHf5jWMBQ/exec';
+    /* Booking webhook -> /apps-script/webhook.gs */
+    const SHEETS_URL = '/api/submit';
 
-    /* ------------------------------------------------------------------
-       AVAILABILITY FEED — feeds the Step 3 time-slot picker.
-       Served by /apps-script/availability.gs, deployed from the Ops sheet on
-       servecos.com. Verified live 2026-07-27: HTTP 200, 9 slots,
-       Access-Control-Allow-Origin: *.
-
-       Set this to '' to skip the network call entirely and go straight to the
-       earlier/later fallback.
-
+    /* Availability feed -> /apps-script/availability.gs.
+       Set to '' to skip the network call and go straight to the fallback.
        Response shape:
-         { ok: true, slots: [ { date: "2026-08-07", time: "12:00 PM", open: 1 }, … ] }
-       ------------------------------------------------------------------ */
-    const AVAILABILITY_SOURCE_URL = 'https://script.google.com/macros/s/AKfycbzumNZZ9KI56KZuM2QlbhlB4QVp3cRS5Q_v8Z3jO0PW5CENCi2NDRExQL2Ko3vA93XM/exec';
+         { ok: true, slots: [ { date: "2026-08-07", time: "12:00 PM", open: 1 }, … ] } */
+    const AVAILABILITY_SOURCE_URL = '/api/slots';
 
     /* Hard caps. The availability fetch must never strand a customer on
        "Loading times…" with no way to submit, and the reservation POST must
        never leave them staring at "Reserving…". */
     const AVAILABILITY_TIMEOUT_MS = 5000;
-    const RESERVE_CONFIRM_TIMEOUT_MS = 10000;
+    const RESERVE_CONFIRM_TIMEOUT_MS = 15000;
+    const RESERVE_MAX_ATTEMPTS = 2;
+    const RESERVE_RETRY_DELAY_MS = 1200;
 
     const $ = (id) => document.getElementById(id);
 
@@ -331,6 +339,7 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
         3:          $('step-3'),
         overflow:   $('state-overflow'),
         confirmed:  $('state-confirmed'),
+        failed:     $('state-failed'),
     };
     if (!stepEls[1] || !stepEls[2] || !stepEls[3]) return;
 
@@ -396,23 +405,24 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
     };
 
     /* ============================================================
-       Sheets POST
+       POST to the edge Worker
 
-       Content-Type is text/plain on BOTH paths. That keeps the request
-       "CORS-simple", so the browser never fires a preflight OPTIONS that an
-       Apps Script web app cannot answer. The .gs reads e.postData.contents
-       either way, so the JSON body is unaffected.
+       Same-origin, so this is plain JSON with no CORS considerations at all.
+       The text/plain workaround is gone — it existed only to keep a
+       cross-origin request simple enough for Apps Script to answer, and the
+       Worker handles that translation now.
 
-       Lead events (waitlist, emailed quote, custom quote) stay fire-and-forget.
-       The reservation uses a readable response — see postReservation.
+       Lead events (waitlist, emailed quote, custom quote) stay fire-and-forget:
+       losing one costs a follow-up, not a booking. The reservation is confirmed
+       — see postReservation.
        ============================================================ */
     function postToSheets(payload) {
         try {
             fetch(SHEETS_URL, {
                 method: 'POST',
-                mode: 'no-cors',
-                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
+                keepalive: true,      // survives the page being closed mid-flight
             }).catch(() => {});
         } catch (_) { /* silent */ }
     }
@@ -430,31 +440,41 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
      *
      * Resolves { confirmed: true|false }. Never rejects.
      */
-    function postReservation(payload) {
+    function postReservation(payload, attempt) {
+        attempt = attempt || 1;
         return new Promise((resolve) => {
             const ctrl  = (typeof AbortController !== 'undefined') ? new AbortController() : null;
             const timer = setTimeout(() => { if (ctrl) ctrl.abort(); }, RESERVE_CONFIRM_TIMEOUT_MS);
 
             fetch(SHEETS_URL, {
                 method: 'POST',
-                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
                 signal: ctrl ? ctrl.signal : undefined,
             })
-                .then(res => {
-                    if (!res.ok) throw new Error('HTTP ' + res.status);
-                    return res.json();
-                })
+                .then(res => res.json().catch(() => { throw new Error('HTTP ' + res.status); }))
                 .then(body => {
-                    if (!body || body.status !== 'ok') throw new Error('Unconfirmed response');
                     clearTimeout(timer);
-                    resolve({ confirmed: true });
+                    if (!body || body.status !== 'ok') {
+                        throw new Error(body && body.error ? body.error : 'unconfirmed');
+                    }
+                    resolve({ confirmed: true, body: body });
                 })
                 .catch(err => {
                     clearTimeout(timer);
-                    console.warn('Reservation write unconfirmed — retrying fire-and-forget.', err);
-                    postToSheets(payload);
-                    resolve({ confirmed: false });
+                    /* One retry. submission_id is unchanged, so if the first
+                       attempt did land the server dedupes it and answers
+                       duplicate:true — which still counts as confirmed. */
+                    if (attempt < RESERVE_MAX_ATTEMPTS) {
+                        console.warn('Reservation attempt ' + attempt + ' failed, retrying.', err);
+                        setTimeout(function () {
+                            postReservation(payload, attempt + 1).then(resolve);
+                        }, RESERVE_RETRY_DELAY_MS);
+                        return;
+                    }
+                    console.error('Reservation could not be confirmed after ' +
+                                  attempt + ' attempts.', err);
+                    resolve({ confirmed: false, error: String(err && err.message || err) });
                 });
         });
     }
@@ -1070,11 +1090,70 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
         // cannot be confirmed, postReservation has already retried fire-and-forget
         // and warned in the console — we still show success rather than sending a
         // paying customer an error for a booking we probably received.
+        /* Only claim the spot on a confirmed write.
+
+           This used to show the confirmation regardless, on the reasoning that a
+           customer should never see an error for a booking we had probably
+           received. That trade was right when failures were rare and random. It
+           was exactly wrong for the corporate-proxy case, where the POST failed
+           every single time and every one of those people was told they were on
+           the schedule.
+
+           Now the endpoint is same-origin a genuine failure means something is
+           actually broken, so saying so is both honest and rare. */
         postReservation(p).then(result => {
-            if (!result.confirmed) console.warn('Reservation shown as booked but write unconfirmed.', p.submission_id);
-            setView('confirmed');
+            if (result.confirmed) {
+                setView('confirmed');
+                return;
+            }
+            console.error('Reservation NOT confirmed.', p.submission_id, result.error);
+            showReserveFailure(p, result.error);
         });
     });
+
+    /**
+     * The booking could not be confirmed. Say so, and make it recoverable in one
+     * tap — their details are already typed, so the fallback carries them into
+     * an email rather than asking them to start again somewhere else.
+     */
+    function showReserveFailure(payload, error) {
+        const el = $('state-failed');
+        if (!el) {                       // markup missing: never strand them silently
+            reserveSubmitting = false;
+            reserveSubmit.disabled = false;
+            reserveSubmit.textContent = 'Reserve my clean';
+            reserveError.textContent =
+                "We couldn't confirm your booking. Please email servehomecleaning@gmail.com and we'll book you in.";
+            return;
+        }
+
+        const link = $('failed-mailto');
+        if (link) {
+            const when = payload.slot_date && payload.slot_time
+                ? payload.slot_date + ' at ' + payload.slot_time
+                : (payload.schedule_preference_label || 'no preference given');
+            const body =
+                "My booking didn't go through on the website. My details:\n\n" +
+                'Name: '    + payload.name    + '\n' +
+                'Phone: '   + payload.phone   + '\n' +
+                'Address: ' + payload.address + (payload.unit ? ', ' + payload.unit : '') + '\n' +
+                'ZIP: '     + payload.zip     + '\n' +
+                'Home: '    + payload.unit_label + '\n' +
+                'Service: ' + payload.service_type + '\n' +
+                'Quoted: $' + payload.first_visit_total + '\n' +
+                'Requested: ' + when + '\n' +
+                (payload.customer_notes ? 'Notes: ' + payload.customer_notes + '\n' : '') +
+                '\nRef: ' + payload.submission_id + '\n';
+            link.href = 'mailto:servehomecleaning@gmail.com' +
+                        '?subject=' + encodeURIComponent('Booking that did not go through — ' + payload.name) +
+                        '&body='    + encodeURIComponent(body);
+        }
+
+        const ref = $('failed-ref');
+        if (ref) ref.textContent = payload.submission_id;
+
+        setView('failed');
+    }
 
     /* ========================================================
        Overflow state — custom quote request (R9)

@@ -479,6 +479,34 @@
                 </div>
             </div>
 
+            <!-- Booking could NOT be confirmed.
+                 Shown only when the write genuinely failed. Previously this state
+                 did not exist and a failed booking rendered the confirmation
+                 above — which is how corporate-network visitors were told a
+                 cleaner was coming when nothing had been recorded. The mailto is
+                 built in script.js and carries everything they already typed, so
+                 recovering costs one tap rather than starting again. -->
+            <div class="quote-step step-hidden" id="state-failed" data-progress="3">
+                <div class="flow-failed">
+                    <div class="flow-failed__mark" aria-hidden="true">!</div>
+                    <h2>We couldn't confirm your booking.</h2>
+                    <p>
+                        Your details are safe — nothing was lost — but the booking did
+                        <strong>not</strong> go through, so you are not on the schedule yet.
+                        This is usually a network on your side blocking us.
+                    </p>
+                    <p class="flow-failed__action">
+                        <a class="btn btn--primary" id="failed-mailto"
+                           href="mailto:servehomecleaning@gmail.com">Send us your booking by email</a>
+                    </p>
+                    <p class="flow-failed__alt">
+                        That opens an email with everything you just entered — just hit send.
+                        Or call <a href="tel:+12062097707">(206) 209-7707</a>.
+                    </p>
+                    <p class="flow-failed__ref">Reference: <span id="failed-ref"></span></p>
+                </div>
+            </div>
+
         </div>
     </section>
 

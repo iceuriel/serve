@@ -1,22 +1,40 @@
 {
   // Cloudflare deployment config.
   //
-  // THE CRITICAL LINE IS assets.directory.
+  // TWO THINGS HERE ARE LOAD-BEARING.
   //
-  // Without it, `wrangler deploy` auto-detects the output directory as "." and
-  // publishes the entire repository — on the first attempt it read 2235 files
-  // from the repo root and only failed because a 122 MiB binary in node_modules
-  // exceeded the asset size limit. Had the repo been slightly smaller, docs/,
-  // apps-script/ and tests/ would have gone live on servecleaning.com.
+  // 1. assets.directory — WITHOUT IT, `wrangler deploy` auto-detects the output
+  //    directory as "." and publishes the entire repository. On the first
+  //    attempt it read 2235 files from the repo root and only failed because a
+  //    122 MiB binary in node_modules exceeded the asset size limit. Had the
+  //    repo been slightly smaller, docs/, apps-script/ and tests/ would have
+  //    gone live on servecleaning.com. scripts/build-site.sh stages the
+  //    allow-list into _site; this makes Cloudflare publish that and only that.
   //
-  // scripts/build-site.sh stages the allow-list into _site. This file is what
-  // makes Cloudflare publish that, and only that.
+  // 2. vars — the two Apps Script /exec URLs. They live HERE rather than in
+  //    script.js because script.js is served publicly: anyone could read the
+  //    endpoints and POST junk into the sheet. The repo is private, so keeping
+  //    them in this file is fine. If it ever goes public, move them to secrets
+  //    (`wrangler secret put WEBHOOK_URL`) — the Worker reads env either way.
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "serve",
   "compatibility_date": "2026-07-28",
 
+  // The Worker runs for any request that does not match a static file, which
+  // is how /api/* reaches it. See src/worker.js for why the proxy exists.
+  "main": "src/worker.js",
+
   "assets": {
-    "directory": "./_site"
+    "directory": "./_site",
+    // Lets the Worker hand non-API requests back to the static asset server.
+    "binding": "ASSETS"
+  },
+
+  "vars": {
+    // Booking webhook — writes JOBS / LEADS / PROPERTIES and flips the slot.
+    "WEBHOOK_URL": "https://script.google.com/macros/s/AKfycbxVWfrn2Mos2-yO1AhDe20tpnFcAdc-nZ_6zb0qK02msdyJZVETgLQ77TvUnxHf5jWMBQ/exec",
+    // Availability feed — time slots for step 3.
+    "AVAILABILITY_URL": "https://script.google.com/macros/s/AKfycbzumNZZ9KI56KZuM2QlbhlB4QVp3cRS5Q_v8Z3jO0PW5CENCi2NDRExQL2Ko3vA93XM/exec"
   },
 
   "observability": {

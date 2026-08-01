@@ -1468,6 +1468,76 @@ a {
 
 
 /* ============================================================
+   Booking could not be confirmed
+
+   Deliberately not styled as a catastrophe. It is a setback with a one-tap
+   route out, and the customer did nothing wrong — panic-red would make them
+   abandon rather than send the email.
+   ============================================================ */
+.flow-failed {
+    max-width: 600px;
+    margin: 1rem auto;
+    text-align: center;
+    background: #fffbeb;
+    border: 1px solid #fcd34d;
+    border-radius: var(--radius);
+    padding: 2.5rem 1.5rem;
+}
+
+.flow-failed__mark {
+    width: 3rem;
+    height: 3rem;
+    border-radius: 50%;
+    background: #d97706;
+    color: #fff;
+    font-family: var(--flow-serif);
+    font-size: 1.6rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 1rem;
+}
+
+.flow-failed h2 {
+    font-family: var(--flow-serif);
+    font-size: 1.7rem;
+    font-weight: 700;
+    color: #92400e;
+    margin-bottom: 0.5rem;
+}
+
+.flow-failed p {
+    font-family: var(--flow-serif);
+    color: #78350f;
+    font-size: 1.05rem;
+    line-height: 1.6;
+}
+
+.flow-failed__action { margin: 1.5rem 0 0.75rem; }
+.flow-failed__action .btn { width: 100%; max-width: 22rem; }
+
+.flow-failed__alt {
+    font-size: 0.95rem !important;
+}
+.flow-failed__alt a {
+    color: #92400e;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    font-weight: 600;
+}
+
+/* Quiet — it matters only if they get in touch. */
+.flow-failed__ref {
+    margin-top: 1.25rem;
+    font-family: var(--flow-sans) !important;
+    font-size: 0.75rem !important;
+    color: #a16207 !important;
+    word-break: break-all;
+}
+
+
+/* ============================================================
    BOOKING FLOW — Responsive (640px+)
    ============================================================ */
 @media (min-width: 640px) {
