@@ -144,8 +144,13 @@ t('build stages _redirects',
 
 /* ============================================================ */
 console.log('\n=== 4. CTA copy is identical across every skin ===');
-const ctas = HTML.match(/Instant [Qq]uote/g) || [];
-t('all CTAs read "Instant quote"', ctas.length === 3 && ctas.every(c => c === 'Instant quote'), ctas);
+/* Scoped to the actual controls — anchors pointing at the quote flow — not to
+   every occurrence of the phrase. Headings elsewhere on the page are prose and
+   may legitimately read differently ("Instant Quotes" in How It Works). The
+   rule is that a CONTROL says the same thing everywhere it appears. */
+const ctas = [...HTML.matchAll(/<a[^>]*href="#quote"[^>]*>([^<]+)<\/a>/g)].map(m => m[1].trim());
+t('every CTA control reads "Instant quote"',
+  ctas.length === 3 && ctas.every(c => c === 'Instant quote'), ctas);
 t('no skin touches the CTA', !/btn--primary|nav__cta/.test(JSON.stringify(vm.runInContext('HERO_SKINS', box))));
 t('skins define a headline and nothing else',
   Object.values(vm.runInContext('HERO_SKINS', box)).every(s => Object.keys(s).join() === 'headline'));

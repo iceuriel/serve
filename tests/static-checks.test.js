@@ -53,23 +53,27 @@ imgs.forEach(m => {
   if (!fs.existsSync(path.join(ROOT, src))) fail('missing image: ' + src);
 });
 ok(imgs.length + ' <img> tags, all local files present');
-const newImgs = imgs.filter(m => /svmA-shot/.test(html.slice(Math.max(0, m.index - 220), m.index)));
-newImgs.forEach(m => {
-  if (!/loading="lazy"/.test(m[0])) fail('after-you-book image not lazy: ' + m[1]);
-  if (!/alt="/.test(m[0]))          fail('after-you-book image missing alt: ' + m[1]);
-});
-ok(newImgs.length + ' after-you-book images: lazy + alt present');
+/* Every image needs alt text, and everything below the fold should lazy-load.
+   The hero logo is the one legitimate exception — it is the first paint. */
+const noAlt = imgs.filter(m => !/alt="/.test(m[0])).map(m => m[1]);
+noAlt.length ? fail('images missing alt: ' + noAlt.join(', '))
+             : ok('all ' + imgs.length + ' images have alt text');
+const notLazy = imgs.filter(m => !/loading="lazy"/.test(m[0]) && !/hero__logo/.test(m[0]))
+                    .map(m => m[1]);
+notLazy.length ? fail('below-the-fold images not lazy: ' + notLazy.join(', '))
+               : ok('all non-hero images lazy-load');
 
 /* 5. Classes introduced this build must be styled. */
 head('New classes are styled');
-['svmA-section','svmA-wrap','svmA-lede','svmA-grid','svmA-bubble','svmA-step',
- 'svmA-shots-title','svmA-shots','svmA-shot','svmA-foot',
- 'step__link','reserve-aftercare','flow-textarea','field-hint'].forEach(c => {
+const NEW_CLASSES = ['svmA-section','svmA-wrap','svmA-lede','svmA-grid','svmA-bubble','svmA-step',
+  // svmA-shots* removed 2026-08-03 with the "What done looks like" gallery.
+  'svmA-foot','step__link','reserve-aftercare','flow-textarea','field-hint'];
+NEW_CLASSES.forEach(c => {
   if (!html.includes('class="' + c) && !html.includes(' ' + c + '"') && !html.includes(c + ' '))
     fail(c + ' not used in index.html');
   if (!css.includes('.' + c)) fail(c + ' has no rule in style.css');
 });
-ok('all 14 new classes used and styled');
+ok('all ' + NEW_CLASSES.length + ' new classes used and styled');
 
 /* 6. The new section must sit OUTSIDE the step-switching machinery. */
 head('after-you-book is outside the quote flow');
@@ -122,11 +126,13 @@ head('Availability feed isolation');
 js.includes('AVAILABILITY_TIMEOUT_MS = 5000') ? ok('5s timeout constant present') : fail('no 5s timeout');
 js.includes('if (!AVAILABILITY_SOURCE_URL)')  ? ok('empty-URL short circuit present') : fail('no empty-URL short circuit');
 
-/* 10. CTA copy unified. */
+/* 10. CTA copy unified — the CONTROLS, not every use of the phrase.
+   Headings are prose and may differ; a button must not. */
 head('CTA copy');
-const cta = [...html.matchAll(/Instant [Qq]uote/g)].map(m => m[0]);
-cta.every(c => c === 'Instant quote') ? ok('all ' + cta.length + ' CTAs read "Instant quote"')
-                                      : fail('inconsistent CTA copy: ' + [...new Set(cta)].join(' | '));
+const cta = [...html.matchAll(/<a[^>]*href="#quote"[^>]*>([^<]+)<\/a>/g)].map(m => m[1].trim());
+cta.length === 3 && cta.every(c => c === 'Instant quote')
+  ? ok('all ' + cta.length + ' CTA controls read "Instant quote"')
+  : fail('CTA controls inconsistent: ' + JSON.stringify(cta));
 
 console.log('\n' + (fails ? 'FAILURES: ' + fails : 'ALL CHECKS PASSED'));
 process.exit(fails ? 1 : 0);

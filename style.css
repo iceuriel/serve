@@ -509,34 +509,6 @@ a {
 
 
 /* ============================================================
-   TESTIMONIAL
-   ============================================================ */
-.testimonial {
-    background: var(--color-dark);
-    padding: 4rem 1.25rem;
-    color: #fff;
-}
-
-.testimonial__quote {
-    font-size: 1.05rem;
-    font-style: italic;
-    line-height: 1.85;
-    color: #d1d5db;
-    text-align: center;
-    max-width: 760px;
-    margin: 0 auto 1rem;
-    border: none;
-}
-
-.testimonial__author {
-    text-align: center;
-    font-size: 0.875rem;
-    color: #6b7280;
-    font-weight: 500;
-}
-
-
-/* ============================================================
    BOOKING FLOW — Build → Price → Reserve
    Editorial identity: Times New Roman across the flow.
    ============================================================ */
@@ -923,41 +895,6 @@ a {
     line-height: 1.6;
 }
 
-.svmA-shots-title {
-    text-align: center;
-    margin-top: 3rem;
-    margin-bottom: 1.25rem;
-}
-
-.svmA-shots {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 0.75rem;
-}
-
-.svmA-shot {
-    margin: 0;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius);
-    overflow: hidden;
-    background: var(--color-bg);
-}
-
-.svmA-shot img {
-    width: 100%;
-    aspect-ratio: 4 / 3;
-    object-fit: cover;
-    display: block;
-}
-
-.svmA-shot figcaption {
-    font-family: 'Inter', system-ui, sans-serif;
-    font-size: 0.8rem;
-    color: var(--color-text-muted);
-    text-align: center;
-    padding: 0.6rem 0.5rem;
-}
-
 .svmA-foot {
     font-family: 'Times New Roman', Times, Georgia, serif;
     font-size: 1rem;
@@ -987,7 +924,6 @@ a {
     .svmA-section { padding: 5rem 2rem; }
     .svmA-wrap h2 { font-size: 2.25rem; }
     .svmA-grid  { grid-template-columns: repeat(2, 1fr); gap: 1.25rem; }
-    .svmA-shots { grid-template-columns: repeat(3, 1fr); gap: 1rem; }
 }
 
 @media (min-width: 1024px) {
