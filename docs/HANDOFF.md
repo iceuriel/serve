@@ -371,6 +371,12 @@ most of its effort eliminating.
 4. **Tab names use underscores.** Anything comparing them must normalize.
 5. **Pricing math is not touched** without an explicit decision. `PRICING`,
    `ZIP_TIERS` and `computeQuote` in `script.js` are deterministic and load-bearing.
+   *Coverage* is the exception — which ZIPs are listed at all is an operator call,
+   not a pricing one, and a ZIP in neither tier is silently refused a quote and
+   shown the waitlist. That is a lost lead, and it happened: a Seaport visitor
+   (02210) was turned away on 2026-08-14 because five Boston-proper ZIPs and
+   Brookline Village had never been listed. `tests/service-area.test.js` now
+   pins the sold-to list; expand coverage there in the same commit.
 6. **Vanilla HTML/CSS/JS only.** No frameworks, no build step, no dependencies.
 7. **The booking flow degrades, never blocks.** Every failure in the scheduler,
    the feed, or the LEADS upsert must still let a customer book.

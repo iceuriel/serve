@@ -53,16 +53,32 @@ const PRICING = {
     OVERFLOW_HOURLY_RATE: 130,   // copy only, never computed
 };
 
-// Service-area coverage. To change coverage, edit these two lists.
+/* Service-area coverage. To change coverage, edit these two lists.
+   CORE     — no travel fee.
+   EXTENDED — +$25 per visit (PRICING.EXTENDED_ZIP_FEE).
+   A ZIP in NEITHER list gets the waitlist instead of a price, so a missing ZIP
+   is a lost lead. When in doubt, add it to CORE — you can re-tier it later. */
 const ZIP_TIERS = {
-    CORE: ["02108","02109","02110","02111","02113","02114","02115","02116",
-           "02118","02119","02120","02121","02122","02124","02125","02126",
-           "02127","02128","02129","02130","02131","02132","02134","02135",
-           "02138","02139","02140","02141","02142","02143","02144","02145",
-           "02445","02446","02467"],          // Boston core + Cambridge / Somerville / Brookline
-    EXTENDED: ["02150","02151","02152","02149","02155","02148","02472","02474",
-               "02476","02458","02459","02460","02461","02462","02464","02465",
-               "02466","02468"],              // +$25 ring (Chelsea / Revere / Newton / Watertown)
+    CORE: [
+        // Boston — every neighborhood, incl. Hyde Park (02136), Allston/HBS (02163),
+        // Back Bay/Prudential (02199), Seaport (02210), Fenway/Kenmore (02215)
+        "02108","02109","02110","02111","02113","02114","02115","02116","02118",
+        "02119","02120","02121","02122","02124","02125","02126","02127","02128",
+        "02129","02130","02131","02132","02134","02135","02136","02163","02199",
+        "02210","02215",
+        "02138","02139","02140","02141","02142",     // Cambridge
+        "02143","02144","02145",                     // Somerville
+        "02445","02446","02447",                     // Brookline
+        "02467",                                     // Chestnut Hill
+    ],
+    EXTENDED: [                                      // +$25 per visit
+        "02148","02149","02150","02151","02152",     // Malden / Everett / Chelsea / Revere / Winthrop
+        "02155",                                     // Medford
+        "02458","02459","02460","02461","02462",     // Newton
+        "02464","02465","02466","02468",
+        "02472",                                     // Watertown
+        "02474","02476",                             // Arlington
+    ],
 };
 
 function zipTier(zip) {
