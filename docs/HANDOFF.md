@@ -382,12 +382,42 @@ most of its effort eliminating.
    the feed, or the LEADS upsert must still let a customer book.
 8. **Never widen a sheet the operator designed.** Header-driven writes; report
    what has no column rather than creating one.
+9. **The SMS consent surface is regulated, not cosmetic.** `/privacy`,
+   `/sms-terms`, the two consent checkboxes and their wording were submitted to
+   Twilio for A2P 10DLC registration, and carriers re-check them *after*
+   approval. Breaking one can revoke a live campaign and silence every booking
+   confirmation. Never bundle the two checkboxes, pre-check one, make one
+   required, move the policy links inside a label, or reword the
+   mobile-information paragraph in `/privacy`. `tests/sms-consent.test.js`
+   enforces all of it; if a change makes that test fail, the change is wrong.
+   Consent is written `"yes"` or blank — **never `"no"`**, because LEADS is
+   blank-fill-only and a `no` would lock out a real opt-in forever.
 
 ---
 
 ## 5. What to work on next
 
 Roughly in priority order.
+
+### 5-0. Add three headers to LEADS · blocking, before any SMS is sent
+
+Not code, and it gates the Twilio number. Add these to the end of the LEADS
+header row, spelled exactly:
+
+```
+sms_transactional    sms_promotional    sms_consent_at
+```
+
+Webhook r7 already writes them (`tests/leads-upsert.test.js` §9 proves it against
+the 22-column shape). Until the headers exist the upsert logs
+`LEADS has no column for: … — skipped.` and writes nothing, so bookings are
+unaffected — but **consent given in the meantime is not recorded anywhere except
+the per-booking `quote_meta` snapshot on JOBS.** Consent has to exist at the
+moment a message is sent and cannot be reconstructed afterwards, so do this
+before the first text goes out, not before the first booking.
+
+Format `sms_consent_at` as a date column. The webhook writes a real `Date`; a
+column formatted as plain text will hold something that only looks like one.
 
 ### 5a. Clear the stale `open` rows in AVAILABILITY · trivial, do it first
 

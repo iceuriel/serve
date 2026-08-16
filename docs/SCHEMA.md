@@ -89,8 +89,11 @@ Anything that's reference data for a single job → `quote_meta`.
 | 17 | `ltv` | FX | Lifetime value. Sum of `final_price` in JOBS for this `lead_id`. |
 | 18 | `notes` | OPS | Free text about the person. Not written by the script. |
 | 19 | `segment` | WH | `movein` · `pro` · `direct`. Header live as of 2026-07-27 — LEADS is 19 columns. **See the segment conflict in Known open items: the site is not yet emitting this vocabulary.** |
+| 20 | `sms_transactional` | **WH** | `yes` or blank. Consent to service texts about a booking. **ADD THIS HEADER** — see the SMS consent block below. |
+| 21 | `sms_promotional` | **WH** | `yes` or blank. Separate consent to marketing texts. Never bundled with column 20 — bundling them is an A2P 10DLC violation. **ADD THIS HEADER.** |
+| 22 | `sms_consent_at` | **WH** | Real Sheets datetime, stamped from the **server** clock when either consent above is first recorded. Blank when neither was given. **ADD THIS HEADER.** |
 
-**The script writes only:** `lead_id`, `name`, `email`, `phone`, `service_address`, `unit`, `zip`, `source`, `segment`, `source_history`, `first_touch`, `last_touch`.
+**The script writes only:** `lead_id`, `name`, `email`, `phone`, `service_address`, `unit`, `zip`, `source`, `segment`, `source_history`, `first_touch`, `last_touch`, `sms_transactional`, `sms_promotional`, `sms_consent_at`.
 **Everything else is yours** and is skipped silently.
 
 **Write rules, in precedence order:**
@@ -98,6 +101,18 @@ Anything that's reference data for a single job → `quote_meta`.
 2. `last_touch` — always overwritten on a match. This is the single documented exception to the blank-cells-only rule.
 3. `source_history` — append-only; a tag already present is not re-added.
 4. Everything else — blank cells only; a populated value is never overwritten.
+
+### SMS consent — columns 20–22
+
+Added 2026-08-16 for Twilio A2P 10DLC campaign registration. **These three headers do not exist on the live tab yet.** Until they are added by hand, the upsert logs `LEADS has no column for: sms_transactional, sms_promotional, sms_consent_at — skipped.` and writes nothing, exactly as it does for any other absent header. Bookings are unaffected. Add the headers **before** sending any text message: consent has to exist at the moment you send, and it cannot be reconstructed afterwards.
+
+The site sends `"yes"` or `""`. **It never sends `"no"`, and nothing here should ever write one.** Rule 4 above is blank-fill-only, so a `no` recorded today would permanently block a genuine opt-in on a later booking — the cell would be populated, and every future write would decline to touch it. A blank cell already means "no consent on record", which is the same thing when a carrier asks, and it stays upgradeable.
+
+`sms_consent_at` is stamped from the server clock inside `upsertLead()`, not taken from the payload, and is a real `Date` for the same reason `first_touch` is. If consent is ever challenged, a timestamp the customer's browser supplied is not the one to be standing on.
+
+**Revocation is out of band.** A customer opting out replies STOP, which Twilio honours at the carrier level — it never reaches this webhook and will not clear column 20 or 21. Twilio's opt-out list is authoritative for whether a message may be sent; these columns are the record that consent was *given*. Do not treat a `yes` here as permission to send without checking Twilio.
+
+Every booking also carries its own consent snapshot in the JOBS `quote_meta` JSON (`sms_transactional`, `sms_promotional`), which needs no new JOBS column. LEADS is the person-level record you filter on; `quote_meta` is the per-submission audit trail.
 
 > Both timestamps are written as JS `Date` objects so Sheets stores real datetimes. An ISO string in a date column sorts lexically and breaks date math with no error. `reportLeadsSchema()` samples the existing cells and reports whether they hold `DATE`, `TEXT`, `number`, or `blank`; the upsert also logs a warning if it finds text where a date belongs.
 
@@ -303,6 +318,8 @@ held `direct ×1` and blank ×12, with no channel values anywhere.
 
 | Date | Change |
 |---|---|
+| 2026-08-16 | **Webhook r7 — SMS consent.** LEADS gains `sms_transactional` / `sms_promotional` / `sms_consent_at` (columns 20–22) for Twilio A2P 10DLC registration; the timestamp is server-stamped and the site never sends `"no"`, so a blank cell stays upgradeable. Consent also rides in JOBS `quote_meta` as a per-booking snapshot, needing no JOBS column. Site side: `/privacy` and `/sms-terms` published as real pages on the allow-list, two separate unchecked consent boxes beside the phone field, policy links in the footer of every page, and `/book` added as the opt-in URL named in the campaign registration. **The three LEADS headers are not on the live tab yet — add them by hand before sending any message.** `tests/sms-consent.test.js` guards the whole surface. |
+| 2026-08-14 | **Service area.** Six ZIPs that had never been listed — 02210 Seaport, 02215 Fenway/Kenmore, 02199 Back Bay, 02163 Allston/HBS, 02136 Hyde Park, 02447 Brookline Village — added to `ZIP_TIERS.CORE` after a Seaport visitor was shown the waitlist instead of a price. Coverage 53 → 59, purely additive. `tests/service-area.test.js` pins the sold-to list so a dropped ZIP fails the suite rather than silently costing a lead. |
 | 2026-07-28 | **Webhook r5.** `PROPERTIES` upsert — six columns, blank-fill only, the tab stays on the protected list behind a `assertPropertiesWritable()` allowance that refuses any other tab. `AVAILABILITY` write-back to the Ops workbook — `open` → `booked` plus `job_id`, never touching `held`, read at write time inside the existing script lock. Both run *after* the JOBS row and can never fail a booking; failures surface as `· SLOT CONFLICT` / `· SLOT NOT MARKED` / a PROPERTIES warning in the notification. Ops tabs `CLEANERS`, `SCHEDULE`, `OPS_DASHBOARD` added to the protected list now that the workbook is reachable by id. |
 | 2026-07-28 | `segment` resolved to the intent taxonomy `movein · pro · direct`; two hero skins select off it by first touch; `/movein` and `/clean` vanity redirects feed the same first-touch path. Confirmation panel now promises a confirmation email within 15 minutes with the footer address as fallback — the tripwire for a silent write failure, which otherwise looks identical to success from the customer's side. |
 | 2026-07-28 | **Privacy.** The Pages workflow published the whole repo to servecleaning.com, including a personal profile. Site moved to Cloudflare with an allow-list build, the GitHub repo made private, and every personal identifier purged from all 47 commits on both branches. `tests/privacy.test.js` enforces it. |

@@ -155,7 +155,14 @@ t('first_touch / last_touch stamped as Dates, not strings',
   ['first_touch','last_touch'].every(c =>
     Object.prototype.toString.call(L._rows[1][li(c)]) === '[object Date]'));
 t('no columns appended to LEADS', L._rows.every(r => r.length <= 19));
-t('nothing reported missing', !B.logs.some(l => /LEADS has no column for/.test(l)),
+/* The consent columns (SCHEMA.md 20-22) are NOT on the live tab yet, so the
+   upsert is expected to report and skip exactly those three and nothing else.
+   Narrow the expected set the moment the operator adds the headers. */
+const missingReport = B.logs.filter(l => /LEADS has no column for/.test(l)).join(' ');
+t('the only columns reported missing are the three pending consent ones',
+  !missingReport || /^LEADS has no column for: sms_transactional, sms_promotional, sms_consent_at — skipped\.$/.test(missingReport.trim()),
+  missingReport);
+t('nothing else reported missing', !B.logs.some(l => /LEADS has no column for/.test(l) && !/sms_/.test(l)),
   B.logs.filter(l => /LEADS has no column/.test(l)));
 
 /* Repeat visit must not overwrite the address, and must append the tag. */

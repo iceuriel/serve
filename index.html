@@ -404,6 +404,35 @@
                         <label class="field-label" for="r-phone">Phone</label>
                         <input class="flow-input" type="tel" id="r-phone" name="phone" autocomplete="tel" placeholder="(617) 555-0100" required>
                     </div>
+
+                    <!-- A2P 10DLC consent. Load-bearing for carrier registration — see
+                         tests/sms-consent.test.js before editing anything in this block.
+                         Both boxes must stay UNCHECKED and OPTIONAL, transactional and
+                         promotional consent must stay on SEPARATE boxes, and the policy
+                         links must stay OUTSIDE the label text as their own anchors. -->
+                    <div class="sms-consent">
+                        <label class="sms-consent__opt">
+                            <input type="checkbox" id="sms-transactional" name="sms_transactional" value="yes">
+                            <span>I agree to receive text messages from Serve about my cleaning
+                            appointments, including confirmations, scheduling updates, and cleaner
+                            arrival notifications, at the number provided. Consent is not a condition
+                            of purchase. Message frequency varies. Message and data rates may apply.
+                            Reply STOP to opt out or HELP for help.</span>
+                        </label>
+
+                        <label class="sms-consent__opt">
+                            <input type="checkbox" id="sms-promotional" name="sms_promotional" value="yes">
+                            <span>I agree to receive occasional promotional text messages from Serve,
+                            including offers and rebooking reminders. Consent is not a condition of
+                            purchase. Message and data rates may apply. Reply STOP to opt out.</span>
+                        </label>
+
+                        <p class="sms-consent-links">
+                            <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a> &middot;
+                            <a href="/sms-terms" target="_blank" rel="noopener">SMS Terms</a>
+                        </p>
+                    </div>
+
                     <div class="field-block">
                         <label class="field-label" for="r-address">Street address</label>
                         <input class="flow-input" type="text" id="r-address" name="address" autocomplete="street-address" placeholder="123 Beacon St, Boston, MA" required>
@@ -560,6 +589,11 @@
             </div>
         </div>
         <div class="footer__copy">
+            <!-- Required on every page for A2P 10DLC registration. -->
+            <p class="footer__legal">
+                <a href="/privacy">Privacy Policy</a> &middot;
+                <a href="/sms-terms">SMS Terms</a>
+            </p>
             <p>&copy; 2026 Serve Cleaning. All rights reserved.</p>
         </div>
     </footer>

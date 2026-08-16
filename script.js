@@ -1089,6 +1089,14 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
         // free-text notes + the pets signal derived from them
         p.customer_notes = reserveNotes ? reserveNotes.value.trim() : '';
         p.pets_flag      = detectPets(p.customer_notes);
+        /* A2P 10DLC consent. Sent as "yes" or "" — NEVER "no".
+           The LEADS upsert fills blank cells only, so a "no" written today would
+           permanently block a real opt-in on a later booking. Blank already means
+           "no consent on record", which is the same thing legally and stays
+           upgradeable. The timestamp is stamped by the webhook, not here: a
+           server clock is the defensible one if consent is ever challenged. */
+        p.sms_transactional = $('sms-transactional').checked ? 'yes' : '';
+        p.sms_promotional   = $('sms-promotional').checked   ? 'yes' : '';
         // legacy pricing fields so existing Sheet columns + email keep populating
         p.unit_label        = unitLabel();
         p.service_type      = state.service;

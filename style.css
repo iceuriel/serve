@@ -1592,3 +1592,166 @@ a {
         font-size: 2.25rem;
     }
 }
+
+
+/* ============================================================
+   SMS CONSENT — A2P 10DLC
+   Sits inside .quote-section, so --flow-sans is in scope.
+
+   Deliberately plain. This block is read by carrier reviewers as well as
+   customers, so the disclosure text stays fully visible at all times: never
+   collapsed behind a "show more", never shrunk below 0.8rem, and never
+   restyled so an unchecked box is hard to distinguish from a checked one.
+   ============================================================ */
+.sms-consent {
+    margin-bottom: 1.5rem;
+    padding: 1.15rem 1.15rem 0.9rem;
+    background: var(--color-bg-light);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+}
+
+.sms-consent__opt {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.7rem;
+    font-family: var(--flow-sans);
+    font-size: 0.82rem;
+    line-height: 1.55;
+    color: var(--color-text);
+    cursor: pointer;
+}
+
+.sms-consent__opt + .sms-consent__opt {
+    margin-top: 0.9rem;
+    padding-top: 0.9rem;
+    border-top: 1px solid var(--color-border);
+}
+
+/* 1.05rem box with padding around it clears the 44px touch target on mobile
+   without making the control look oversized next to the body text. */
+.sms-consent__opt input[type="checkbox"] {
+    flex: 0 0 auto;
+    width: 1.05rem;
+    height: 1.05rem;
+    margin: 0.18rem 0 0;
+    accent-color: var(--color-dark);
+    cursor: pointer;
+}
+
+.sms-consent-links {
+    margin-top: 0.9rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--color-border);
+    font-family: var(--flow-sans);
+    font-size: 0.78rem;
+    color: var(--color-text-muted);
+}
+
+.sms-consent-links a {
+    color: var(--color-text-muted);
+    text-decoration: underline;
+}
+
+.sms-consent-links a:hover {
+    color: var(--color-dark);
+}
+
+.footer__legal {
+    margin-bottom: 0.5rem;
+}
+
+.footer__legal a {
+    color: #9ca3af;
+    text-decoration: underline;
+}
+
+.footer__legal a:hover {
+    color: #d1d5db;
+}
+
+
+/* ============================================================
+   LEGAL PAGES — /privacy, /sms-terms
+   Standalone pages: --flow-sans is NOT in scope here, so these rules use the
+   global --font. One readable column, no ornament.
+   ============================================================ */
+.legal {
+    max-width: 44rem;
+    margin: 0 auto;
+    padding: 3rem 1.25rem 4rem;
+    font-family: var(--font);
+}
+
+.legal__title {
+    font-size: 2rem;
+    font-weight: 800;
+    color: var(--color-dark);
+    line-height: 1.2;
+    margin-bottom: 0.4rem;
+}
+
+.legal__updated {
+    font-size: 0.85rem;
+    color: var(--color-text-muted);
+    margin-bottom: 2rem;
+}
+
+.legal__lede {
+    font-size: 1.02rem;
+    color: var(--color-text);
+    margin-bottom: 2rem;
+}
+
+.legal h2 {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: var(--color-dark);
+    margin: 2.25rem 0 0.75rem;
+}
+
+.legal h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--color-dark);
+    margin: 1.5rem 0 0.5rem;
+}
+
+.legal p {
+    margin-bottom: 1rem;
+    color: var(--color-text);
+}
+
+.legal ul {
+    margin: 0 0 1.25rem 1.25rem;
+    color: var(--color-text);
+}
+
+.legal li {
+    margin-bottom: 0.5rem;
+}
+
+.legal a {
+    color: var(--color-dark);
+    text-decoration: underline;
+}
+
+/* The mobile-information paragraph and the STOP instruction. Carrier reviewers
+   look for these specifically; the callout keeps them findable at a glance. */
+.legal__callout {
+    padding: 1.1rem 1.25rem;
+    background: var(--color-bg-light);
+    border-left: 3px solid var(--color-dark);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    margin-bottom: 1.25rem;
+}
+
+@media (min-width: 768px) {
+    .legal {
+        padding: 4rem 2rem 5rem;
+    }
+
+    .legal__title {
+        font-size: 2.5rem;
+    }
+}

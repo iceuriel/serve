@@ -14,3 +14,10 @@
 
 /movein   /?src=deed-movein   302
 /clean    /?src=dh-clean      302
+
+# /book is the opt-in URL named in Twilio's A2P 10DLC campaign registration.
+# A reviewer follows it by hand to confirm the consent checkbox is really there
+# and really unchecked, so it has to land ON the booking form, not the homepage
+# top. Untagged on purpose: this is a compliance URL, not a marketing one, and
+# it must not pollute attribution with a src that no campaign ever printed.
+/book     /#quote             302

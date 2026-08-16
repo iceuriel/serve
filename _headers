@@ -38,6 +38,26 @@
   Content-Type: text/css; charset=utf-8
   Cache-Control: public, max-age=0, must-revalidate
 
+# Legal pages, linked from Twilio's A2P 10DLC campaign registration. Carriers
+# re-fetch these after approval, so they must stay 200 and must not be served
+# stale after an edit. Both the extensionless and .html paths are declared
+# because the asset server resolves /privacy to /privacy.html.
+/privacy
+  Content-Type: text/html; charset=utf-8
+  Cache-Control: public, max-age=0, must-revalidate
+
+/privacy.html
+  Content-Type: text/html; charset=utf-8
+  Cache-Control: public, max-age=0, must-revalidate
+
+/sms-terms
+  Content-Type: text/html; charset=utf-8
+  Cache-Control: public, max-age=0, must-revalidate
+
+/sms-terms.html
+  Content-Type: text/html; charset=utf-8
+  Cache-Control: public, max-age=0, must-revalidate
+
 # Photos are content-stable and heavy. Cache them properly.
 /images/*
   Cache-Control: public, max-age=604800

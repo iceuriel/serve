@@ -192,7 +192,10 @@ t('first_touch is NOT a string', typeof created[li('first_touch')] !== 'string')
 t('both stamped identically on create',
   +created[li('first_touch')] === +created[li('last_touch')]);
 t('segment written to the live tab', created[li('segment')] === 'movein', created[li('segment')]);
-t('full coverage - nothing reported missing', !B.logs.some(l => /LEADS has no column for/.test(l)),
+/* Consent columns 20-22 are pending on the live tab; section 9 proves they are
+   written once they exist. Everything else must still be fully covered. */
+t('full coverage - nothing reported missing beyond the pending consent columns',
+  !B.logs.some(l => /LEADS has no column for/.test(l) && !/sms_/.test(l)),
   B.logs.filter(l => /no column for/.test(l)));
 
 const OPERATOR_ONLY = ['source_detail','contacted_via','status','first_variant','dnc_scrub','ltv','notes'];
@@ -355,6 +358,86 @@ const refOK = samples.every((s, i) => {
 });
 t('weekdays are calendrically correct', refOK, outA);
 t('2026-08-14 is a Friday', outA[0] === 'Friday, Aug 14', outA[0]);
+
+/* ============================================================
+   9. SMS consent (SCHEMA.md LEADS 20-22)
+
+   The live tab does not have these headers yet. This section runs against the
+   22-column shape it will have once they are added, so the operator is adding
+   columns to code that is already proven against them rather than finding out
+   on a live booking.
+   ============================================================ */
+console.log('\n=== 9. SMS consent columns ===');
+const LEADS_22 = LEADS_LIVE.concat(['sms_transactional', 'sms_promotional', 'sms_consent_at']);
+const ci = n => LEADS_22.indexOf(n);
+const consentRow = (payload, seed) => {
+  const h = build(LEADS_22, seed);
+  h.post(Object.assign({}, BASE, payload));
+  return { row: h.tabs.LEADS._rows[1], logs: h.logs };
+};
+
+const both = consentRow({ submission_id: 'c-1', sms_transactional: 'yes', sms_promotional: 'yes' });
+t('both boxes -> both cells "yes"',
+  both.row[ci('sms_transactional')] === 'yes' && both.row[ci('sms_promotional')] === 'yes',
+  [both.row[ci('sms_transactional')], both.row[ci('sms_promotional')]]);
+t('consent timestamp is a real Date, not a string', isDate(both.row[ci('sms_consent_at')]),
+  String(both.row[ci('sms_consent_at')]));
+t('consent columns no longer reported missing',
+  !both.logs.some(l => /LEADS has no column for/.test(l) && /sms_/.test(l)));
+
+/* The single most important assertion here. Writing "no" would populate the
+   cell, and every rule in this file is blank-fill-only — a genuine opt-in on a
+   later booking could then never be recorded. Blank means "no consent". */
+const neither = consentRow({ submission_id: 'c-2' });
+t('no consent -> cells left BLANK, never "no"',
+  neither.row[ci('sms_transactional')] === '' && neither.row[ci('sms_promotional')] === '',
+  [neither.row[ci('sms_transactional')], neither.row[ci('sms_promotional')]]);
+t('no consent -> no timestamp', neither.row[ci('sms_consent_at')] === '',
+  String(neither.row[ci('sms_consent_at')]));
+
+const txOnly = consentRow({ submission_id: 'c-3', sms_transactional: 'yes' });
+t('transactional alone does not imply promotional',
+  txOnly.row[ci('sms_transactional')] === 'yes' && txOnly.row[ci('sms_promotional')] === '',
+  [txOnly.row[ci('sms_transactional')], txOnly.row[ci('sms_promotional')]]);
+t('transactional alone still stamps the timestamp', isDate(txOnly.row[ci('sms_consent_at')]));
+
+/* Anything that is not exactly "yes" is not consent. A checkbox that starts
+   sending "true" or "on" after a refactor must not silently become an opt-in. */
+[['true', true], ['on', 'on'], ['1', 1], ['no', 'no'], ['YES', 'YES']].forEach(([label, v]) => {
+  const r = consentRow({ submission_id: 'c-v-' + label, sms_transactional: v });
+  t('"' + label + '" is not treated as consent', r.row[ci('sms_transactional')] === '',
+    r.row[ci('sms_transactional')]);
+});
+
+/* A customer who declined on booking 1 and opts in on booking 2 must be
+   recorded — this is the blank-fill path doing the work it was built for. */
+const seedNoConsent = [LEADS_22.map((h, i) =>
+  h === 'lead_id' ? 'repeat.customer@example.com' :
+  h === 'email'   ? 'repeat.customer@example.com' : '')];
+const upgraded = consentRow(
+  { submission_id: 'c-4', email: 'repeat.customer@example.com', sms_transactional: 'yes' },
+  seedNoConsent);
+t('a later opt-in fills the previously blank cell',
+  upgraded.row[ci('sms_transactional')] === 'yes', upgraded.row[ci('sms_transactional')]);
+t('and stamps the consent time then', isDate(upgraded.row[ci('sms_consent_at')]));
+
+/* And the reverse: consent already on record is never quietly downgraded by a
+   later booking where the box happened to be left unchecked. Revocation is
+   STOP, handled by Twilio, and never reaches this webhook. */
+const seedConsented = [LEADS_22.map((h) =>
+  h === 'lead_id' || h === 'email' ? 'consented@example.com' :
+  h === 'sms_transactional' ? 'yes' : '')];
+const kept = consentRow({ submission_id: 'c-5', email: 'consented@example.com' }, seedConsented);
+t('existing consent survives a booking with the box unchecked',
+  kept.row[ci('sms_transactional')] === 'yes', kept.row[ci('sms_transactional')]);
+
+/* The timestamp must come from the server, so a payload cannot backdate it. */
+const spoofed = consentRow({ submission_id: 'c-6', sms_transactional: 'yes',
+                             sms_consent_at: '1999-01-01T00:00:00.000Z' });
+t('a consent time supplied in the payload is ignored',
+  isDate(spoofed.row[ci('sms_consent_at')]) &&
+  spoofed.row[ci('sms_consent_at')].getUTCFullYear() === 2026,
+  String(spoofed.row[ci('sms_consent_at')]));
 
 console.log('\n' + (bad ? 'FAILURES: ' + bad : 'ALL ASSERTIONS PASSED'));
 process.exit(bad ? 1 : 0);

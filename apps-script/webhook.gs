@@ -1,8 +1,11 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-07-28  ·  master  ·  r6 — self-cleaning testPayload
+ * VERSION STAMP:  2026-08-16  ·  master  ·  r7 — SMS consent on LEADS
  *
+ * r7 = SMS consent (sms_transactional / sms_promotional / sms_consent_at)
+ *      written to LEADS, timestamped server-side. Needs three new LEADS
+ *      headers; without them the upsert reports and skips, as always.
  * r6 = testPayload picks a real open slot and cleans up after itself.
  * r5 = PROPERTIES upsert + AVAILABILITY write-back to the Ops workbook.
  * r4 = timezone pinning (BUSINESS_TZ everywhere, timezone-free prettyDate).
@@ -214,6 +217,12 @@ const QUOTE_META_KEYS = [
   "recurring_weekly", "recurring_biweekly", "recurring_monthly",
   "zip_tier", "page_path", "utm_source", "utm_medium", "utm_campaign",
   "unit_label", "src", "submitted_at",
+  /* SMS consent as captured on THIS booking. LEADS holds the person-level
+     record you filter by; this is the per-booking snapshot you read when
+     investigating one job, which is exactly what quote_meta is for. It also
+     means every submission carries its own consent state with no new JOBS
+     column, so the audit trail exists even before LEADS gets its headers. */
+  "sms_transactional", "sms_promotional",
 ];
 
 /**
@@ -232,7 +241,8 @@ const OPS_PREFERRED_KEYS = ["address", "unit", "zip"];
  * status, first_variant, dnc_scrub, ltv, notes — and is skipped silently.
  */
 const LEADS_FIELDS = ["lead_id", "name", "email", "phone", "address",
-                      "unit", "zip", "source", "segment", "source_history"];
+                      "unit", "zip", "source", "segment", "source_history",
+                      "sms_transactional", "sms_promotional", "sms_consent_at"];
 
 /** LEADS-specific payload key -> header, where the two differ. */
 const LEADS_HEADER_MAP = { address: "service_address" };
@@ -446,7 +456,7 @@ function handleEvent(ss, data, eventType) {
 
 /** Health check — open the /exec URL in a browser. */
 function doGet() {
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-07-28 r6" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-08-16 r7" });
 }
 
 
@@ -543,6 +553,19 @@ function upsertLead(ss, data, leadId) {
   }
 
   const incomingTag = firstSet(data.src, data.src_first, "");
+  const stamp = new Date();          // a real Date, never an ISO string
+
+  /* A2P 10DLC consent — the record that proves a customer agreed to be texted.
+     "yes" or "" — NEVER "no". Every write below is blank-fill-only, so a "no"
+     recorded today would permanently block a genuine opt-in on a later booking.
+     Blank already means "no consent on record", which is the same thing when a
+     carrier asks, and it stays upgradeable.
+     The timestamp is the SERVER clock, not a value from the payload: if consent
+     is ever challenged, a time the browser supplied is not what you want to be
+     standing on. It is a real Date for the same reason first_touch is. */
+  const smsT = data.sms_transactional === "yes" ? "yes" : "";
+  const smsP = data.sms_promotional   === "yes" ? "yes" : "";
+
   const incoming = {
     lead_id: leadId,
     name:    data.name  || "",
@@ -553,9 +576,10 @@ function upsertLead(ss, data, leadId) {
     zip:     data.zip  || "",
     source:  firstSet(data.src_first, data.src, ""),
     segment: data.segment || "",
+    sms_transactional: smsT,
+    sms_promotional:   smsP,
+    sms_consent_at:    (smsT || smsP) ? stamp : "",
   };
-
-  const stamp = new Date();          // a real Date, never an ISO string
 
   /* ---- No match: create. Both timestamps stamped once, here. ---- */
   if (rowIndex === -1) {

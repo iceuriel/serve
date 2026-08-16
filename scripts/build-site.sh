@@ -25,7 +25,11 @@ rm -rf "$OUT"
 mkdir -p "$OUT"
 
 # --- the allow-list ---
-cp index.html script.js style.css "$OUT"/
+# privacy.html and sms-terms.html are served at /privacy and /sms-terms. Both
+# are REQUIRED to stay reachable: Twilio's A2P 10DLC registration lists them and
+# carriers re-check them, so a 404 here can get the number's campaign revoked,
+# not merely rejected. They are plain HTML with no JS by design.
+cp index.html privacy.html sms-terms.html script.js style.css "$OUT"/
 cp -r images "$OUT"/
 
 # Response headers and vanity redirects. Both Cloudflare and Netlify read
