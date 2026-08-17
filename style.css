@@ -477,8 +477,19 @@ a {
     text-align: center;
 }
 
-.work__subtitle {
-    margin-top: 3.5rem;
+/* ============================================================
+   RECENT WORK STRIP
+   Its own section at the foot of the page, below #after-you-book.
+   Shares --color-bg-light with the section above it, so the border-top
+   is what separates them — same trick .svmA-section uses.
+   ============================================================ */
+.work-strip {
+    padding: 3.5rem 1.25rem;
+    background: var(--color-bg-light);
+    border-top: 1px solid var(--color-border);
+}
+
+.work-strip__title {
     margin-bottom: 1.25rem;
     text-align: center;
     font-size: 1.1rem;
@@ -486,13 +497,13 @@ a {
     color: var(--color-dark);
 }
 
-.work__strip {
+.work-strip__grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
     gap: 0.75rem;
 }
 
-.work__strip-item {
+.work-strip__item {
     margin: 0;
     aspect-ratio: 1 / 1;
     overflow: hidden;
@@ -500,7 +511,7 @@ a {
     border: 1px solid var(--color-border);
 }
 
-.work__strip-item img {
+.work-strip__item img {
     width: 100%;
     height: 100%;
     object-fit: cover;
@@ -1539,7 +1550,7 @@ a {
         gap: 3rem 2rem;
     }
 
-    .work__strip {
+    .work-strip__grid {
         grid-template-columns: repeat(4, 1fr);
         gap: 1rem;
     }
