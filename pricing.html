@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<!--
+    /pricing — published price ranges.
+
+    THE TABLE IS RENDERED BY script.js, NOT WRITTEN HERE.
+
+    Every figure comes from computeQuote() — the same function that prices the
+    calculator. That is the whole point of the page: a published range and a
+    quoted price cannot disagree, because there is only one of them. Editing
+    PRICING in script.js moves this table with it. Do not hardcode a number
+    into this file; a hardcoded number is a promise that goes stale silently.
+
+    The nav below is byte-identical to index.html and services.html. See the
+    comment at the top of index.html for the full list of files carrying one.
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>House Cleaning Prices in Boston — Serve</title>
+    <meta name="description" content="What house cleaning actually costs in Boston: first cleans from $117 to $347, recurring visits from $85. All-in pricing — supplies and card fees included, no hourly rates, no surprises at the door.">
+    <link rel="canonical" href="https://servecleaning.com/pricing">
+    <link rel="icon" type="image/x-icon" href="images/favicon.ico">
+    <link rel="icon" type="image/svg+xml" href="images/favicon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="images/favicon-32.png">
+    <link rel="apple-touch-icon" href="images/apple-touch-icon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Montserrat:wght@500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+
+    <!-- FAQPage structured data. Every answer below is word-for-word what the
+         visible FAQ says — Google treats a mismatch as a markup violation. -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "How much does house cleaning cost in Boston?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "For a first clean with Serve, most Boston homes fall between $117 and $347 depending on size and condition. Recurring visits run from $85 per visit for a studio to about $191 for a three-bedroom. Move-in and move-out cleans on an empty home are higher, since every cabinet, the fridge and the oven are done inside."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Is that the real price, or are there fees on top?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "It is the real price. Supplies, equipment and card processing fees are all included. The only thing that changes the number is what you tell us about the home — its size, its condition, and any add-ons you choose."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Do you charge by the hour?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "No. You get a flat price before you book and that is what you pay. An hourly rate moves the risk of a slow day onto the customer, and it gives a cleaner a reason to work slowly. Homes above five bedrooms are the one exception and get a personal quote."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What makes my price land at the high end of the range?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Condition. A lightly lived-in home sits at the low end and a home that needs heavy-duty attention sits at the top. Square footage matters too — a large home at a given bedroom count prices above the band. Nothing else moves it."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Do I have to sign up for a recurring plan?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "No. The first clean stands on its own and there is no contract. If you do want to keep it going, new recurring customers get $50 off visits two through four, and recurring visits are priced well below a one-time clean because the home is already at baseline."
+          }
+        }
+      ]
+    }
+    </script>
+</head>
+<body class="serve-has-sticky">
+
+    <!-- NAV — byte-identical in index.html, pricing.html and services.html.
+         Paths are absolute so the same block works from any of them. -->
+    <nav class="nav">
+        <div class="nav__inner">
+            <a href="/" class="nav__logo">Serve</a>
+            <ul class="nav__links">
+                <li><a href="/#how-it-works">How It Works</a></li>
+                <li><a href="/pricing">Pricing</a></li>
+                <li><a href="/services">Services</a></li>
+                <li><a href="/#quote" class="nav__cta serve-pulse">Instant quote</a></li>
+            </ul>
+            <button class="nav__hamburger" aria-label="Open menu" aria-expanded="false">
+                <span></span><span></span><span></span>
+            </button>
+        </div>
+        <div class="nav__mobile-menu" id="mobile-menu">
+            <ul>
+                <li><a href="/#how-it-works">How It Works</a></li>
+                <li><a href="/pricing">Pricing</a></li>
+                <li><a href="/services">Services</a></li>
+                <li><a href="/#quote">Instant quote</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <header class="serve-page-head">
+        <h1>House cleaning prices in Boston</h1>
+        <p>Flat rates, published up front. No hourly billing, no quote you have to phone for.</p>
+    </header>
+
+    <!-- HEADLINE BAND
+         The answer first. Someone who clicked "See full pricing" wants the
+         number in under two seconds, and a paragraph of positioning in front
+         of it is the reason people bounce off pricing pages. -->
+    <section class="serve-band">
+        <span class="serve-band__label">Most Boston homes, first clean</span>
+        <span class="serve-band__figure" data-serve-headline-range>&mdash;</span>
+        <p class="serve-band__note">Half price for first-time customers &mdash; supplies and card fees included.</p>
+    </section>
+
+    <section class="serve-section" id="price-table">
+        <div class="serve-section__inner">
+            <h2>Every size, every service</h2>
+            <p class="serve-section__sub">
+                Tap any price to load that home into the calculator and get your
+                exact quote. Ranges below are for our core service area; homes in
+                the extended area add $25 per visit, which the calculator applies
+                once you enter your ZIP.
+            </p>
+
+            <div class="serve-table-wrap">
+                <table class="serve-table">
+                    <caption class="serve-sr">Cleaning price ranges by home size and service type</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">Home</th>
+                            <th scope="col">First Clean <span>50% off</span></th>
+                            <th scope="col" class="serve-col--feature">Recurring <span>per visit</span></th>
+                            <th scope="col">Move In / Out <span>empty home</span></th>
+                        </tr>
+                    </thead>
+                    <tbody data-serve-price-rows><!-- rendered by script.js --></tbody>
+                </table>
+            </div>
+
+            <p class="serve-table-note">
+                First Clean and Move In / Out ranges run from a lightly lived-in home to
+                one needing heavy-duty attention. Recurring runs from weekly (cheapest
+                per visit) to monthly.
+            </p>
+
+            <!-- The recurring-vs-one-time comparison is the core of the plan
+                 pitch and used to appear only after a visitor had already
+                 finished the calculator. Here it sits next to both numbers. -->
+            <div class="serve-callout">
+                <h3>Why recurring costs so much less</h3>
+                <p>
+                    A first clean pays for taking a home back to baseline &mdash; grout,
+                    baseboards, behind the furniture. Once it is there, keeping it there
+                    is a fraction of the work, so a recurring visit is priced against the
+                    upkeep rather than the reset. New recurring customers also get
+                    <strong>$50 off visits 2&ndash;4</strong>.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <section class="serve-section serve-section--alt" id="what-moves-your-price">
+        <div class="serve-section__inner">
+            <h2>What moves your price</h2>
+            <p class="serve-section__sub">Four things, and nothing else.</p>
+            <ul class="serve-list">
+                <li><strong>Condition.</strong> Lightly lived-in sits at the low end of the range. Heavy-duty sits at the top.</li>
+                <li><strong>Add-ons.</strong> Fridge and oven interiors are toggles you choose, not surprises at the door.</li>
+                <li><strong>Square footage.</strong> Large homes at a given bedroom count price above the band.</li>
+                <li><strong>Nothing else.</strong> Ranges are all-in &mdash; supplies and card fees included.</li>
+            </ul>
+        </div>
+    </section>
+
+    <section class="serve-section" id="faq">
+        <div class="serve-section__inner">
+            <h2>Questions about pricing</h2>
+            <div class="serve-faq">
+                <details>
+                    <summary>How much does house cleaning cost in Boston?</summary>
+                    <p>For a first clean with Serve, most Boston homes fall between $117 and $347 depending on size and condition. Recurring visits run from $85 per visit for a studio to about $191 for a three-bedroom. Move-in and move-out cleans on an empty home are higher, since every cabinet, the fridge and the oven are done inside.</p>
+                </details>
+                <details>
+                    <summary>Is that the real price, or are there fees on top?</summary>
+                    <p>It is the real price. Supplies, equipment and card processing fees are all included. The only thing that changes the number is what you tell us about the home &mdash; its size, its condition, and any add-ons you choose.</p>
+                </details>
+                <details>
+                    <summary>Do you charge by the hour?</summary>
+                    <p>No. You get a flat price before you book and that is what you pay. An hourly rate moves the risk of a slow day onto the customer, and it gives a cleaner a reason to work slowly. Homes above five bedrooms are the one exception and get a personal quote.</p>
+                </details>
+                <details>
+                    <summary>What makes my price land at the high end of the range?</summary>
+                    <p>Condition. A lightly lived-in home sits at the low end and a home that needs heavy-duty attention sits at the top. Square footage matters too &mdash; a large home at a given bedroom count prices above the band. Nothing else moves it.</p>
+                </details>
+                <details>
+                    <summary>Do I have to sign up for a recurring plan?</summary>
+                    <p>No. The first clean stands on its own and there is no contract. If you do want to keep it going, new recurring customers get $50 off visits two through four, and recurring visits are priced well below a one-time clean because the home is already at baseline.</p>
+                </details>
+            </div>
+            <p class="serve-note">
+                Still not sure? Email <a href="mailto:servehomecleaning@gmail.com">servehomecleaning@gmail.com</a>
+                or call <a href="tel:+12062097707">(206) 209-7707</a>.
+            </p>
+        </div>
+    </section>
+
+    <!-- FOOTER -->
+    <footer class="footer">
+        <div class="footer__inner">
+            <div class="footer__brand">
+                <span class="footer__logo">Serve</span>
+                <p>Professional home cleaning for Greater Boston.</p>
+            </div>
+            <div class="footer__contact">
+                <p>Questions? Reach us at:</p>
+                <a href="mailto:servehomecleaning@gmail.com">servehomecleaning@gmail.com</a>
+                <a href="tel:+12062097707">(206) 209-7707</a>
+            </div>
+        </div>
+        <div class="footer__copy">
+            <!-- Required on every page for A2P 10DLC registration. -->
+            <p class="footer__legal">
+                <a href="/privacy">Privacy Policy</a> &middot;
+                <a href="/sms-terms">SMS Terms</a>
+            </p>
+            <p>&copy; 2026 Serve Cleaning. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <div class="serve-sticky-cta">
+        <p class="serve-sticky-cta__text">Want your exact number?</p>
+        <a href="/#quote" class="btn btn--primary">Get my instant quote &rarr;</a>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

@@ -58,6 +58,31 @@
   Content-Type: text/html; charset=utf-8
   Cache-Control: public, max-age=0, must-revalidate
 
+# Published pricing and scope. Both render their tables from script.js, so a
+# stale copy of either would show numbers that no longer match the calculator —
+# the one thing the shared price function exists to prevent. Same revalidate
+# rule as the other pages, and both path forms because the asset server
+# resolves /pricing to /pricing.html.
+/pricing
+  Content-Type: text/html; charset=utf-8
+  Cache-Control: public, max-age=0, must-revalidate
+
+/pricing.html
+  Content-Type: text/html; charset=utf-8
+  Cache-Control: public, max-age=0, must-revalidate
+
+/services
+  Content-Type: text/html; charset=utf-8
+  Cache-Control: public, max-age=0, must-revalidate
+
+/services.html
+  Content-Type: text/html; charset=utf-8
+  Cache-Control: public, max-age=0, must-revalidate
+
+/sitemap.xml
+  Content-Type: application/xml; charset=utf-8
+  Cache-Control: public, max-age=3600
+
 # Photos are content-stable and heavy. Cache them properly.
 /images/*
   Cache-Control: public, max-age=604800

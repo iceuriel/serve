@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<!--
+    /services — what is actually in each clean.
+
+    The room-by-room matrix and the add-on prices are rendered by script.js
+    from SERVE_SCOPE and PRICING. Do not hardcode either into this file.
+
+    SERVE_SCOPE is meant to have three consumers, not one: this matrix today,
+    and the partner job brief and photo-verification shot list next. A task
+    written into the markup here would appear on the website and nowhere else,
+    which is how a cleaner ends up not knowing what was sold.
+
+    The nav below is byte-identical to index.html and pricing.html. See the
+    comment at the top of index.html for the full list of files carrying one.
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>What's Included — Deep, Recurring &amp; Move-Out Cleaning | Serve</title>
+    <meta name="description" content="Exactly what Serve cleans, room by room: a first deep clean, recurring weekly or biweekly upkeep, and move-in / move-out cleaning for empty homes in Greater Boston. Add-ons, exclusions and prices all published up front.">
+    <link rel="canonical" href="https://servecleaning.com/services">
+    <link rel="icon" type="image/x-icon" href="images/favicon.ico">
+    <link rel="icon" type="image/svg+xml" href="images/favicon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="images/favicon-32.png">
+    <link rel="apple-touch-icon" href="images/apple-touch-icon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Montserrat:wght@500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="serve-has-sticky">
+
+    <!-- NAV — byte-identical in index.html, pricing.html and services.html.
+         Paths are absolute so the same block works from any of them. -->
+    <nav class="nav">
+        <div class="nav__inner">
+            <a href="/" class="nav__logo">Serve</a>
+            <ul class="nav__links">
+                <li><a href="/#how-it-works">How It Works</a></li>
+                <li><a href="/pricing">Pricing</a></li>
+                <li><a href="/services">Services</a></li>
+                <li><a href="/#quote" class="nav__cta serve-pulse">Instant quote</a></li>
+            </ul>
+            <button class="nav__hamburger" aria-label="Open menu" aria-expanded="false">
+                <span></span><span></span><span></span>
+            </button>
+        </div>
+        <div class="nav__mobile-menu" id="mobile-menu">
+            <ul>
+                <li><a href="/#how-it-works">How It Works</a></li>
+                <li><a href="/pricing">Pricing</a></li>
+                <li><a href="/services">Services</a></li>
+                <li><a href="/#quote">Instant quote</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <header class="serve-page-head">
+        <h1>What's included in a Serve clean</h1>
+        <p>Three services, written down in full. Nothing decided at the door.</p>
+    </header>
+
+    <section class="serve-section" id="services">
+        <div class="serve-section__inner">
+            <div class="serve-cards">
+
+                <article class="serve-card">
+                    <span class="serve-card__badge">50% off</span>
+                    <h2 class="serve-card__title">First Clean with Serve</h2>
+                    <p class="serve-card__lede">Your first time with us, or any home that hasn't had a deep clean in a while.</p>
+                    <ul class="serve-card__list">
+                        <li>Every room taken back to baseline &mdash; this is the reset recurring visits maintain</li>
+                        <li>Baseboards, door frames, and switch plates wiped down</li>
+                        <li>Shower glass, grout, and tile detailed</li>
+                        <li>Behind and under anything that moves</li>
+                    </ul>
+                    <div class="serve-card__foot">
+                        <span class="serve-card__range">
+                            Typical range
+                            <strong data-serve-card-range="deep">&mdash;</strong>
+                        </span>
+                        <button type="button" class="btn btn--primary btn--full serve-prefill" data-service="deep">Get my price &rarr;</button>
+                    </div>
+                </article>
+
+                <article class="serve-card">
+                    <span class="serve-card__badge">$50 off visits 2&ndash;4</span>
+                    <h2 class="serve-card__title">Recurring</h2>
+                    <p class="serve-card__lede">Homes already at baseline that you want kept there &mdash; weekly, biweekly, or monthly.</p>
+                    <ul class="serve-card__list">
+                        <li>Kitchen and bathrooms fully reset every visit</li>
+                        <li>Floors vacuumed and mopped throughout</li>
+                        <li>Same cleaner whenever scheduling allows</li>
+                        <li>Linen changes included at no charge</li>
+                    </ul>
+                    <div class="serve-card__foot">
+                        <span class="serve-card__range">
+                            Typical range, per visit
+                            <strong data-serve-card-range="recurring">&mdash;</strong>
+                        </span>
+                        <button type="button" class="btn btn--primary btn--full serve-prefill" data-service="recurring">Get my price &rarr;</button>
+                    </div>
+                </article>
+
+                <article class="serve-card">
+                    <span class="serve-card__badge serve-card__badge--quiet">Empty homes</span>
+                    <h2 class="serve-card__title">Move In / Move Out</h2>
+                    <p class="serve-card__lede">Empty homes &mdash; moving in, moving out, listing a property, or preparing a family home for its next chapter.</p>
+                    <ul class="serve-card__list">
+                        <li>Inside the fridge, oven, and every cabinet and drawer</li>
+                        <li>Interior windows, sills, and tracks</li>
+                        <li>Baseboards, closets, and shelving throughout</li>
+                        <li>Priced for an empty unit &mdash; no furniture to work around</li>
+                    </ul>
+                    <div class="serve-card__foot">
+                        <span class="serve-card__range">
+                            Typical range
+                            <strong data-serve-card-range="moveinout">&mdash;</strong>
+                        </span>
+                        <button type="button" class="btn btn--primary btn--full serve-prefill" data-service="moveinout">Get my price &rarr;</button>
+                    </div>
+                </article>
+
+            </div>
+        </div>
+    </section>
+
+    <section class="serve-section serve-section--alt" id="in-every-clean">
+        <div class="serve-section__inner">
+            <h2>In every Serve clean</h2>
+            <p class="serve-section__sub">True of all three services, so it never appears as a line item.</p>
+            <ul class="serve-list">
+                <li>Supplies, vacuums, and equipment &mdash; you provide nothing</li>
+                <li>Bonded, insured, background-checked cleaners</li>
+                <li>Photo-verified before we lock up</li>
+                <li>Something not right? Tell us within 24 hours and we come back</li>
+                <li>All-in price &mdash; supplies and card fees included</li>
+            </ul>
+        </div>
+    </section>
+
+    <section class="serve-section" id="add-ons">
+        <div class="serve-section__inner">
+            <h2>Add-ons, &agrave; la carte</h2>
+            <p class="serve-section__sub">
+                Toggles on the quote form, priced before you book. Fridge and oven
+                interiors are already included in a move-in / move-out clean.
+            </p>
+            <ul class="serve-list">
+                <li><strong>Fridge interior</strong> &mdash; <span data-serve-addon="fridge">&mdash;</span></li>
+                <li><strong>Oven interior</strong> &mdash; <span data-serve-addon="oven">&mdash;</span></li>
+                <li><strong>Linen change, per bed</strong> &mdash; quoted with your booking, free on a recurring plan</li>
+            </ul>
+        </div>
+    </section>
+
+    <section class="serve-section serve-section--alt" id="not-included">
+        <div class="serve-section__inner">
+            <h2>Not included in any clean</h2>
+            <p class="serve-section__sub">
+                Published deliberately. A scope people can read is what stops a job
+                being renegotiated on the doorstep.
+            </p>
+            <ul class="serve-list serve-list--excluded">
+                <li>Exterior windows, or anything above ground-floor reach</li>
+                <li>Mold, biohazard, or hoarding-condition remediation</li>
+                <li>Post-construction debris</li>
+                <li>Pet waste and litter box contents</li>
+                <li>Furniture that takes more than one person to move</li>
+                <li>Laundry beyond linen changes</li>
+            </ul>
+            <p class="serve-note">Run into one of these? Tell us in the notes box and we'll quote it separately.</p>
+        </div>
+    </section>
+
+    <section class="serve-section" id="room-by-room">
+        <div class="serve-section__inner">
+            <h2>Room by room</h2>
+            <p class="serve-section__sub">
+                The full task list, side by side. Collapsed because nobody picks a
+                cleaner by reading a grid &mdash; but it is here when you want it.
+            </p>
+
+            <details class="serve-matrix-acc">
+                <summary>Show the full room-by-room comparison</summary>
+
+                <p class="serve-matrix-legend">
+                    <strong>&#10003;</strong> included &middot;
+                    <strong>+</strong> paid add-on &middot;
+                    <strong>&middot;</strong> not included
+                </p>
+
+                <div class="serve-table-wrap">
+                    <table class="serve-matrix">
+                        <caption class="serve-sr">Task-by-task comparison of the three Serve cleaning services</caption>
+                        <thead>
+                            <tr>
+                                <th scope="col">Task</th>
+                                <th scope="col">First Clean</th>
+                                <th scope="col">Recurring</th>
+                                <th scope="col">Move In / Out</th>
+                            </tr>
+                        </thead>
+                        <tbody data-serve-scope-rows><!-- rendered by script.js from SERVE_SCOPE --></tbody>
+                    </table>
+                </div>
+            </details>
+        </div>
+    </section>
+
+    <!-- FOOTER -->
+    <footer class="footer">
+        <div class="footer__inner">
+            <div class="footer__brand">
+                <span class="footer__logo">Serve</span>
+                <p>Professional home cleaning for Greater Boston.</p>
+            </div>
+            <div class="footer__contact">
+                <p>Questions? Reach us at:</p>
+                <a href="mailto:servehomecleaning@gmail.com">servehomecleaning@gmail.com</a>
+                <a href="tel:+12062097707">(206) 209-7707</a>
+            </div>
+        </div>
+        <div class="footer__copy">
+            <!-- Required on every page for A2P 10DLC registration. -->
+            <p class="footer__legal">
+                <a href="/privacy">Privacy Policy</a> &middot;
+                <a href="/sms-terms">SMS Terms</a>
+            </p>
+            <p>&copy; 2026 Serve Cleaning. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <div class="serve-sticky-cta">
+        <p class="serve-sticky-cta__text">Know which one you need?</p>
+        <a href="/#quote" class="btn btn--primary">Get my instant quote &rarr;</a>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

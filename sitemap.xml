@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Only pages that are meant to be indexed and reachable.
+
+    Extensionless paths, because that is what the asset server actually serves
+    and what every link on the site points at — /pricing, not /pricing.html.
+    Listing both forms would publish two URLs for one page.
+
+    Adding a page? It needs THREE things, not one:
+      1. an entry here
+      2. a line in scripts/build-site.sh — the publish allow-list
+      3. a cache rule in _headers
+    Miss the second and the page 404s in production while working locally.
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url>
+        <loc>https://servecleaning.com/</loc>
+        <lastmod>2026-08-19</lastmod>
+        <changefreq>weekly</changefreq>
+        <priority>1.0</priority>
+    </url>
+    <url>
+        <loc>https://servecleaning.com/pricing</loc>
+        <lastmod>2026-08-19</lastmod>
+        <changefreq>monthly</changefreq>
+        <priority>0.9</priority>
+    </url>
+    <url>
+        <loc>https://servecleaning.com/services</loc>
+        <lastmod>2026-08-19</lastmod>
+        <changefreq>monthly</changefreq>
+        <priority>0.9</priority>
+    </url>
+    <url>
+        <loc>https://servecleaning.com/privacy</loc>
+        <lastmod>2026-08-16</lastmod>
+        <changefreq>yearly</changefreq>
+        <priority>0.2</priority>
+    </url>
+    <url>
+        <loc>https://servecleaning.com/sms-terms</loc>
+        <lastmod>2026-08-16</lastmod>
+        <changefreq>yearly</changefreq>
+        <priority>0.2</priority>
+    </url>
+</urlset>

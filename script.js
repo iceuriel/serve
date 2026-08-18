@@ -599,7 +599,13 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
     const zipWaitlist  = $('zip-waitlist');
     const waitlistCopy = $('waitlist-copy');
 
-    /* Steppers */
+    /* Steppers.
+       `stepperSet` holds one setter per stepper so the prefill path can move a
+       value the same way a click does — clamped, re-rendered, and pushed into
+       state through the same onChange. Writing data-value directly from outside
+       would leave the visible number and the button disabled-states stale. */
+    const stepperSet = {};
+
     function initStepper(elId, valueId, onChange) {
         const el = $(elId);
         const valEl = $(valueId);
@@ -613,16 +619,19 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
             el.querySelector('[data-dir="-1"]').disabled = v <= min;
             el.querySelector('[data-dir="1"]').disabled  = v >= max;
         }
+        function apply(v) {
+            v = Math.max(min, Math.min(max, v));
+            el.setAttribute('data-value', String(v));
+            render();
+            onChange(v);
+        }
         el.querySelectorAll('.stepper__btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 const dir = parseInt(btn.getAttribute('data-dir'), 10);
-                let v = parseInt(el.getAttribute('data-value'), 10) + dir;
-                v = Math.max(min, Math.min(max, v));
-                el.setAttribute('data-value', String(v));
-                render();
-                onChange(v);
+                apply(parseInt(el.getAttribute('data-value'), 10) + dir);
             });
         });
+        stepperSet[elId] = apply;
         render();
         onChange(parseInt(el.getAttribute('data-value'), 10));
     }
@@ -1213,6 +1222,110 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
         $('overflow-submit').disabled = true;
     });
 
+    /* ========================================================
+       PREFILL — arriving from /pricing, /services, or a homepage teaser
+
+       Published price tables are only useful if clicking a number puts that
+       configuration into the calculator. Both routes end up here:
+
+         cross-page   /?beds=2&baths=1&service=deep#quote
+         same-page    window.ServeQuote.applyPrefill(...) from a teaser row
+
+       WHY THIS LANDS ON BUILD, NOT PRICE, WHEN THERE IS NO ZIP
+       ------------------------------------------------------------
+       The build spec asked for the Price step directly. It cannot safely go
+       there without a ZIP. `state.zip` gates two separate things: coverage
+       (an unlisted ZIP must get the waitlist, never a price) and the $25
+       extended-area fee. Jumping to Price with `zip: ''` would quote every
+       visitor the CORE rate, and — worse — Step 3 would then submit a booking
+       with no ZIP at all, which breaks `property_key`, skips the PROPERTIES
+       write, and can put an out-of-area job on the schedule.
+
+       So: everything else is filled in, and the visitor lands on Build with
+       one field left and the cursor already in it. If a ZIP IS resolvable —
+       already typed this session, or passed as `&zip=` on the link — it goes
+       straight to Price as specified.
+       ======================================================== */
+
+    /* The published tables speak in services; the calculator speaks in a
+       service plus a frequency. `recurring` is not a third service type — it is
+       a First Clean with a plan attached, so it maps to biweekly, the middle
+       option and the one most recurring customers pick. */
+    const PREFILL_SERVICES = {
+        deep:      { service: 'first_clean', frequency: 'once' },
+        recurring: { service: 'first_clean', frequency: 'biweekly' },
+        moveinout: { service: 'move_out',    frequency: 'once' },
+    };
+
+    function applyPrefill(cfg) {
+        cfg = cfg || {};
+        try {
+            if (cfg.zip && /^\d{5}$/.test(String(cfg.zip))) {
+                zipInput.value = String(cfg.zip);
+                evaluateZip();
+            }
+
+            if (cfg.beds  != null && stepperSet['stepper-bedrooms'])  stepperSet['stepper-bedrooms'](Number(cfg.beds));
+            if (cfg.baths != null && stepperSet['stepper-bathrooms']) stepperSet['stepper-bathrooms'](Number(cfg.baths));
+
+            const map = PREFILL_SERVICES[cfg.service];
+            if (map) {
+                const radio = buildForm.querySelector('input[name="service"][value="' + map.service + '"]');
+                if (radio && !radio.checked) {
+                    radio.checked = true;
+                    /* Dispatch rather than assigning state directly: the change
+                       handler is what clears add-ons when the service is not a
+                       First Clean, and skipping it leaves them armed. */
+                    radio.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                state.frequency = map.frequency;
+            }
+
+            if (typeof serveRetirePulse === 'function') serveRetirePulse();
+
+            /* 5+ bedrooms has no flat rate — send it down the same custom-quote
+               path the form would, rather than to a price that does not exist. */
+            if (state.bedrooms >= PRICING.OVERFLOW_BEDROOMS) { setView('overflow'); return; }
+
+            if (state.zip.length === 5 && state.tier !== 'unknown') {
+                syncAddonsToService();
+                recompute();
+                renderPrice();
+                setView(2);
+                prefetchAvailability();
+            } else {
+                setView(1);
+                zipInput.focus({ preventScroll: true });
+            }
+        } catch (err) {
+            /* A prefill is a convenience. If anything about it fails the
+               calculator must still be sitting there, usable, at Step 1. */
+            console.warn('Prefill could not be applied.', err);
+        }
+    }
+
+    /* The only surface the shared module talks to. Absent on /pricing and
+       /services — where this IIFE returns early — which is exactly how the
+       shared click handler tells a same-page prefill from a cross-page one. */
+    window.ServeQuote = { applyPrefill: applyPrefill };
+
+    (function readPrefillParams() {
+        let params;
+        try { params = new URLSearchParams(location.search); } catch (_) { return; }
+        const beds    = params.get('beds');
+        const baths   = params.get('baths');
+        const service = params.get('service');
+        const zip     = params.get('zip');
+        if (beds == null && baths == null && service == null) return;   // nothing to do
+
+        applyPrefill({
+            beds:    beds  != null && /^\d+$/.test(beds)  ? parseInt(beds, 10)  : null,
+            baths:   baths != null && /^\d+$/.test(baths) ? parseInt(baths, 10) : null,
+            service: service,
+            zip:     zip,
+        });
+    })();
+
     /* --- Utils --- */
     function isEmail(v) {
         return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((v || '').trim());
@@ -1222,4 +1335,335 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
     document.querySelectorAll('.flow-input').forEach(el => {
         el.addEventListener('input', () => el.classList.remove('error'));
     });
+})();
+
+
+/* ============================================================
+   SERVE — SHARED PAGE MODULE
+   Loaded by index.html, pricing.html and services.html.
+
+   Everything below is page-agnostic: each block looks for its own hook and
+   does nothing at all when that hook is absent. That is what lets one
+   script.js serve three pages with no per-page bundles and no build step.
+
+   Selectors here are classes and data-attributes rather than ids, on purpose.
+   tests/static-checks.test.js asserts that every id script.js looks up exists
+   in index.html — an id that only lived on /pricing would fail a test that is
+   otherwise doing useful work.
+   ============================================================ */
+
+
+/* ------------------------------------------------------------
+   1. CTA pulse
+
+   A slow halo on the two entry-point CTAs. It retires the moment the visitor
+   touches the quote form: the animation's whole job is "notice me", and once
+   noticed it is only motion competing with the form.
+   ------------------------------------------------------------ */
+function serveRetirePulse() {
+    document.querySelectorAll('.serve-pulse').forEach(el => el.classList.add('is-retired'));
+}
+
+(function initPulseRetirement() {
+    const quote = document.querySelector('#quote');
+    if (!quote) return;
+    ['click', 'input', 'change'].forEach(evt =>
+        quote.addEventListener(evt, serveRetirePulse, { once: true }));
+})();
+
+
+/* ------------------------------------------------------------
+   2. Published price ranges
+
+   Computed by calling the live computeQuote — the same function behind the
+   calculator. Nothing here is a hardcoded number, so a published range cannot
+   drift from the quote a visitor is then shown. Change PRICING and every table
+   on the site moves with it.
+
+   Ranges are quoted at a CORE ZIP. Extended-area ZIPs add
+   PRICING.EXTENDED_ZIP_FEE per visit, which the calculator applies once a real
+   ZIP is entered; the pages say so in prose rather than publishing two tables.
+   ------------------------------------------------------------ */
+const SERVE_RANGE_ZIP = '02116';        /* Back Bay — CORE tier, no travel fee */
+
+const SERVE_SIZES = [
+    { key: 'studio', label: 'Studio',    beds: 0, baths: 1 },
+    { key: '1br1ba', label: '1BR / 1BA', beds: 1, baths: 1 },
+    { key: '2br1ba', label: '2BR / 1BA', beds: 2, baths: 1 },
+    { key: '2br2ba', label: '2BR / 2BA', beds: 2, baths: 2 },
+    { key: '3br2ba', label: '3BR / 2BA', beds: 3, baths: 2 },
+];
+
+const SERVE_SERVICES = [
+    { key: 'deep',      label: 'First Clean',   sub: '50% off' },
+    { key: 'recurring', label: 'Recurring',     sub: 'per visit' },
+    { key: 'moveinout', label: 'Move In / Out', sub: 'empty home' },
+];
+
+/**
+ * Low/high range for one cell, in whole dollars. Returns null when a
+ * combination has no flat rate, so a cell renders an em dash rather than "$0".
+ *
+ * What the two ends mean differs by column, and the pages say which:
+ *   deep / moveinout  — lightly lived-in vs. heavy-duty condition
+ *   recurring         — weekly (cheapest per visit) vs. monthly
+ */
+function serveRange(beds, baths, service) {
+    if (typeof computeQuote !== 'function') return null;
+    const q = (condition, svc) => computeQuote({
+        bedrooms: beds, bathrooms: baths, service: svc, condition: condition,
+        addonFridge: false, addonOven: false, zip: SERVE_RANGE_ZIP, frequency: 'once',
+    });
+    try {
+        if (service === 'deep')      return [q('light', 'first_clean').displayPrice, q('heavy', 'first_clean').displayPrice];
+        if (service === 'moveinout') return [q('light', 'move_out').displayPrice,    q('heavy', 'move_out').displayPrice];
+        if (service === 'recurring') {
+            const f = q('standard', 'first_clean').freqSteady;
+            return [f.weekly, f.monthly];
+        }
+    } catch (_) { /* fall through to null */ }
+    return null;
+}
+
+function serveRangeText(range) {
+    if (!range) return '—';
+    return range[0] === range[1] ? '$' + range[0] : '$' + range[0] + '–$' + range[1];
+}
+
+/* One price cell: a real button, so it is keyboard-reachable and announced as
+   actionable, carrying the config it should load into the calculator. */
+function servePriceCellHtml(size, service) {
+    const range = serveRange(size.beds, size.baths, service.key);
+    /* data-label carries the column header down to narrow screens, where the
+       table collapses to stacked cards and the <thead> is hidden. */
+    const label = ' data-label="' + service.label + '"';
+    if (!range) return '<td class="serve-cell serve-cell--empty"' + label + '>—</td>';
+    const spoken = serveRangeText(range).replace('–', ' to ');
+    return '<td class="serve-cell"' + label + '>' +
+        '<button type="button" class="serve-prefill serve-cell__btn"' +
+        ' data-beds="' + size.beds + '" data-baths="' + size.baths + '" data-service="' + service.key + '"' +
+        ' aria-label="' + size.label + ', ' + service.label + ', ' + spoken +
+        '. Get an instant quote for this home.">' +
+        '<span class="serve-cell__price">' + serveRangeText(range) + '</span>' +
+        '<span class="serve-cell__go" aria-hidden="true">Get my price →</span>' +
+        '</button></td>';
+}
+
+/* Full 5 x 3 table — /pricing */
+(function renderFullPriceTable() {
+    const body = document.querySelector('[data-serve-price-rows]');
+    if (!body) return;
+    body.innerHTML = SERVE_SIZES.map(size =>
+        '<tr><th scope="row" class="serve-size">' + size.label + '</th>' +
+        SERVE_SERVICES.map(svc => servePriceCellHtml(size, svc)).join('') +
+        '</tr>').join('');
+})();
+
+/* Three-row teaser — homepage. First Clean only: it is the entry product and
+   the only number a first-time visitor is actually choosing between. */
+(function renderTeaserTable() {
+    const body = document.querySelector('[data-serve-teaser-rows]');
+    if (!body) return;
+    const wanted = ['1br1ba', '2br1ba', '3br2ba'];
+    body.innerHTML = SERVE_SIZES.filter(s => wanted.indexOf(s.key) !== -1).map(size =>
+        '<tr><th scope="row" class="serve-size">' + size.label + '</th>' +
+        servePriceCellHtml(size, SERVE_SERVICES[0]) +
+        '</tr>').join('');
+})();
+
+/* Headline band — the widest honest First Clean span across the published
+   sizes, so the first thing on /pricing is a number rather than a preamble. */
+(function renderHeadlineBand() {
+    const el = document.querySelector('[data-serve-headline-range]');
+    if (!el) return;
+    const lows = [], highs = [];
+    SERVE_SIZES.forEach(s => {
+        const r = serveRange(s.beds, s.baths, 'deep');
+        if (r) { lows.push(r[0]); highs.push(r[1]); }
+    });
+    if (!lows.length) return;
+    el.textContent = '$' + Math.min.apply(null, lows) + '–$' + Math.max.apply(null, highs);
+})();
+
+/* Add-on prices — /services. Read from PRICING for the same reason the tables
+   are: the calculator sells these as toggles, and a page that names a different
+   number than the toggle does is worse than a page that names none. */
+(function renderAddonPrices() {
+    document.querySelectorAll('[data-serve-addon]').forEach(el => {
+        const key = el.getAttribute('data-serve-addon');
+        if (typeof PRICING === 'object' && PRICING.ADDONS && PRICING.ADDONS[key] != null) {
+            el.textContent = '$' + PRICING.ADDONS[key];
+        }
+    });
+})();
+
+/* Per-card typical range — /services */
+(function renderCardRanges() {
+    document.querySelectorAll('[data-serve-card-range]').forEach(el => {
+        const svc = el.getAttribute('data-serve-card-range');
+        const lows = [], highs = [];
+        SERVE_SIZES.forEach(s => {
+            const r = serveRange(s.beds, s.baths, svc);
+            if (r) { lows.push(r[0]); highs.push(r[1]); }
+        });
+        if (lows.length) {
+            el.textContent = '$' + Math.min.apply(null, lows) + '–$' + Math.max.apply(null, highs);
+        }
+    });
+})();
+
+
+/* ------------------------------------------------------------
+   3. Scope of work — the canonical object
+
+   Deliberately a standalone data structure rather than markup. The room-by-room
+   matrix on /services renders from it today; the partner job brief and the
+   photo-verification shot list are meant to render from it next. One source,
+   three consumers — a task added here appears everywhere it should.
+
+     1 = included     0 = not included     2 = paid add-on
+
+   Fridge and oven interiors are coded 2 on First Clean because the calculator
+   sells them there as $45 / $40 toggles (PRICING.ADDONS), and 1 on move-in/out
+   because that service bundles them into its multiplier. Linen change is 1 on
+   recurring (free, per the plan), 0 on First Clean, and 0 on move-in/out, where
+   there are no beds to make.
+   ------------------------------------------------------------ */
+const SERVE_SCOPE = [
+    { group: 'Kitchen', tasks: [
+        { task: 'Counters, backsplash, and sink degreased', deep: 1, recurring: 1, moveinout: 1 },
+        { task: 'Exterior of all appliances',               deep: 1, recurring: 1, moveinout: 1 },
+        { task: 'Stovetop and range hood',                  deep: 1, recurring: 1, moveinout: 1 },
+        { task: 'Inside the fridge',                        deep: 2, recurring: 0, moveinout: 1 },
+        { task: 'Inside the oven',                          deep: 2, recurring: 0, moveinout: 1 },
+        { task: 'Inside cabinets and drawers',              deep: 0, recurring: 0, moveinout: 1 },
+    ]},
+    { group: 'Bathrooms', tasks: [
+        { task: 'Toilet, tub, and sink disinfected',        deep: 1, recurring: 1, moveinout: 1 },
+        { task: 'Mirrors and fixtures polished',            deep: 1, recurring: 1, moveinout: 1 },
+        { task: 'Shower glass and tile detailed',           deep: 1, recurring: 0, moveinout: 1 },
+        { task: 'Grout scrubbed and brightened',            deep: 1, recurring: 0, moveinout: 1 },
+    ]},
+    { group: 'Bedrooms &amp; living', tasks: [
+        { task: 'Surfaces dusted, floors vacuumed',         deep: 1, recurring: 1, moveinout: 1 },
+        { task: 'Under and behind movable furniture',       deep: 1, recurring: 0, moveinout: 1 },
+        { task: 'Closets and shelving',                     deep: 0, recurring: 0, moveinout: 1 },
+        { task: 'Linen change',                             deep: 0, recurring: 1, moveinout: 0 },
+    ]},
+    { group: 'Throughout', tasks: [
+        { task: 'Floors vacuumed and mopped',               deep: 1, recurring: 1, moveinout: 1 },
+        { task: 'Baseboards and door frames',               deep: 1, recurring: 0, moveinout: 1 },
+        { task: 'Switch plates and handles',                deep: 1, recurring: 0, moveinout: 1 },
+        { task: 'Interior windows, sills, and tracks',      deep: 0, recurring: 0, moveinout: 1 },
+    ]},
+];
+
+const SERVE_SCOPE_MARKS = {
+    1: { glyph: '✓', label: 'Included',     cls: 'is-yes' },
+    2: { glyph: '+',      label: 'Paid add-on',  cls: 'is-addon' },
+    0: { glyph: '·', label: 'Not included', cls: 'is-no' },
+};
+
+(function renderScopeMatrix() {
+    const body = document.querySelector('[data-serve-scope-rows]');
+    if (!body) return;
+    body.innerHTML = SERVE_SCOPE.map(group =>
+        '<tr class="serve-matrix__group"><th scope="colgroup" colspan="4">' + group.group + '</th></tr>' +
+        group.tasks.map(t =>
+            '<tr><th scope="row" class="serve-matrix__task">' + t.task + '</th>' +
+            ['deep', 'recurring', 'moveinout'].map(k => {
+                const m = SERVE_SCOPE_MARKS[t[k]] || SERVE_SCOPE_MARKS[0];
+                return '<td class="serve-matrix__mark ' + m.cls + '">' +
+                       '<span aria-hidden="true">' + m.glyph + '</span>' +
+                       '<span class="serve-sr">' + m.label + '</span></td>';
+            }).join('') +
+            '</tr>').join('')
+    ).join('');
+})();
+
+
+/* ------------------------------------------------------------
+   4. Prefill links
+
+   Any .serve-prefill element carries the configuration it should load. On the
+   homepage window.ServeQuote exists and the calculator is set directly; on
+   /pricing and /services it does not, so the same element navigates to the
+   homepage carrying the config as query params.
+
+   Existing query params are preserved — losing src here would silently break
+   attribution for every visitor who arrived on a tagged poster or QR link and
+   then clicked a price.
+   ------------------------------------------------------------ */
+(function initPrefillLinks() {
+    const nodes = document.querySelectorAll('.serve-prefill');
+    if (!nodes.length) return;
+
+    function configOf(el) {
+        return {
+            beds:    el.getAttribute('data-beds'),
+            baths:   el.getAttribute('data-baths'),
+            service: el.getAttribute('data-service'),
+        };
+    }
+
+    function crossPageUrl(cfg) {
+        let params;
+        try { params = new URLSearchParams(location.search); } catch (_) { params = new URLSearchParams(); }
+        if (cfg.beds    != null) params.set('beds', cfg.beds);
+        if (cfg.baths   != null) params.set('baths', cfg.baths);
+        if (cfg.service != null) params.set('service', cfg.service);
+        const qs = params.toString();
+        return '/' + (qs ? '?' + qs : '') + '#quote';
+    }
+
+    nodes.forEach(el => {
+        el.addEventListener('click', function (e) {
+            const cfg = configOf(el);
+            e.preventDefault();
+            if (window.ServeQuote && typeof window.ServeQuote.applyPrefill === 'function') {
+                window.ServeQuote.applyPrefill(cfg);
+            } else {
+                location.href = crossPageUrl(cfg);
+            }
+        });
+    });
+})();
+
+
+/* ------------------------------------------------------------
+   5. Arrival cue
+
+   A hash jump moves the page with no explanation. A brief highlight on the
+   destination heading answers "why did it move" without a scroll animation
+   anyone has to sit through.
+   ------------------------------------------------------------ */
+(function initArrivalCue() {
+    let reduced = false;
+    try { reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (_) {}
+    if (reduced) return;
+
+    function cue() {
+        const id = (location.hash || '').slice(1);
+        if (!id) return;
+        let target = null;
+        try {
+            target = (window.CSS && typeof CSS.escape === 'function')
+                ? document.querySelector('#' + CSS.escape(id))
+                : document.getElementById(id);
+        } catch (_) { return; }
+        if (!target) return;
+        /* #quote holds five step panels and only one is ever visible, so the
+           first heading in DOM order is usually inside a hidden one. Prefer a
+           heading that is actually on screen; offsetParent is null for anything
+           display:none. */
+        const headings = [].slice.call(target.querySelectorAll('h1, h2, h3'));
+        const heading = headings.filter(h => h.offsetParent !== null)[0] || headings[0] || target;
+        heading.classList.remove('serve-arrive');
+        void heading.offsetWidth;              /* restart the animation on a repeat jump */
+        heading.classList.add('serve-arrive');
+        setTimeout(function () { heading.classList.remove('serve-arrive'); }, 1600);
+    }
+
+    window.addEventListener('hashchange', cue);
+    if (location.hash) setTimeout(cue, 260);   /* let the browser's own jump land first */
 })();

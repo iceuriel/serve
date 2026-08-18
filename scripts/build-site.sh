@@ -29,7 +29,14 @@ mkdir -p "$OUT"
 # are REQUIRED to stay reachable: Twilio's A2P 10DLC registration lists them and
 # carriers re-check them, so a 404 here can get the number's campaign revoked,
 # not merely rejected. They are plain HTML with no JS by design.
-cp index.html privacy.html sms-terms.html script.js style.css "$OUT"/
+#
+# pricing.html and services.html are served at /pricing and /services. Both are
+# linked from the nav of every page and listed in sitemap.xml — a page that is
+# advertised everywhere and staged nowhere 404s in production while working
+# perfectly on a local file open, which is the failure mode this list exists to
+# make impossible to reach by accident.
+cp index.html pricing.html services.html privacy.html sms-terms.html script.js style.css "$OUT"/
+cp sitemap.xml "$OUT"/
 cp -r images "$OUT"/
 
 # Response headers and vanity redirects. Both Cloudflare and Netlify read

@@ -147,8 +147,14 @@ console.log('\n=== 4. CTA copy is identical across every skin ===');
 /* Scoped to the actual controls — anchors pointing at the quote flow — not to
    every occurrence of the phrase. Headings elsewhere on the page are prose and
    may legitimately read differently ("Instant Quotes" in How It Works). The
-   rule is that a CONTROL says the same thing everywhere it appears. */
-const ctas = [...HTML.matchAll(/<a[^>]*href="#quote"[^>]*>([^<]+)<\/a>/g)].map(m => m[1].trim());
+   rule is that a CONTROL says the same thing everywhere it appears.
+
+   Both href forms count. The nav moved to the absolute "/#quote" when /pricing
+   and /services were added, because the nav block is now byte-identical across
+   three files and a bare "#quote" would point at the wrong page from two of
+   them. The hero stays relative — it only ever renders here. What is being
+   asserted is the LABEL, which did not change and must not. */
+const ctas = [...HTML.matchAll(/<a[^>]*href="\/?#quote"[^>]*>([^<]+)<\/a>/g)].map(m => m[1].trim());
 t('every CTA control reads "Instant quote"',
   ctas.length === 3 && ctas.every(c => c === 'Instant quote'), ctas);
 t('no skin touches the CTA', !/btn--primary|nav__cta/.test(JSON.stringify(vm.runInContext('HERO_SKINS', box))));

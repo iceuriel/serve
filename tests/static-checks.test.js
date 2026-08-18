@@ -127,9 +127,12 @@ js.includes('AVAILABILITY_TIMEOUT_MS = 5000') ? ok('5s timeout constant present'
 js.includes('if (!AVAILABILITY_SOURCE_URL)')  ? ok('empty-URL short circuit present') : fail('no empty-URL short circuit');
 
 /* 10. CTA copy unified — the CONTROLS, not every use of the phrase.
-   Headings are prose and may differ; a button must not. */
+   Headings are prose and may differ; a button must not.
+   Both href forms count: the nav uses the absolute "/#quote" so one nav block
+   can be byte-identical across index, pricing and services; the hero stays
+   relative. The label is what is under test and it did not change. */
 head('CTA copy');
-const cta = [...html.matchAll(/<a[^>]*href="#quote"[^>]*>([^<]+)<\/a>/g)].map(m => m[1].trim());
+const cta = [...html.matchAll(/<a[^>]*href="\/?#quote"[^>]*>([^<]+)<\/a>/g)].map(m => m[1].trim());
 cta.length === 3 && cta.every(c => c === 'Instant quote')
   ? ok('all ' + cta.length + ' CTA controls read "Instant quote"')
   : fail('CTA controls inconsistent: ' + JSON.stringify(cta));

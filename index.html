@@ -1,4 +1,25 @@
 <!DOCTYPE html>
+<!--
+    THE NAV AND FOOTER ARE REAL HTML IN EVERY FILE, NOT INJECTED BY JS.
+
+    Search engines and Twilio's A2P reviewers both follow links out of the
+    served markup; a nav that only exists after JavaScript runs is a nav that
+    some of them never see. The cost is that a nav edit is a five-file edit.
+
+    Files carrying a nav — change one, change the rest:
+
+        index.html      full nav  (canonical)
+        pricing.html    full nav  — byte-identical to this file's
+        services.html   full nav  — byte-identical to this file's
+        privacy.html    reduced nav (Home + Instant quote)
+        sms-terms.html  reduced nav (Home + Instant quote)
+
+    The two legal pages deliberately carry a SHORTER nav and no script tag.
+    They are load-bearing for A2P 10DLC registration and are kept as plain
+    HTML with no JS — which also means no hamburger, so a full link list would
+    be unreachable on a phone, where .nav__links is display:none until 721px.
+    Do not "fix" that by copying the full nav into them.
+-->
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -15,14 +36,16 @@
 </head>
 <body>
 
-    <!-- NAV -->
+    <!-- NAV — byte-identical in index.html, pricing.html and services.html.
+         Paths are absolute so the same block works from any of them. -->
     <nav class="nav">
         <div class="nav__inner">
-            <a href="#" class="nav__logo">Serve</a>
+            <a href="/" class="nav__logo">Serve</a>
             <ul class="nav__links">
-                <li><a href="#how-it-works">How It Works</a></li>
-                <li><a href="#examples">Examples</a></li>
-                <li><a href="#quote" class="nav__cta">Instant quote</a></li>
+                <li><a href="/#how-it-works">How It Works</a></li>
+                <li><a href="/pricing">Pricing</a></li>
+                <li><a href="/services">Services</a></li>
+                <li><a href="/#quote" class="nav__cta serve-pulse">Instant quote</a></li>
             </ul>
             <button class="nav__hamburger" aria-label="Open menu" aria-expanded="false">
                 <span></span><span></span><span></span>
@@ -30,9 +53,10 @@
         </div>
         <div class="nav__mobile-menu" id="mobile-menu">
             <ul>
-                <li><a href="#how-it-works">How It Works</a></li>
-                <li><a href="#examples">Examples</a></li>
-                <li><a href="#quote">Instant quote</a></li>
+                <li><a href="/#how-it-works">How It Works</a></li>
+                <li><a href="/pricing">Pricing</a></li>
+                <li><a href="/services">Services</a></li>
+                <li><a href="/#quote">Instant quote</a></li>
             </ul>
         </div>
     </nav>
@@ -45,7 +69,7 @@
         <div class="hero__content">
             <h1 class="hero__headline">Greater Boston's Premier Cleaning Service.</h1>
             <p class="hero__sub">Professional, insured, and background-checked cleaners — available for standard, deep, and move-out cleans across the Greater Boston area.</p>
-            <a href="#quote" class="btn btn--primary">Instant quote</a>
+            <a href="#quote" class="btn btn--primary serve-pulse">Instant quote</a>
         </div>
     </section>
 
@@ -80,12 +104,16 @@
                 <div class="step">
                     <div class="step__number">1</div>
                     <h3>Instant Quotes</h3>
-                    <p>Fill out your home details below and instantly calculate an honest price — and no commitment required.</p>
+                    <p>Fill out your home details below and instantly calculate an honest
+                    <a href="/pricing" class="serve-inline-link">price</a> — no commitment required.</p>
                 </div>
                 <div class="step">
                     <div class="step__number">2</div>
                     <h3>We Schedule Your Clean</h3>
-                    <p>Pick a time that works for you. Our team shows up on time, fully equipped, and ready to work.</p>
+                    <p>Whether it's your
+                    <a href="/services" class="serve-inline-link">first deep clean, a recurring visit, or a move-in</a>,
+                    pick a time that works for you. Our team shows up on time, fully
+                    equipped, and ready to work.</p>
                 </div>
                 <div class="step">
                     <div class="step__number">3</div>
@@ -510,6 +538,85 @@
                 </div>
             </div>
 
+        </div>
+    </section>
+
+    <!-- PRICING TEASER
+         Placed below the form, not above it. Someone who scrolls past the
+         calculator without using it has told us they will not fill in five
+         fields to find out what this costs — so they get a real number here
+         instead of leaving. Above the form it would compete with the thing it
+         is meant to feed.
+
+         Rows are rendered by script.js from computeQuote, the same function
+         behind the calculator, so a published price cannot drift from a
+         quoted one. Three sizes only: 1BR and 3BR bracket the market, and a
+         studio or a 4BR reads down or up from the nearest row. -->
+    <section class="serve-teaser serve-teaser--pricing" id="pricing-teaser">
+        <div class="serve-teaser__inner">
+            <h2 class="serve-teaser__title">What Boston homes actually pay</h2>
+            <p class="serve-teaser__sub">Your first clean with Serve, at half price. Tap any price to load that home into the calculator.</p>
+
+            <div class="serve-teaser__table">
+                <div class="serve-table-wrap">
+                    <table class="serve-table">
+                        <caption class="serve-sr">First clean price ranges by home size</caption>
+                        <thead>
+                            <tr>
+                                <th scope="col">Home</th>
+                                <th scope="col">First Clean <span>50% off</span></th>
+                            </tr>
+                        </thead>
+                        <tbody data-serve-teaser-rows><!-- rendered by script.js --></tbody>
+                    </table>
+                </div>
+                <p class="serve-table-note">All-in &mdash; supplies and card fees included.</p>
+            </div>
+
+            <p class="serve-teaser__cta"><a href="/pricing">See full pricing &rarr;</a></p>
+        </div>
+    </section>
+
+    <!-- SERVICES TEASER
+         Two bullets per card, chosen to DIFFERENTIATE rather than to sell.
+         "We bring supplies" is true of all three, so it tells a reader nothing
+         about which one they are — and this section's only job is helping them
+         recognise themselves. The selling happens on /services. -->
+    <section class="serve-teaser serve-teaser--services" id="services-teaser">
+        <div class="serve-teaser__inner">
+            <h2 class="serve-teaser__title">Three cleans. Pick the one that fits.</h2>
+            <p class="serve-teaser__sub">Most people start with a first clean and keep it going from there.</p>
+
+            <div class="serve-cards">
+                <article class="serve-card">
+                    <span class="serve-card__badge">50% off</span>
+                    <h3 class="serve-card__title">First Clean with Serve</h3>
+                    <ul class="serve-card__list">
+                        <li>Every room taken back to baseline</li>
+                        <li>Half price your first time with us</li>
+                    </ul>
+                </article>
+
+                <article class="serve-card">
+                    <span class="serve-card__badge">$50 off visits 2&ndash;4</span>
+                    <h3 class="serve-card__title">Recurring</h3>
+                    <ul class="serve-card__list">
+                        <li>Kitchen and bathrooms reset every visit</li>
+                        <li>Linen changes included at no charge</li>
+                    </ul>
+                </article>
+
+                <article class="serve-card">
+                    <span class="serve-card__badge serve-card__badge--quiet">Empty homes</span>
+                    <h3 class="serve-card__title">Move In / Move Out</h3>
+                    <ul class="serve-card__list">
+                        <li>Inside the fridge, oven, and every cabinet</li>
+                        <li>Priced for an empty unit</li>
+                    </ul>
+                </article>
+            </div>
+
+            <p class="serve-teaser__cta"><a href="/services">Compare all three &rarr;</a></p>
         </div>
     </section>
 

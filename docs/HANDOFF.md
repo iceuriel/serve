@@ -6,10 +6,143 @@ assistant with no access to this repo. Self-contained on purpose.
 **Companion doc:** `/docs/SCHEMA.md` — authoritative for every column's meaning
 and who writes it. This file is the narrative; that file is the contract.
 
-**Latest session: 2026-07-28.** Jump to
-[what changed on 2026-07-28](#session-2026-07-28) for the current state. The
-sections below it describe the 2026-07-27 build and remain accurate except where
-that section supersedes them.
+**Latest session: 2026-08-19.** Jump to
+[what changed on 2026-08-19](#session-2026-08-19) for the current state. The
+sections below it describe earlier builds and remain accurate except where a
+later section supersedes them.
+
+---
+
+## Session 2026-08-19
+
+**Prices and scope are now published.** Until this build no price appeared
+anywhere on the site until a visitor completed five calculator steps, and the
+only visible dollar figure was the `$130/hr` in the oversized-home fallback — an
+hourly rate shown exclusively to the people we had just told we could not price.
+Service descriptions were one-liners, so customers filled in the scope
+themselves and the gap surfaced at the door.
+
+### The site is now three pages, not one
+
+`/pricing` and `/services` join `/` as full pages, plus two compressed teasers
+on the homepage between the booking form and *After you book*. The teasers exist
+so someone who scrolls past the calculator without using it still sees a real
+number before they leave.
+
+### Every published price is computed, never written down
+
+**This is the part to protect.** No price on either new page or on the homepage
+teaser is a literal. All of them render at page load by calling `computeQuote` —
+the same function behind the calculator — from the shared module at the end of
+`script.js`. Change `PRICING` and every table on the site moves with it.
+
+A published range that disagrees with the quote a visitor is then shown is the
+worst failure this feature can have, and the only way to make it structurally
+impossible is to have one source. `tests/pricing-and-services.test.js` runs the
+real module against a fake DOM, reads the numbers back out of the markup it
+produced, and recomputes them independently — so replacing the render with a
+hardcoded table fails the suite on the next `PRICING` change.
+
+Ranges are quoted at `SERVE_RANGE_ZIP` (02116, CORE tier), so no travel fee is
+baked into them; the extended-area $25 is explained in prose and applied by the
+calculator once a real ZIP is entered.
+
+The same rule covers the add-on prices on `/services` and the room-by-room
+matrix, which renders from `SERVE_SCOPE`.
+
+### `SERVE_SCOPE` is meant to have three consumers
+
+It is a standalone exported object, not markup, because the partner job brief
+and the photo-verification shot list should render from it next. One source,
+three consumers — a task added there appears everywhere it should. A task
+written into the HTML would appear on the website and nowhere else, which is how
+a cleaner ends up not knowing what was sold.
+
+Coding worth remembering: fridge and oven interiors are `2` (paid add-on) on
+First Clean because the calculator sells them as `$45` / `$40` toggles, and `1`
+on move-in/out because that service bundles them into its multiplier. This
+mirrors `add_on_rev` being 0 on every move-in/out job.
+
+### Prefill lands on Build, not Price — deliberately
+
+Every price cell is a real `<button>` that loads that configuration into the
+calculator: directly on the homepage via `window.ServeQuote.applyPrefill`, and
+from the other two pages via `/?beds=2&baths=1&service=deep#quote`.
+
+**It stops at Build when there is no ZIP, and that is not an oversight.**
+`state.zip` gates coverage (an unlisted ZIP must get the waitlist, never a
+price) and the extended-area fee. Jumping to Price without one would quote every
+visitor the CORE rate and — worse — Step 3 would then submit with no ZIP at all,
+breaking `property_key`, skipping the PROPERTIES write, and potentially putting
+an out-of-area job on the schedule. Everything else is filled in and the cursor
+is already in the ZIP field. A `&zip=` param is supported, and with it the
+prefill goes straight to Price.
+
+**Existing query params are preserved on the hop.** Losing `src` when someone
+clicks a price would silently reset attribution for every visitor who arrived on
+a tagged poster or QR link. Asserted by test.
+
+### The nav is duplicated on purpose
+
+Nav and footer are real HTML in all five pages, never injected by JS — crawlers
+and Twilio's A2P reviewers both follow links out of the served markup. The cost
+is that a nav edit is a five-file edit, so **`index.html` opens with a comment
+listing every file that carries one.** The three content pages are byte-identical
+and a test enforces it.
+
+`privacy.html` and `sms-terms.html` keep their **shorter** nav and no script tag.
+They are load-bearing for A2P registration and are plain HTML by design — which
+means no hamburger, so a full link list would be unreachable on a phone, where
+`.nav__links` is `display:none` until 721px. Do not "fix" that.
+
+`Examples` lost its nav item. The Serve Standard section (`#examples`) is
+unchanged and still in its position.
+
+### The CTA pulse
+
+A slow halo on the hero and header CTAs only. Four properties, all load-bearing:
+
+- **`box-shadow`, never `transform: scale`.** Scaling a button with a text label
+  shifts it off the pixel grid and the label goes visibly soft mid-cycle.
+- **Stops on hover and focus.** A button still pulsing under the pointer reads
+  as unresponsive.
+- **Retires on engagement.** `serveRetirePulse()` fires on first interaction
+  with `#quote`. The pulse means "notice me"; once noticed it is only motion
+  competing with the form.
+- **Respects `prefers-reduced-motion`.**
+
+The halo is white, not the brand accent. Both CTAs sit on the dark navy, and a
+`#4b5563` halo on a gray button against that bar is invisible. `--serve-accent`
+and `--serve-accent-rgb` are defined as the existing brand gray and used for
+inline links, the arrival cue and the on-light pulse variant.
+
+The existing button shadows are repeated inside both keyframe sets. `box-shadow`
+is one property — animating it without the insets drops the bevel for the whole
+cycle.
+
+### Two tests were changed, and why
+
+The nav CTA moved from `#quote` to `/#quote` so one nav block can be
+byte-identical across three files. `static-checks` §10 and `segment-and-skins`
+§4 both matched the literal `href="#quote"` and went to zero matches. Both now
+accept either form. **The assertion itself did not weaken** — what is under test
+is that every control leading to the quote flow reads `Instant quote`, which is
+unchanged and still enforced at exactly three controls.
+
+### Still open
+
+- **The `$130/hr` top end.** Homes at 5+ bedrooms still fall through to the
+  hourly custom-quote path — the one pricing mechanic the brand otherwise
+  rejects. The published table stops at 3BR/2BA and 4BR still gets a flat rate,
+  so the wall is two rows past the table's edge; that is why this shipped. The
+  real fix is separating fixed overhead from marginal rate at the top end and
+  extending flat-rate pricing upward. Uriel decided on 2026-08-19 to ship
+  without it.
+- **No browser verification.** The Chrome extension was not connected during
+  this build, so the pages were verified by executing the real module against a
+  fake DOM, by static assertions, and by serving `_site` locally and confirming
+  every route returns 200. **Nobody has looked at these pages rendered.** Do that
+  before pointing traffic at them.
 
 ---
 
@@ -382,7 +515,18 @@ most of its effort eliminating.
    the feed, or the LEADS upsert must still let a customer book.
 8. **Never widen a sheet the operator designed.** Header-driven writes; report
    what has no column rather than creating one.
-9. **The SMS consent surface is regulated, not cosmetic.** `/privacy`,
+9. **A new page needs four things, not one.** A file added to the repo is
+   private by default — `scripts/build-site.sh` publishes an allow-list, which
+   is the mechanism that keeps engineering docs and personal material off the
+   marketing domain. So a page also needs: a `cp` line in that script, a cache
+   rule in `_headers` (both `/page` and `/page.html` — the asset server resolves
+   one to the other), and an entry in `sitemap.xml`. Miss the build script and
+   the page 404s in production while working perfectly on a local file open.
+   `tests/pricing-and-services.test.js` §9 pins this for the two current pages.
+10. **Published prices are never literals.** Every price on the site renders by
+   calling `computeQuote`. A number typed into HTML is a promise that goes stale
+   the next time `PRICING` changes, silently, on a page nobody re-reads.
+11. **The SMS consent surface is regulated, not cosmetic.** `/privacy`,
    `/sms-terms`, the two consent checkboxes and their wording were submitted to
    Twilio for A2P 10DLC registration, and carriers re-check them *after*
    approval. Breaking one can revoke a live campaign and silence every booking
