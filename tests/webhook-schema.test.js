@@ -216,5 +216,44 @@ t('notes never empty on any shape', [1,2,3,4].every(r => String(nt(r)).trim() !=
 t('notes still schedule-summary only (no customer text)',
   [1,2,3,4].every(r => !/dog|driveway|Contact:/i.test(String(nt(r)))));
 
+/* ============================================================
+   The site and the webhook deploy SEPARATELY, so the site can always be
+   running ahead of the script — a push reaches Cloudflare in minutes while the
+   Apps Script deployment is a manual step someone has to remember.
+
+   That makes one property load-bearing: a payload key the deployed webhook has
+   never heard of must be ignored, not fatal. Verified against the real thing on
+   2026-08-21 by running the pre-r8 script against an r8 payload — the booking
+   landed intact and the three new fields were simply dropped. This pins the
+   general rule so the next field added cannot break a live booking.
+   ============================================================ */
+console.log('\n=== 9. an unknown payload key never breaks a booking ===');
+const FWD = build();
+const withJunk = Object.assign({}, BASE, {
+  submission_id: 'fwd-1', email: 'fwd@example.com',
+  some_field_from_a_newer_site: 'hello',
+  another_new_one: 42,
+  nested_thing: { a: 1 },
+});
+let fwdThrew = null, fwdRes = null;
+try { fwdRes = FWD.post(withJunk); } catch (e) { fwdThrew = e; }
+t('a payload carrying unknown keys does not throw', !fwdThrew, fwdThrew && fwdThrew.message);
+t('and still reports ok', fwdRes && fwdRes.status === 'ok', fwdRes && fwdRes.status);
+t('the JOBS row is still written', FWD.tabs.JOBS._rows.length === 2);
+const fwdRow = FWD.tabs.JOBS._rows[1] || [];
+const fwdCol = n => fwdRow[JOBS_36.indexOf(n)];
+t('known fields are unaffected by the unknown ones',
+  fwdCol('beds') === 2 && fwdCol('quoted_price') === 214 && fwdCol('zip') === '02134',
+  [fwdCol('beds'), fwdCol('quoted_price'), fwdCol('zip')]);
+t('no unknown key leaked into quote_meta',
+  !/some_field_from_a_newer_site|another_new_one|nested_thing/.test(String(fwdCol('quote_meta'))));
+/* Half-baths reach the sheet as a decimal — the `baths` column has always been
+   numeric, but nothing had ever sent it a fraction before 2026-08-21. */
+const HALF = build();
+HALF.post(Object.assign({}, BASE, { submission_id: 'half-1', email: 'h@example.com', bathrooms: 2.5 }));
+t('a half-bath rides through to the sheet as 2.5, not truncated',
+  HALF.tabs.JOBS._rows[1][JOBS_36.indexOf('baths')] === 2.5,
+  HALF.tabs.JOBS._rows[1][JOBS_36.indexOf('baths')]);
+
 console.log('\n' + (bad ? 'FAILURES: ' + bad : 'ALL ASSERTIONS PASSED'));
 process.exit(bad ? 1 : 0);
