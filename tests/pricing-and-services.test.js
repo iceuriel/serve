@@ -17,9 +17,16 @@ const fs   = require('fs');
 const path = require('path');
 const vm   = require('vm');
 
-const read = f => fs.readFileSync(path.join(REPO_ROOT, f), 'utf8');
+/* Line endings are normalised on read. _headers is CRLF in this repo, and a
+   pattern with a literal \n in the middle of it silently matches nothing —
+   `^x$` under /m tolerates \r\n, but `x\n\s*y` does not. That difference
+   reported a missing charset header three times over while the header was
+   present and correct, which is the worst kind of test failure: one that sends
+   you to edit a file that was never wrong. */
+const read = f => fs.readFileSync(path.join(REPO_ROOT, f), 'utf8').replace(/\r\n/g, '\n');
 
 const SITE     = read('script.js');
+const GEO      = read('serve-geo-data.js');
 const INDEX    = read('index.html');
 const PRICING  = read('pricing.html');
 const SERVICES = read('services.html');
@@ -113,9 +120,15 @@ function runModule(opts) {
   /* `function` declarations land on the vm global by themselves; `const` ones
      do not — they stay in the script's lexical scope. Export the handful this
      file needs to inspect rather than reaching for them and getting undefined. */
-  const exports = '\n;globalThis.__serve = { PRICING, ZIP_TIERS, SERVE_RANGE_ZIP, SERVE_SIZES, SERVE_SCOPE };';
+  const exports = '\n;globalThis.__serve = { PRICING, ZIP_TIERS, SERVE_RANGE_ZIP, SERVE_RANGE_GEO, SERVE_SIZES, SERVE_SCOPE };';
 
-  vm.runInContext(engine + '\n' + shared + exports, box);
+  /* serve-geo-data.js is a separate <script> tag in the browser, concatenated
+     here because the two share one lexical scope on a real page. `withoutGeo`
+     reproduces the tag being absent, which must still price every home rather
+     than throwing — that is the degradation path, and it is asserted below. */
+  const geo = opts.withoutGeo ? '' : GEO + '\n';
+
+  vm.runInContext(geo + engine + '\n' + shared + exports, box);
   return { box, els, location, mod: box.__serve };
 }
 
@@ -147,10 +160,16 @@ t('no NaN / undefined leaked into the markup',
 const computeQuote = run.box.computeQuote;
 const PRICING_OBJ  = run.mod.PRICING;
 
+/* Reads the module's own anchor constants rather than naming a ZIP. Hardcoding
+   either of them here made this silently wrong the moment the anchor moved —
+   the render would use one basis and the independent recompute another, and
+   with a size factor in play that is reported as a pricing bug when it is
+   really a test bug. */
 function expectRange(beds, baths, service) {
   const q = (condition, svc) => computeQuote({
     bedrooms: beds, bathrooms: baths, service: svc, condition: condition,
-    addonFridge: false, addonOven: false, zip: '02116', frequency: 'once',
+    addonFridge: false, addonOven: false, zip: run.mod.SERVE_RANGE_ZIP,
+    geo: run.mod.SERVE_RANGE_GEO, frequency: 'once',
   });
   if (service === 'deep')      return [q('light', 'first_clean').displayPrice, q('heavy', 'first_clean').displayPrice];
   if (service === 'moveinout') return [q('light', 'move_out').displayPrice,    q('heavy', 'move_out').displayPrice];
@@ -167,9 +186,22 @@ function expectRange(beds, baths, service) {
 t('recurring low end is the weekly rate, not the monthly one',
   expectRange(3, 2, 'recurring')[0] < expectRange(3, 2, 'recurring')[1]);
 
-/* Ranges are published at a CORE ZIP, so no travel fee is baked into them. */
-t('the reference ZIP is in the CORE tier, so no $25 fee is hidden in the table',
+/* The published tables must be computed on a basis that adds NOTHING, on all
+   three axes. Any one of them silently moves every published price on the site.
+   Since 2026-08-21 the size factor and parking adder are stated outright rather
+   than borrowed from whichever neighbourhood sits nearest 1.00 — no ZIP is
+   exactly neutral once factors are continuous. */
+t('the reference ZIP is in the CORE tier, so no $25 travel fee is hidden in the table',
   run.box.zipTier(run.mod.SERVE_RANGE_ZIP) === 'core', run.mod.SERVE_RANGE_ZIP);
+const refGeo = run.mod.SERVE_RANGE_GEO;
+t('the published basis applies no size factor', refGeo.factor === 1, refGeo);
+t('the published basis applies no parking adder', refGeo.park === 0, refGeo);
+/* The whole point of stating it explicitly: it must NOT track the anchor ZIP's
+   own measured factor, which drifts every time the map is regenerated. */
+t('the published basis is independent of the anchor ZIP\'s own factor — that is '
+  + 'what stops a data refresh silently repricing three pages',
+  run.box.serveGeo(run.mod.SERVE_RANGE_ZIP).factor !== undefined &&
+  refGeo.factor === 1);
 
 /* The headline band and the add-on prices come from the same two sources. */
 t('headline band rendered a real range', /^\$\d+–\$\d+$/.test(run.els.headline.textContent),
@@ -178,6 +210,22 @@ t('fridge add-on price comes from PRICING.ADDONS',
   run.els.addonFridge.textContent === '$' + PRICING_OBJ.ADDONS.fridge, run.els.addonFridge.textContent);
 t('oven add-on price comes from PRICING.ADDONS',
   run.els.addonOven.textContent === '$' + PRICING_OBJ.ADDONS.oven, run.els.addonOven.textContent);
+
+/* The pricing engine now spans two files. If the second one fails to load —
+   a missing tag on one page, a 404, a bad deploy — the pages must still publish
+   real prices rather than throwing and rendering nothing. "The booking flow
+   degrades, never blocks" applies to the price tables too. */
+const noGeo = runModule({ withoutGeo: true });
+t('the /pricing table still renders with serve-geo-data.js absent',
+  noGeo.els.priceRows.innerHTML.length > 0);
+t('and still publishes real dollar amounts, not $0 or a dash',
+  /\$\d+/.test(noGeo.els.priceRows.innerHTML) && !/\$0\b/.test(noGeo.els.priceRows.innerHTML));
+t('and falls back to the neutral case rather than half-applying a factor',
+  noGeo.box.serveGeo('02116').factor === 1 && noGeo.box.serveGeo('02116').park === 0);
+/* The published tables state their basis outright, so this holds by
+   construction: the geo file cannot move a published number at all. */
+t('published prices are byte-identical with and without the geo file',
+  noGeo.els.priceRows.innerHTML === priceHtml);
 
 /* ---------- 2. price cells are real, reachable controls ---------- */
 console.log('\n=== 2. every price cell is a keyboard-reachable button ===');
@@ -340,6 +388,25 @@ console.log('\n=== 9. the new pages are actually reachable ===');
 t('sitemap lists extensionless URLs only, never both forms for one page',
   !/\.html<\/loc>/.test(SITEMAP));
 t('both pages load the shared script', /<script src="script\.js">/.test(PRICING) && /<script src="script\.js">/.test(SERVICES));
+
+/* The geo data is a second script file, so it needs the same four things any
+   published asset needs — and one more: it must load FIRST. */
+t('build-site.sh stages serve-geo-data.js',
+  /cp\s+[^\n]*\bserve-geo-data\.js\b/.test(BUILD));
+t('serve-geo-data.js has a cache rule', /^\/serve-geo-data\.js$/m.test(HEADERS));
+t('serve-geo-data.js declares a charset', /\/serve-geo-data\.js\n\s*Content-Type:[^\n]*charset=utf-8/.test(HEADERS));
+[['index.html', INDEX], ['pricing.html', PRICING], ['services.html', SERVICES]].forEach(([name, doc]) => {
+  const g = doc.indexOf('<script src="serve-geo-data.js">');
+  const s = doc.indexOf('<script src="script.js">');
+  t(name + ' loads serve-geo-data.js', g !== -1);
+  t(name + ' loads it BEFORE script.js — classic scripts run in tag order',
+    g !== -1 && s !== -1 && g < s);
+});
+/* It is a classic script, not a module: the site has no build step and no
+   module loader, so an `export` would be a syntax error that takes the whole
+   file down and with it every price on the page. */
+t('serve-geo-data.js uses no ES module syntax',
+  !/^\s*export\s/m.test(GEO) && !/^\s*import\s/m.test(GEO));
 t('both pages load the shared stylesheet',
   /href="style\.css"/.test(PRICING) && /href="style\.css"/.test(SERVICES));
 t('no page-scoped <style> or <script> blocks — shared files only',

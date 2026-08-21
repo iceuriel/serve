@@ -34,6 +34,16 @@
   Content-Type: text/javascript; charset=utf-8
   Cache-Control: public, max-age=0, must-revalidate
 
+# Same revalidate rule as script.js, and for the same reason: the two are one
+# pricing engine split across two files, and a fresh script.js paired with a
+# cached serve-geo-data.js would price homes off a stale ZIP map with nothing
+# reporting a fault. Its ZIP labels are internal, but the file carries non-ASCII
+# in its comments, so the charset is declared here too rather than left to the
+# document encoding.
+/serve-geo-data.js
+  Content-Type: text/javascript; charset=utf-8
+  Cache-Control: public, max-age=0, must-revalidate
+
 /style.css
   Content-Type: text/css; charset=utf-8
   Cache-Control: public, max-age=0, must-revalidate

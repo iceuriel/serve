@@ -6,10 +6,377 @@ assistant with no access to this repo. Self-contained on purpose.
 **Companion doc:** `/docs/SCHEMA.md` — authoritative for every column's meaning
 and who writes it. This file is the narrative; that file is the contract.
 
-**Latest session: 2026-08-19.** Jump to
-[what changed on 2026-08-19](#session-2026-08-19) for the current state. The
+**Latest session: 2026-08-21.** Jump to
+[what changed on 2026-08-21](#session-2026-08-21) for the current state. The
 sections below it describe earlier builds and remain accurate except where a
 later section supersedes them.
+
+---
+
+## Session 2026-08-21
+
+**The geo factors shipped the day before were wrong, and the parcel data proves
+it.** Nothing had been deployed, so this corrects them in place rather than
+undoing a live change.
+
+### The bug: the size index double-counted bathrooms
+
+`serve-geo-data.js` derived each ZIP's index by controlling for **bedrooms ×
+levels**. That is only correct if bedrooms and levels are the only things the
+calculator charges for — and they aren't. `PER_BATHROOM` charges $66 a bathroom
+on the same base the factor then multiplies.
+
+So any part of a neighbourhood's size advantage that came from having more
+bathrooms was billed twice: once through `PER_BATHROOM`, once through the zone
+factor. Rebuilt on **bedrooms × baths × levels** — the basis the calculator
+actually prices on — the three tiers fit like this:
+
+| tier | shipped | measured | verdict |
+|---|---|---|---|
+| LARGE | 1.30 | **1.09** | far too high; only Seaport and Waterfront earned it |
+| STD | 1.00 | **1.00** | excellent — 19 ZIPs, all within ±7% |
+| SMALL | 0.85 | **0.91** | slightly too low; only the North End reached 0.85 |
+
+Worst single case: **Chestnut Hill measured 0.98 — precisely average — and was
+charged 1.30**, quoting $257 for a 2BR/1BA first clean the data supports at $194.
+It was rated LARGE because it is an expensive area, but expensive and *large* are
+different things and only one of them takes longer to clean.
+
+### Tiers are gone entirely
+
+Three buckets forced 49 neighbourhoods into three numbers, and bought
+interpretability that nothing consumes — no zone name has ever been rendered.
+`ZIP_GEO` now holds a continuous per-ZIP factor, clamped to [0.85, 1.45]. Same
+lookup, same cost, strictly more accurate. `ZONE_FACTOR` no longer exists.
+
+19 of 49 ZIPs move by 0.08 or more; the mean factor falls 1.061 → 1.015. Real
+quotes for a 2BR/1BA first clean now span **$182–$312** where the old tiers gave
+$183–$282 and flat pricing gave $198 everywhere.
+
+### Both data sources now share one scale
+
+Boston has bedroom and bathroom counts; the MassGIS town extracts do not. So
+Boston ZIPs are measured on beds × baths × levels against a **Boston**
+denominator, and town ZIPs on type × rooms × stories against a **pooled**
+denominator. Two denominators mean two definitions of 1.00.
+
+Boston measures **0.9825** on the pooled scale — its homes run slightly small for
+the region — so every Boston figure is multiplied by that to land both groups on
+one regional footing. Left uncorrected, Boston read ~1.8% high against Newton and
+Brookline for no reason anyone chose. It is a single common multiplier, so the
+ordering within Boston is untouched.
+
+### The published tables no longer borrow a ZIP
+
+They were anchored on `SERVE_RANGE_ZIP` — 02116 until 2026-08-20, then 02130.
+Both were proxies for "adds nothing", and both were fragile: 02116 turned out to
+carry a 1.30 factor, and 02130 was neutral only while 19 ZIPs shared one bucket
+value. **Once factors went continuous, no ZIP is exactly 1.00.**
+
+So `SERVE_RANGE_GEO` now states the neutral basis outright and `computeQuote`
+accepts it as an explicit `geo` override. `SERVE_RANGE_ZIP` survives only to
+supply the CORE tier, so no travel fee is baked in. A data refresh can no longer
+silently reprice three pages. Verified: all 15 published cells byte-identical to
+what the pre-geo engine produced.
+
+### What the data also settled
+
+- **Levels beats ZIP as a predictor.** Held out on 30k homes, predicting living
+  area: beds+baths 16.6% median error, +floors **14.9%**, +ZIP 15.4%,
+  +floors+ZIP **14.2%**.
+- **Asking "condo or house?" would add nothing.** Adding property type on top of
+  floors moves the error 14.9% → 14.9%. Floors already answers it — **1 floor is
+  91% condo**. Do not add a property-type input.
+- **Cross-town size differences are mostly composition.** Single-family medians
+  run Boston 1,620 → Newton 2,349 → Brookline 2,816 sqft, a 1.74× spread. Control
+  for room count and it collapses to 1.08–1.22×. Beds and baths were already
+  absorbing most of it.
+- **`PER_LEVEL` at $35 is low on a pure-size basis.** Within the same beds and
+  baths, a 2-floor home is 1.17–1.37× the area of a 1-floor one at 1–2 baths — so
+  size implies $60–85. But the effect *reverses* at 3+ baths (0.91–0.94×), and a
+  floor adds no fixtures. Left at $35 deliberately; see below.
+
+### THE FIRST REAL TIMING DATA — and what it broke
+
+Late in the session Uriel supplied the first measured job durations this project
+has ever had. One cleaner, start to finish:
+
+| job | hours | price then | $/cleaner-hour |
+|---|---|---|---|
+| 2BR/1BA first deep clean (Malden) | 7 | $223 | **$31.86** |
+| 3BR/2BA move-in | 12 | $787 | $65.58 |
+| 3BR/2BA recurring | 4–6 | $189 | **$31.50–47.25** |
+
+**The deep-clean base rate turned out to be right.** That same 2BR/1BA *before*
+the 50% first-clean discount is $420, which over 7 hours is exactly
+**$60/cleaner-hour**. The engine's view of the work is sound. What is not sound
+is what sits on top of it.
+
+Three things follow, and only the third was acted on this session:
+
+1. **The 50% first-clean discount is a ~$200 subsidy per job**, taking the first
+   visit to $32/cleaner-hour. That may well be worth it as customer acquisition
+   — but it should be a marketing decision with a payback period, not a
+   multiplier inherited from a lost spec.
+2. **Recurring is the real emergency.** Across the service area a 3BR/2BA
+   biweekly runs **$156 (Brighton) to $234 (Prudential)**, and at the observed
+   4–6 hours that is **$26–$59 per cleaner-hour** against the $60 the deep clean
+   validates. Only the dearest ZIP at the fastest duration even approaches
+   target. Recurring is the product the whole `pro` segment pitch exists to sell.
+   **Not changed here — this is Uriel's call.**
+
+   **Uriel reviewed the full spread on 2026-08-21 and chose to leave recurring
+   prices unchanged for now.** That is a decision, not an oversight — do not
+   "correct" it in a later pass without asking. The reasoning to revisit it with
+   is below, and the numbers hold until `duration_min` says otherwise.
+
+   Reaching $60/cleaner-hour needs somewhere between **+27% and +131%**,
+   depending on the ZIP and the duration:
+
+   | base | → $240 (4h) | → $300 (5h) | → $360 (6h) |
+   |---|---|---|---|
+   | cheapest CORE — Brighton $156 | +54% | +92% | +131% |
+   | Malden $189 *(the observed job)* | +27% | +59% | +90% |
+   | dearest — Prudential $234 | +3% | +28% | +54% |
+
+   > An earlier version of this entry said "45–90%". That number was built by
+   > taking the low end off one base and the high end off another, and it
+   > understated the top badly. Quote a required increase against **one** base at
+   > a time or it describes nothing.
+
+   **The 4h-vs-6h swing matters more than the ZIP spread.** It is ±50% of the
+   labour on the same nominal job, which is a scope or scheduling problem rather
+   than a pricing one — no single price serves both, and today the 4-hour homes
+   subsidise the 6-hour ones. Worth understanding before repricing, because
+   raising the price uniformly locks that cross-subsidy in.
+3. **Move-in was ~9% rich per hour** and was corrected. See below.
+
+> **A correction worth recording, because the first version of this analysis was
+> wrong.** An earlier pass reported move-in as priced "3.53x a first clean but
+> only 1.71x as long", implying it was 2x too expensive. That compared the
+> move-in against the **discounted** first clean, so the 50% discount showed up
+> as a move-out problem. Compared like for like — both undiscounted, per
+> cleaner-hour — move-in was $65.58 against the deep clean's $60.00, i.e. 9%
+> rich. The correction shipped is a ~10% trim, not a halving.
+
+### The three levers, in the order the data ranks them
+
+**1. Levels — the strongest, and it retires a question.** Held out on 30k homes,
+adding levels cuts size-prediction error 16.5% → 14.9%; ZIP alone manages 15.4%.
+It also makes a "condo or house?" input pointless: **one floor is already 91%
+condo**, and adding property type on top of levels improves nothing at all
+(14.9% → 14.9%). `PER_LEVEL` raised **$35 → $50**, from the measured 1.215x area
+of a second floor, of which `AREA_SHARE` is chargeable, plus stair and hauling
+overhead.
+
+**2. Geography — real, but it was applied far too broadly.** The decisive finding:
+holding bed/bath/level fixed, high-factor ZIPs have **identical room counts**
+(1.000x) and simply bigger rooms (1.354x sqft per room). A Seaport 2BR has the
+same four rooms, one kitchen and one bathroom as an East Boston 2BR — just more
+open floor.
+
+Scaling the whole size base by the factor therefore charged 24% more for
+arrival, staging and a toilet, none of which grow with the home. New
+`PRICING.AREA_SHARE = 0.6` confines the factor to the area-driven share, so a
+1.24 ZIP lifts the base 14% rather than 24%. The 2BR/1BA spread across Boston
+compresses from roughly $183–$282 to **$188–$241**.
+
+**3. Access and parking — unchanged, and validated.** Correlation between the
+size factor and the parking adder is **−0.10**: they measure genuinely different
+things and both earn their place, with parking pulling mildly against geography
+exactly as expected (dense areas are smaller *and* harder to park).
+
+### Where the model now sits against the measured jobs
+
+| job | hours | price now | $/cleaner-hour |
+|---|---|---|---|
+| 2BR/1BA deep clean | 7 | $420 | $60.00 |
+| 3BR/2BA move-in | 12 | $711 | $59.25 |
+| 3BR/2BA recurring | 5 | $189 | **$37.80** |
+
+Two of three now agree. Recurring remains open.
+
+### Prediction accuracy is at its ceiling — stop optimising it
+
+Among homes sharing beds, baths, levels, ZIP **and** room count exactly, the
+median home still differs from its neighbours by **11.1%**. That is irreducible.
+The model sits at 14.1%. Adding total room count buys 0.2 points; adding half
+baths buys nothing. **There is no input you can put on a form that closes that
+gap** — the remaining error is the home itself. Effort belongs in measuring
+duration, not in refining the size proxy.
+
+### Still open
+
+- **Size is not time.** Every geographic figure in this build predicts square
+  footage. A second floor adds area and stairs but no toilets, sinks or kitchens,
+  and fixtures are what consume the hour. `AREA_SHARE` is the one knob that
+  encodes this and **0.6 is a judgement, not a measurement**.
+- **Recurring pricing** — see above. The largest open number in the system.
+- **The first-clean subsidy** — $200/job, currently undecided rather than chosen.
+- **The four town factors are knowingly ~15% conservative**, and that was a
+  decision, not an oversight. They are measured controlling for total room count
+  — which the calculator never asks about — so the suburban office, den and extra
+  dining room get divided out. Brookline and Newton read ~13–17% low; Somerville
+  ~12% high. Both obvious repairs fail (dropping the control double-counts
+  bedrooms; imputing bedrooms from rooms is right only 39% of the time), and the
+  root cause is that MassGIS carries no bed/bath counts at all. Uriel chose to
+  leave the towns conservative on 2026-08-21. **Do not "fix" it by dropping the
+  rooms control** — the full reasoning is in the header of `serve-geo-data.js`.
+
+  This is the empirical answer to a question worth keeping: a suburban home at
+  the same nominal spec really is a bigger job, and roughly a third to a half of
+  that is genuinely extra rooms rather than bigger ones. A single family carries
+  exactly **+1 room over a condo at every bedroom count** — 1BR through 4BR.
+- **Assessed value is in both datasets and is not usable.** Median single-family
+  value per square foot runs $438 in Boston to $952 in Cambridge — a 2.2x spread
+  that tracks desirability, not size. It would import location a second time, and
+  a customer cannot state their assessment at quote time regardless.
+- **Three measured jobs is not a dataset.** Every calibration above rests on
+  one or two observations. Also: 7 hours for a 2BR/1BA deep clean is high against
+  an industry norm of 4–6, so there is a real fork — price for that standard, or
+  trim its scope. Get `duration_min` to 15–20 rows and all of this becomes
+  measurable.
+- **Even the best model misses by 14.2% at the median and 40% at the 90th
+  percentile.** Geographic pricing narrows the error; it does not remove it.
+- **Three rows rest on thin data.** Prudential (02199) measures 1.51 on 77 homes
+  and sits on the 1.45 clamp. Allston/HBS (02163) is a campus with almost no
+  residential parcels, so its 0.98 is the Boston average wearing a ZIP code. The
+  three Somerville ZIPs share one town figure — Somerville populates its ZIP
+  column on 29% of rows, Cambridge on 21%.
+- **02447 Brookline Village still has no parcel data**, so it prices neutral
+  while 02445/02446 measure 1.09 and 1.07. Unchanged from yesterday.
+- **Still no browser verification.** Third session with the Chrome extension
+  unavailable.
+
+---
+
+## Session 2026-08-20
+
+**Price now depends on where the home is.** Until this build, a 2BR/1BA first
+clean cost $198 whether it was in Back Bay or Allston. It now ranges $183–$282
+across the 59 served ZIPs. The quote also asks how many levels the home has and
+accepts half bathrooms.
+
+### What is actually data-backed here, and what is not
+
+`serve-geo-data.js` is real: 49 ZIPs derived from 184,552 FY2026 Boston parcel
+records plus MassGIS layers for Brookline, Cambridge, Newton and Somerville. For
+each ZIP it holds a **zone** — how much larger or smaller homes there are once
+bedrooms and levels are already accounted for — and a **parking tier**, the
+share of parcels with no on-site parking.
+
+**Everything else in the pricing engine is an unmeasured guess, including the
+parts that were already there.** `BASE`, `PER_BEDROOM` and `PER_BATHROOM` have
+no recorded derivation: they arrived whole in the 2026-07-20 rebuild, which
+cites a "spec §3.2 / §3.3" and rules R1–R11 annotated down the function. That
+document is not in this repo and never was — the Known open items in
+`SCHEMA.md` record it as lost to a truncated paste. `HALF_BATHROOM` and
+`PER_LEVEL`, added this session, are no better founded; they were set from
+minute priors in the geo spec, which itself says its coefficients are priors
+rather than measurements.
+
+This is now written into the banner above `PRICING` in `script.js`, because
+that is where the next person will reach for these numbers. The point is not
+that they are wrong. It is that **a change there is a business decision, not a
+correction**, and nobody should believe otherwise on the strength of the
+confident-looking parcel data sitting next to it.
+
+`JOBS.duration_min` is what changes this. Once real measured durations
+accumulate, these coefficients become fittable for the first time. Protect that
+column.
+
+### The published price tables did not move, and that took a deliberate step
+
+Every price on `/pricing`, `/services` and the homepage teaser renders by
+calling `computeQuote` (convention #10). Those tables were quoted at
+`SERVE_RANGE_ZIP = 02116` — and the new map rates **Back Bay as LARGE, 1.30x,
+with P1 parking**. Left alone, every published price on three pages would have
+risen about a third overnight, as a side effect of which ZIP the table happened
+to be anchored at rather than any pricing decision anyone made.
+
+The anchor moved to **02130 (Jamaica Plain)**, the one combination that adds
+nothing on all three axes: STD zone, P0 parking, CORE tier. All 15 published
+cells were then verified byte-identical against the previous engine by loading
+both versions and diffing every cell.
+
+`tests/pricing-and-services.test.js` now pins the anchor's zone, parking tier
+and tier — and that it is actually *mapped*, since an unmapped ZIP would pass
+the first two by falling back, which is not the same as being deliberately
+neutral.
+
+### The tension this creates, which prose has to carry
+
+The geo spec says never to render the zone. The site publishes price tables. A
+Back Bay visitor therefore sees a table and is then quoted about a third more,
+with no on-page explanation available.
+
+`/pricing` and the homepage teaser now say the ranges are *typical* and that the
+exact price depends on the home and the address. `/services` already said
+"Typical range" and was left alone. **This is a mitigation, not a fix.** If the
+gap starts costing conversions, the honest options are publishing a span across
+zones or rendering the table after a ZIP is entered — both were considered and
+rejected as worse for now.
+
+### `serve-geo-data.js` is a classic script, not a module
+
+The spec supplied it with ES `export`. This site has no build step and no module
+loader; `export` would be a syntax error that takes the file down and every
+price with it. It ships as top-level `const`/`function`, loaded by its own
+`<script>` tag **before** `script.js` on all three script-bearing pages.
+
+Being a second file means it needs everything convention #9 demands — a `cp`
+line in `scripts/build-site.sh`, a cache rule in `_headers` — plus one more:
+**load order**. All of it is pinned by test.
+
+If it fails to load, `serveGeo()` returns the neutral STD / P0 case rather than
+throwing, so every home still prices. The `try` around it is load-bearing: an
+unloaded `const ZONE_FACTOR` raises a ReferenceError rather than reading as
+undefined. Asserted by running the engine slice with no geo file at all.
+
+### Two tests were failing on master before this build, and both were wrong
+
+`npm test` was red on a clean tree: `sms-consent.test.js` reported that
+`_headers` declared no charset for `/privacy` and `/sms-terms`. **The headers
+were present and correct the whole time.** `_headers` is CRLF, and while `^x$`
+under `/m` tolerates `\r\n`, a pattern with a literal `\n` in the middle of it
+matches nothing. Both files now normalise line endings on read.
+
+This is the dangerous kind of failing test: it sends you to edit a file that was
+never wrong — and that file is on the A2P surface, where a "fix" can cost a live
+campaign.
+
+The same file pinned the webhook revision to the exact string `r7`, so the r8
+bump reported the SMS consent surface as broken when nothing about it changed.
+It now parses the revision and asserts **r7 or later**, with the stamp and the
+`doGet` response still required to agree. Below r7 still fails.
+
+### Still open
+
+- **The webhook is at r8 in the repo and is not deployed.** r8 is purely
+  additive — an r7 deployment ignores the three new keys and writes every
+  existing column as before — so bookings are safe and the site can ship first.
+  The new fields simply are not recorded until it goes out.
+- **02447 Brookline Village has no parcel data**, so it falls back to STD while
+  the other two Brookline ZIPs (02445, 02446) are both LARGE. An identical home
+  there prices about 30% below one two ZIPs over. Nine EXTENDED-tier towns are
+  also unmapped, which matters less — they are neutral anyway.
+- **No job floor, and it turns out not to need one.** Nothing clamps a quote
+  upward. An exhaustive scan on 2026-08-21 — all 59 ZIPs x beds x baths x
+  condition x service x levels, 47,790 configurations — puts the cheapest
+  reachable quote at **$115** (studio, light, first clean, 02134), against a
+  previous floor of $117. A $2 drop.
+
+  An earlier draft of this list said "about $100", which was the figure *before
+  the parking adder* and overstated the risk. All four SMALL-zone ZIPs (02113,
+  02134, 02163, 02215) are P1 or P2, so each adds $15–$25 back and the two
+  adjustments largely cancel. `ZONE_MINIMUM` from the spec stays unbuilt — not
+  only because setting one means inventing a business number, but because there
+  is nothing for it to catch.
+- **Still no browser verification.** The Chrome extension was not connected for
+  this build either. The new stepper was verified by driving the real
+  `initStepper` against a fake DOM — half-steps, clamping, the "3+" label and
+  float drift are all covered by test — but **nobody has looked at the Levels
+  control rendered on a real page.** Do that before pointing traffic at it.
 
 ---
 
@@ -536,6 +903,28 @@ most of its effort eliminating.
    enforces all of it; if a change makes that test fail, the change is wrong.
    Consent is written `"yes"` or blank — **never `"no"`**, because LEADS is
    blank-fill-only and a `no` would lock out a real opt-in forever.
+12. **Nothing in `serve-geo-data.js` is user-facing.** Not the size factor, not
+   the parking tier, not the neighbourhood labels. The customer sees one price.
+   Factor and tier go to `quote_meta` for later analysis and nowhere else.
+   `tests/geo-pricing.test.js` §7 greps every rendered surface and fails if
+   either leaks.
+13. **Published prices are computed at an explicitly neutral basis, never at a
+   real ZIP.** `SERVE_RANGE_GEO` states it: factor 1.00, no parking adder, and
+   `SERVE_RANGE_ZIP` supplies only the CORE tier so no travel fee is baked in.
+   Anchoring on a neighbourhood was tried twice and broke twice — 02116 carried
+   a 1.30 factor, and 02130 was neutral only while 19 ZIPs shared a bucket. A
+   regenerated map must never be able to reprice three pages as a side effect.
+   Pinned by test.
+15. **Any index that scales the size base must control for everything the base
+   already charges for** — bedrooms, baths AND levels. Controlling for a subset
+   bills the same square footage twice. That shipped for one day in the LARGE
+   tier and cost up to 31% on a quote. When the map is regenerated from newer
+   parcel data, regenerate it on the same three axes, and keep both data sources
+   on one scale (see the 0.9825 note in `serve-geo-data.js`).
+14. **Pricing constants are guesses; the geo data is not.** Do not let their
+   adjacency imply otherwise. See the banner above `PRICING` in `script.js` and
+   the 2026-08-20 session notes — changing a coefficient is a business decision
+   until `duration_min` has enough rows to fit against.
 
 ---
 

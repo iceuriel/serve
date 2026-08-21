@@ -1,8 +1,15 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-08-16  ·  master  ·  r7 — SMS consent on LEADS
+ * VERSION STAMP:  2026-08-20  ·  master  ·  r8 — levels + geo pricing fields
  *
+ * r8 = `levels` (floors inside the unit) joins the ops-preferred keys, and
+ *      `geo_factor` / `park_tier` join quote_meta. All three are additive: no
+ *      header is required for a booking to succeed, and JOBS is not widened.
+ *      Adding a `levels` header moves it out of quote_meta into its own column.
+ *      (r8 was revised on 2026-08-21 before ever being deployed: the geo key was
+ *      `zone` while the site still shipped three tiers. It now carries the
+ *      measured factor itself, which is strictly more informative.)
  * r7 = SMS consent (sms_transactional / sms_promotional / sms_consent_at)
  *      written to LEADS, timestamped server-side. Needs three new LEADS
  *      headers; without them the upsert reports and skips, as always.
@@ -217,6 +224,14 @@ const QUOTE_META_KEYS = [
   "recurring_weekly", "recurring_biweekly", "recurring_monthly",
   "zip_tier", "page_path", "utm_source", "utm_medium", "utm_campaign",
   "unit_label", "src", "submitted_at",
+  /* Silent geographic pricing adjustment applied to this quote, from
+     serve-geo-data.js. Logged so quote accuracy can be analysed by area once
+     completed jobs accumulate — `geo_factor` scaled the size base (1.00 = the
+     regional norm for that home), `park_tier` added a flat per-visit amount.
+     NEITHER IS EVER SHOWN TO A CUSTOMER, and neither belongs in an email or an
+     ops column; they are reference data for one job, which is what quote_meta
+     is for. */
+  "geo_factor", "park_tier",
   /* SMS consent as captured on THIS booking. LEADS holds the person-level
      record you filter by; this is the per-booking snapshot you read when
      investigating one job, which is exactly what quote_meta is for. It also
@@ -230,8 +245,15 @@ const QUOTE_META_KEYS = [
  * Written straight to the matching header. If a header is missing, they fall
  * back into quote_meta rather than vanishing — a safety net for a schema that
  * has not caught up yet, not the intended path.
+ *
+ * `levels` (floors inside the unit) is here rather than in QUOTE_META_KEYS
+ * because it is a thing a cleaner needs to know before arriving — stairs decide
+ * what equipment comes out of the van — and it prices like beds and baths,
+ * which both have real columns. There is no `levels` header on JOBS today, so
+ * it rides in quote_meta and logs that it did. Add the header and it moves into
+ * its own column with no code change.
  */
-const OPS_PREFERRED_KEYS = ["address", "unit", "zip"];
+const OPS_PREFERRED_KEYS = ["address", "unit", "zip", "levels"];
 
 /**
  * The ONLY LEADS columns this script writes, listed as PAYLOAD keys.
@@ -456,7 +478,7 @@ function handleEvent(ss, data, eventType) {
 
 /** Health check — open the /exec URL in a browser. */
 function doGet() {
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-08-16 r7" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-08-20 r8" });
 }
 
 
