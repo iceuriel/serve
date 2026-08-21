@@ -15,7 +15,12 @@ const REPO_ROOT = require('path').resolve(__dirname, '..');
 const fs   = require('fs');
 const path = require('path');
 
-const read = f => fs.readFileSync(path.join(REPO_ROOT, f), 'utf8');
+/* CRLF normalised on read — _headers is CRLF, and a pattern with a literal \n
+   inside it matches nothing there even when the header is present. Two charset
+   assertions below were failing for exactly that reason while _headers was
+   correct. Do not "fix" _headers in response to a failure here without checking
+   the file first. */
+const read = f => fs.readFileSync(path.join(REPO_ROOT, f), 'utf8').replace(/\r\n/g, '\n');
 
 const html      = read('index.html');
 const privacy   = read('privacy.html');
@@ -162,8 +167,17 @@ t('consent timestamp comes from the server clock, not the payload',
 t('webhook coerces anything that is not "yes" to blank',
   /data\.sms_transactional === "yes" \? "yes" : ""/.test(webhook) &&
   /data\.sms_promotional\s*=== "yes" \? "yes" : ""/.test(webhook));
-t('version stamp bumped past r6', /VERSION STAMP:[^\n]*r7/.test(webhook));
-t('doGet reports the same revision', /version: "2026-08-16 r7"/.test(webhook));
+/* What is under test is that the deployed webhook is r7 OR LATER — r7 is where
+   SMS consent landed, and any revision after it still carries that code. Pinned
+   to the exact string `r7`, this failed on the very next unrelated bump and
+   reported the consent surface as broken when nothing about it had changed.
+   The assertion is not weakened: below r7 still fails, and the stamp and the
+   doGet response must still agree with each other. */
+const stampRev = (webhook.match(/VERSION STAMP:[^\n]*\br(\d+)\b/) || [])[1];
+const doGetRev = (webhook.match(/version:\s*"[^"]*\br(\d+)"/) || [])[1];
+t('version stamp is r7 or later', Number(stampRev) >= 7, stampRev);
+t('doGet reports the same revision as the stamp',
+  doGetRev !== undefined && doGetRev === stampRev, [stampRev, doGetRev]);
 
 console.log('\n=== 9. the block is styled (it is read, so it must be legible) ===');
 ['sms-consent', 'sms-consent__opt', 'sms-consent-links', 'footer__legal', 'legal__callout']

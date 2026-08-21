@@ -28,16 +28,65 @@
 /* ============================================================
    Serve Pricing Engine  (spec §3 — deterministic)
    Edit PRICING and ZIP_TIERS to adjust rates / coverage.
+
+   WHERE THESE NUMBERS CAME FROM — read this before tuning them.
+
+   BASE, PER_BEDROOM and PER_BATHROOM have no recorded derivation. They arrived
+   whole in the 2026-07-20 rebuild, which cites a "spec §3.2 / §3.3" and rules
+   R1-R11 that are annotated all the way down this function. That document is
+   not in this repo and never was; SCHEMA.md records it as lost to a truncated
+   paste. Nothing measured backs them. The shape is conventional for flat-rate
+   cleaning — a fixed base for setup, kitchen and common areas, plus per-room
+   adders with a bathroom at 2x a bedroom — but that is an inference from the
+   numbers, not their provenance.
+
+   HALF_BATHROOM and PER_LEVEL, added 2026-08-20, are no better founded. They
+   were set from the minute priors in the geo pricing spec (a half bath at half
+   a full one; a level at roughly a bedroom's work) and that spec says plainly
+   that its own coefficients are priors, not measurements.
+
+   So: every absolute dollar here is an untested guess. The one thing in the
+   pricing path that IS data-backed is serve-geo-data.js, and it only yields
+   RELATIVE factors — it knows a Back Bay 2BR is larger than a typical 2BR, not
+   what an hour of cleaning is worth.
+
+   JOBS.duration_min is what changes that. Once real measured durations
+   accumulate, these become fittable for the first time. Until then, treat a
+   change here as a business decision, not a correction.
    ============================================================ */
 const PRICING = {
     BASE: 150,
     PER_BEDROOM: 33,
     PER_BATHROOM: 66,
+    HALF_BATHROOM: 33,   // toilet + sink + mirror + floor; no shower or tub to detail
+    PER_LEVEL: 50,       // charged for each level BEYOND the first — see LEVELS below
+
+    /* How much of the size base scales with FLOOR AREA rather than with fixture
+       count or fixed setup. The geographic factor is applied only to this share.
+
+       Why it exists: parcel data shows that when a ZIP's homes are larger at the
+       same bed/bath/level spec, the room COUNT is identical (1.000x) and the
+       rooms are simply bigger (1.354x sqft per room). So a Seaport 2BR has the
+       same four rooms, one kitchen and one bathroom as an East Boston 2BR — just
+       more open floor. Scaling the whole base by the geo factor charged 24% more
+       for arrival, staging and a toilet, none of which grow with the home.
+
+       0.6 is an estimate of the deep-clean time that is genuinely area-driven —
+       bedrooms, living space and floors — against setup, kitchen and bathroom
+       fixtures, which are not. It is a judgement, not a measurement. Raising it
+       widens the geographic spread; lowering it flattens it. */
+    AREA_SHARE: 0.6,
 
     DEEP_MULT: 1.4,
     DEEP_MULT_SMALL: 1.2,        // bedrooms <= 1 (studio or 1BR)
-    MOVEOUT_MULT: 2.0,
-    MOVEOUT_MULT_SMALL: 1.8,     // bedrooms <= 1
+    /* Calibrated 2026-08-21 against the first measured move-in: a 3BR/2BA took
+       12 cleaner-hours, and 12h at the $60/cleaner-hour implied by the measured
+       2BR/1BA deep clean is $720, which is 1.82x that home's size base. Was 2.0,
+       which billed the same job at $66/hr. ONE observation — revisit as
+       duration_min fills. The SMALL variant moved in proportion; it has no
+       observation of its own. */
+    MOVEOUT_MULT: 1.8,
+    MOVEOUT_MULT_SMALL: 1.6,     // bedrooms <= 1
 
     FIRST_CLEAN_FACTOR: 0.5,     // first clean = deep price x 0.5
 
@@ -87,19 +136,108 @@ function zipTier(zip) {
     return 'unknown';
 }
 
+/* Silent geographic adjustment, resolved from serve-geo-data.js.
+ *
+ * NOTHING HERE IS EVER SHOWN TO A CUSTOMER. The size factor and parking tier
+ * are logged to the sheet so quote accuracy can be analysed by area later; they
+ * are never rendered, never named in copy, and never sent back as a line item.
+ * The customer sees one price.
+ *
+ * serve-geo-data.js is a separate <script> tag, so this must survive its
+ * absence: a missing file, a typo'd tag on one page, or a malformed map all
+ * resolve to the neutral case instead of throwing. A visitor still gets a
+ * price. The `try` is load-bearing — an unloaded `const PARK_ADDER` raises a
+ * ReferenceError rather than reading as undefined.
+ *
+ * The 10 served ZIPs with no parcel data (Brookline Village and the nine
+ * EXTENDED-tier towns) land here too, by the same neutral path.
+ */
+const NEUTRAL_GEO = { parkTier: 'P0', factor: 1, park: 0, mapped: false };
+
+function serveGeo(zip) {
+    try {
+        const g    = lookupGeo(zip);
+        const park = PARK_ADDER[g.parkTier];
+        if (typeof g.factor !== 'number' || typeof park !== 'number') return NEUTRAL_GEO;
+        return { parkTier: g.parkTier, factor: g.factor, park: park, mapped: g.mapped };
+    } catch (_) {
+        return NEUTRAL_GEO;
+    }
+}
+
 /**
  * Deterministic quote per spec §3.2 / §3.3. All price fields returned RAW
  * (un-rounded); apply Math.ceil at display (R11). `frequency` is 'once' or a
  * FREQ key and only affects `steadySelected`, never the one-time price.
+ *
+ * `bathrooms` accepts half-steps (2.5). `levels` counts floors INSIDE the unit
+ * and defaults to 1. `zip` now does two jobs: the CORE / EXTENDED tier it
+ * always did, and a silent zone + parking adjustment from serve-geo-data.js.
+ *
+ * Order of operations, which is not arbitrary:
+ *   1. sum the size base            beds, baths, levels
+ *   2. x zone factor                the only thing it scales
+ *   3. x condition, x service       existing canonical multipliers
+ *   4. + flat per-visit dollars     add-ons, travel fee, parking — never scaled
+ *   5. x frequency                  recurring track only, off the size base
  */
 function computeQuote(input) {
-    const { bedrooms, bathrooms, service, condition, addonFridge, addonOven, zip, frequency } = input;
+    const { bedrooms, bathrooms, service, condition, addonFridge, addonOven, zip, frequency, levels, geo: geoOverride } = input;
 
     const tier   = zipTier(zip);
     const zipFee = tier === 'extended' ? PRICING.EXTENDED_ZIP_FEE : 0;      // R8
+    /* `geo` may be passed explicitly. The published price tables do that to
+       quote the NEUTRAL case rather than borrowing whichever ZIP they happen to
+       be anchored at — see SERVE_RANGE_GEO. Everything else resolves from the
+       customer's own ZIP. */
+    const geo    = geoOverride || serveGeo(zip);
+
+    /* G1 — bathrooms carry half-steps. A half bath is a toilet, sink, mirror and
+       floor with no shower or tub, so it is priced as its own constant rather
+       than as a fraction of a full one. 2.5 baths means two full and one half. */
+    const fullBaths = Math.floor(bathrooms);
+    const halfBaths = Math.round((bathrooms % 1) * 2);
+
+    /* G2 — LEVELS. Charged BEYOND the first, so a single-level home is
+       unaffected. Defaults to 1 when the caller omits it, which is what the
+       published price tables do.
+
+       This is the strongest single predictor the calculator has — better than
+       ZIP. Held out on 30k Boston homes, adding levels cut the error in
+       predicting home size from 16.5% to 14.9%, where ZIP alone managed 15.4%.
+       It also makes a "condo or house?" question unnecessary: one floor is
+       already 91% condo, and asking property type on top of levels adds exactly
+       nothing.
+
+       PER_LEVEL of $50 comes from: a second floor is 1.215x the living area at
+       the same bed/bath spec (measured), of which AREA_SHARE is chargeable
+       (~13%), plus stairs and hauling equipment up and down (~4% of a deep
+       clean). ~17% of a 2BR/1BA size base is about $50. Was $35. */
+    const levelCount = Math.max(1, Math.floor(Number(levels) || 1));
 
     // R1 — base formula
-    const standard = PRICING.BASE + PRICING.PER_BEDROOM * bedrooms + PRICING.PER_BATHROOM * bathrooms;
+    const sizeBase = PRICING.BASE
+        + PRICING.PER_BEDROOM   * bedrooms
+        + PRICING.PER_BATHROOM  * fullBaths
+        + PRICING.HALF_BATHROOM * halfBaths
+        + PRICING.PER_LEVEL     * (levelCount - 1);
+
+    /* G3 — the geographic factor scales only the AREA-DRIVEN SHARE of the size
+       base, not all of it.
+
+       The factor measures one thing: how much larger homes in this ZIP are once
+       bedrooms, baths and levels are accounted for. Parcel data shows that extra
+       size is entirely bigger rooms, not more rooms — same room count, same
+       fixtures, more floor. So it must not scale arrival, staging, or a
+       bathroom. AREA_SHARE is the fraction it is allowed to touch.
+
+       A factor of 1.24 therefore lifts the base by 0.6 x 24% = 14%, not 24%.
+
+       Applied here, before the service and condition multipliers, so it flows
+       into the one-time price and the recurring prices alike — a bigger home is
+       bigger on every visit. */
+    const geoEffect = (1 - PRICING.AREA_SHARE) + PRICING.AREA_SHARE * geo.factor;
+    const standard  = sizeBase * geoEffect;
 
     // R2 — small-unit multipliers
     const smallUnit = bedrooms <= 1;
@@ -123,23 +261,30 @@ function computeQuote(input) {
         if (addonOven)   addons += PRICING.ADDONS.oven;
     }
 
+    /* G4 — flat per-visit dollars, added AFTER every multiplier and never
+       scaled by one. Parking costs the same whether the job is a studio or a
+       townhouse, so multiplying it would tax the largest jobs for a fixed cost.
+       The extended-area fee has always worked this way; the parking adder joins
+       it at the same stage. */
+    const flatFees = zipFee + geo.park;
+
     let oneTime, deepAnchor = null, discountApplies = false;
     if (service === 'move_out') {
-        oneTime = moveOutPrice + zipFee;
+        oneTime = moveOutPrice + flatFees;
     } else {
         if (noStack) {
-            oneTime = deepPrice + addons + zipFee;             // full deep price, no anchor
+            oneTime = deepPrice + addons + flatFees;           // full deep price, no anchor
         } else {
             deepAnchor = deepPrice;                            // R4 — struck-through anchor
             discountApplies = true;
-            oneTime = deepPrice * PRICING.FIRST_CLEAN_FACTOR + addons + zipFee;
+            oneTime = deepPrice * PRICING.FIRST_CLEAN_FACTOR + addons + flatFees;
         }
     }
 
-    // R3 / R7 — recurring steady-state ALWAYS at condition 1.0, + zipFee
+    // R3 / R7 — recurring steady-state ALWAYS at condition 1.0, + flat fees
     const freqSteady = {};
     Object.keys(PRICING.FREQ).forEach(f => {
-        freqSteady[f] = Math.ceil(standard * PRICING.FREQ[f] + zipFee);
+        freqSteady[f] = Math.ceil(standard * PRICING.FREQ[f] + flatFees);
     });
 
     const steadySelected = (service === 'first_clean' && frequency && frequency !== 'once' && PRICING.FREQ[frequency] != null)
@@ -151,6 +296,9 @@ function computeQuote(input) {
         displayPrice: Math.ceil(oneTime),                       // R11 — whole dollars, round up
         deepAnchorDisplay: deepAnchor != null ? Math.ceil(deepAnchor) : null,
         freqSteady, steadySelected,
+        /* For the sheet and for tests. Never render any of these. */
+        fullBaths, halfBaths, levels: levelCount,
+        geoFactor: geo.factor, parkTier: geo.parkTier, parkAdder: geo.park, geoMapped: geo.mapped,
     };
 }
 
@@ -416,6 +564,7 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
         tier: 'unknown',
         bedrooms: 2,
         bathrooms: 1,
+        levels: 1,
         service: 'first_clean',
         condition: 'standard',
         addonFridge: false,
@@ -518,6 +667,7 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
             zip_tier:           state.tier,
             bedrooms:           state.bedrooms,
             bathrooms:          state.bathrooms,
+            levels:             state.levels,
             service:            state.service,
             condition:          state.condition,
             addon_fridge:       state.addonFridge,
@@ -526,6 +676,10 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
             quote_price:        q ? q.displayPrice : null,
             steady_state_price: q ? q.steadySelected : null,
             addon_total:        q ? q.addons : null,   // reported, not recomputed
+            /* Silent geo adjustment, logged for later analysis of quote
+               accuracy by area. NEVER rendered — see serveGeo(). */
+            geo_factor:         q ? q.geoFactor : null,
+            park_tier:          q ? q.parkTier : null,
             time_preference:    state.timePreference,
             utm_source:         a.utm_source,
             utm_medium:         a.utm_medium,
@@ -545,8 +699,11 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
         if (n >= PRICING.OVERFLOW_BEDROOMS) return n + '+ BR';
         return n + ' BR';
     }
+    /* Levels only appear once there is more than one — "1 floor" on every
+       single-storey condo is noise in the sheet and in the confirmation. */
     function unitLabel() {
-        return bedroomsLabel(state.bedrooms) + ' / ' + state.bathrooms + ' BA';
+        const base = bedroomsLabel(state.bedrooms) + ' / ' + state.bathrooms + ' BA';
+        return state.levels > 1 ? base + ' / ' + state.levels + ' floors' : base;
     }
     function addonLabels() {
         const list = [];
@@ -606,21 +763,30 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
        would leave the visible number and the button disabled-states stale. */
     const stepperSet = {};
 
-    function initStepper(elId, valueId, onChange) {
+    /* `data-step` defaults to 1. Bathrooms use 0.5 — the convention listings are
+       written in, so customers are already fluent in it. Values are held as
+       numbers, not integers, and snapped back onto the step grid after every
+       arithmetic op so a run of clicks cannot drift into 1.4999999999999998.
+       `format` is optional and controls the label only, never the value. */
+    function initStepper(elId, valueId, onChange, format) {
         const el = $(elId);
         const valEl = $(valueId);
         if (!el) return;
-        const min = parseInt(el.getAttribute('data-min'), 10);
-        const max = parseInt(el.getAttribute('data-max'), 10);
+        const min  = parseFloat(el.getAttribute('data-min'));
+        const max  = parseFloat(el.getAttribute('data-max'));
+        const step = parseFloat(el.getAttribute('data-step')) || 1;
+
+        const snap = v => Math.round(v / step) * step;
+        const read = () => parseFloat(el.getAttribute('data-value'));
 
         function render() {
-            const v = parseInt(el.getAttribute('data-value'), 10);
-            valEl.textContent = (elId === 'stepper-bedrooms') ? bedroomsLabel(v).replace(' BR', '') : String(v);
+            const v = read();
+            valEl.textContent = format ? format(v, max) : String(v);
             el.querySelector('[data-dir="-1"]').disabled = v <= min;
             el.querySelector('[data-dir="1"]').disabled  = v >= max;
         }
         function apply(v) {
-            v = Math.max(min, Math.min(max, v));
+            v = Math.max(min, Math.min(max, snap(v)));
             el.setAttribute('data-value', String(v));
             render();
             onChange(v);
@@ -628,16 +794,21 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
         el.querySelectorAll('.stepper__btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 const dir = parseInt(btn.getAttribute('data-dir'), 10);
-                apply(parseInt(el.getAttribute('data-value'), 10) + dir);
+                apply(read() + dir * step);
             });
         });
         stepperSet[elId] = apply;
         render();
-        onChange(parseInt(el.getAttribute('data-value'), 10));
+        onChange(read());
     }
 
-    initStepper('stepper-bedrooms', 'bedrooms-value', v => { state.bedrooms = v; });
+    initStepper('stepper-bedrooms', 'bedrooms-value', v => { state.bedrooms = v; },
+                v => bedroomsLabel(v).replace(' BR', ''));
     initStepper('stepper-bathrooms', 'bathrooms-value', v => { state.bathrooms = v; });
+    /* "3+" at the ceiling, read from the element's own data-max so the label
+       cannot drift from the range the buttons actually allow. */
+    initStepper('stepper-levels', 'levels-value', v => { state.levels = v; },
+                (v, max) => v >= max ? v + '+' : String(v));
 
     /* Service + condition radios */
     buildForm.querySelectorAll('input[name="service"]').forEach(r => {
@@ -747,6 +918,7 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
         state.quote = computeQuote({
             bedrooms:    state.bedrooms,
             bathrooms:   state.bathrooms,
+            levels:      state.levels,
             service:     state.service,
             condition:   state.condition,
             addonFridge: state.addonFridge,
@@ -1383,8 +1555,26 @@ function serveRetirePulse() {
    Ranges are quoted at a CORE ZIP. Extended-area ZIPs add
    PRICING.EXTENDED_ZIP_FEE per visit, which the calculator applies once a real
    ZIP is entered; the pages say so in prose rather than publishing two tables.
+
+   THE PUBLISHED TABLES QUOTE THE NEUTRAL CASE, NOT A REAL NEIGHBOURHOOD.
+
+   They used to be anchored on a specific ZIP — 02116 until 2026-08-20, then
+   02130. Both attempts were proxies for "adds nothing", and both were fragile:
+   02116 turned out to carry a 1.30x factor, which would have raised every
+   published price on three pages by a third as a pure side effect. 02130 was
+   genuinely neutral only while 19 ZIPs shared an identical bucket value.
+
+   Once factors became continuous (2026-08-21) no ZIP is exactly 1.00 any more,
+   so the neutral case is now stated outright instead of being borrowed from a
+   neighbourhood that happened to sit near it. The published range is what a
+   typical Greater Boston home of that size pays; a visitor's own ZIP then moves
+   it up or down, and the pages say so in prose.
+
+   SERVE_RANGE_ZIP still supplies the CORE tier, so no travel fee is baked in.
+   Its size factor and parking tier are deliberately NOT used.
    ------------------------------------------------------------ */
-const SERVE_RANGE_ZIP = '02116';        /* Back Bay — CORE tier, no travel fee */
+const SERVE_RANGE_ZIP = '02130';        /* CORE tier only — supplies zipFee = 0 */
+const SERVE_RANGE_GEO = { parkTier: 'P0', factor: 1, park: 0, mapped: false };
 
 const SERVE_SIZES = [
     { key: 'studio', label: 'Studio',    beds: 0, baths: 1 },
@@ -1412,7 +1602,8 @@ function serveRange(beds, baths, service) {
     if (typeof computeQuote !== 'function') return null;
     const q = (condition, svc) => computeQuote({
         bedrooms: beds, bathrooms: baths, service: svc, condition: condition,
-        addonFridge: false, addonOven: false, zip: SERVE_RANGE_ZIP, frequency: 'once',
+        addonFridge: false, addonOven: false, zip: SERVE_RANGE_ZIP,
+        geo: SERVE_RANGE_GEO, frequency: 'once',
     });
     try {
         if (service === 'deep')      return [q('light', 'first_clean').displayPrice, q('heavy', 'first_clean').displayPrice];

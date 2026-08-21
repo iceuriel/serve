@@ -58,7 +58,39 @@ narrative.
 | 33 | `address` | WH | Street address snapshot. Real column, not `quote_meta` — ops sorts and filters on it. |
 | 34 | `unit` | WH | Unit/apt. |
 | 35 | `zip` | WH | ZIP. |
-| 36 | `quote_meta` | WH | JSON blob: secondary quote data only (`original_price`, `discount_applied`, `steady_state_price`, the three recurring prices, `zip_tier`, `page_path`, `utm_*`, `unit_label`, `src`, `submitted_at`). |
+| 36 | `quote_meta` | WH | JSON blob: secondary quote data only (`original_price`, `discount_applied`, `steady_state_price`, the three recurring prices, `zip_tier`, `page_path`, `utm_*`, `unit_label`, `src`, `submitted_at`, the two SMS consent flags, plus `zone` / `park_tier` / `levels` — see below). |
+
+### `geo_factor`, `park_tier` and `levels` in `quote_meta` — added 2026-08-20
+
+`geo_factor` (a number, `1.00` = the regional norm for that home) and
+`park_tier` (`P2` · `P1` · `P0`) are the silent geographic adjustment applied to
+this quote, resolved from the ZIP by `serve-geo-data.js`. `geo_factor` scaled the
+size base; `park_tier` added flat dollars per visit. They are recorded so quote
+accuracy can be analysed by area once completed jobs accumulate.
+
+> **This key was `zone` for one day.** Until 2026-08-21 the site shipped three
+> tiers (`LARGE` / `STD` / `SMALL`) and logged the tier name. The tiers were
+> withdrawn before ever reaching production — their index double-counted
+> bathrooms — and the key now carries the measured factor itself, which is
+> strictly more informative and cannot go stale as a taxonomy. **No row was ever
+> written with `zone`:** webhook r8 has not been deployed, so nothing in the
+> workbook uses either spelling.
+
+**Neither is ever shown to a customer, named in copy, or itemised on a quote.**
+The customer sees one price. `tests/geo-pricing.test.js` §7 greps every rendered
+surface and fails if either leaks.
+
+An unmapped ZIP records `1.00` / `P0`. No mapped ZIP is exactly 1.00 any more, so
+unlike under the old tiers the fallback is now distinguishable from a real
+measurement in the sheet — a `geo_factor` of exactly 1.00 means the ZIP was not
+in the map. Ten served ZIPs are unmapped: Brookline Village (02447) and the nine
+EXTENDED-tier towns, none of which are in the parcel datasets.
+
+`levels` is floors **inside the unit**, 1–3. It is an ops field, not reference
+data: stairs decide what equipment comes off the van. There is no `levels`
+header on JOBS today, so it rides in `quote_meta` and the webhook logs that it
+did. **Add a `levels` header to JOBS and it moves into its own column with no
+code change** — it is in `OPS_PREFERRED_KEYS` for exactly that reason.
 
 **The column rule, so this stays consistent as the schema grows:**
 Anything a human reads, sorts, or filters in normal ops → its own column.
@@ -246,6 +278,16 @@ workbook changed accounts — keep it current.
 | Health check | open the `/exec` URL — `doGet` returns the stamp | the `/exec` URL *is* the feed |
 | Editor dry-run | `reportLeadsSchema()`, then `testPayload()` | `testAvailability()` |
 
+> **The repo is at `2026-08-20 r8` and that is NOT deployed yet.** r8 adds
+> `zone` / `park_tier` / `levels` to what the webhook records. It is purely
+> additive — an r7 deployment receiving an r8 payload ignores the three new keys
+> and writes every existing column exactly as before, so **bookings are not at
+> risk while this sits undeployed**; the only cost is that the new fields are
+> not recorded. The site can ship before the webhook without breaking anything.
+> This table's "Deployed version" row has been stale since at least 2026-07-28
+> (it reads r4 while `HANDOFF.md` §3 reads r6) — open the `/exec` URL and read
+> the stamp rather than trusting either.
+
 **Deploy settings both need:** Execute as **Me**, Who has access **Anyone**.
 Anything else and the browser gets a login page instead of JSON.
 
@@ -318,6 +360,8 @@ held `direct ×1` and blank ×12, with no channel values anywhere.
 
 | Date | Change |
 |---|---|
+| 2026-08-21 | **Geo factors recalibrated against the parcel data — no new column.** The three tiers (`LARGE` / `STD` / `SMALL` at 1.30 / 1.00 / 0.85) were withdrawn before deployment and replaced by a continuous per-ZIP factor. **The reason is a double-count:** the tier index controlled for bedrooms × levels, but the calculator also charges `PER_BATHROOM`, so bathroom-driven size was billed twice — which is why LARGE read 1.30 when the data supported 1.09. Rebuilt on bedrooms × baths × levels, with Boston figures scaled by 0.9825 to share one regional footing with the MassGIS towns. Schema impact is a **rename inside `quote_meta` only**: `zone` → `geo_factor`, now a number. Nothing was ever written under the old key — r8 is still undeployed. Published prices did not move: the tables now state their neutral basis outright (`SERVE_RANGE_GEO`) instead of borrowing whichever ZIP sat nearest 1.00, so a future data refresh cannot silently reprice three pages. All 15 published cells verified byte-identical. See `HANDOFF.md` §2026-08-21. |
+| 2026-08-20 | **Geographic pricing — webhook r8.** The quote gains a `levels` input, half-step bathrooms, a silent per-ZIP zone factor and a parking adder, all from `serve-geo-data.js` (49 ZIPs, derived from 184,552 Boston parcels plus four MassGIS layers). Schema impact is additive and needs no header: `zone` and `park_tier` join `QUOTE_META_KEYS`, `levels` joins `OPS_PREFERRED_KEYS` so a `levels` header on JOBS would pick it up automatically. **Nothing geographic is user-facing** — see the `quote_meta` note above. Published prices did not move: `SERVE_RANGE_ZIP` was repointed 02116 → 02130 in the same commit, because the new map rates Back Bay LARGE and leaving the anchor there would have raised every published price on three pages by about a third as a side effect. All 15 published cells verified byte-identical against the previous engine. Real quotes now spread $183–$282 for a 2BR/1BA first clean where they were a flat $198 across CORE. See `HANDOFF.md` §2026-08-20. |
 | 2026-08-19 | **Published pricing — no schema change.** `/pricing` and `/services` shipped, plus two homepage teasers. No column added, renamed or repurposed; the booking payload is untouched. Recorded here for one reason: **every price cell is a link into the calculator, and the hop preserves existing query params**, so `src` / `src_first` / `src_chain` and therefore `segment` survive a visitor clicking a published price. Attribution reaching JOBS and LEADS is unchanged by the new pages. Prefill lands on the Build step unless a ZIP is already resolvable — deliberately, because a booking submitted with a blank `zip` would break `property_key` and skip the PROPERTIES upsert. See `HANDOFF.md` §2026-08-19. |
 | 2026-08-16 | **Webhook r7 — SMS consent.** LEADS gains `sms_transactional` / `sms_promotional` / `sms_consent_at` (columns 20–22) for Twilio A2P 10DLC registration; the timestamp is server-stamped and the site never sends `"no"`, so a blank cell stays upgradeable. Consent also rides in JOBS `quote_meta` as a per-booking snapshot, needing no JOBS column. Site side: `/privacy` and `/sms-terms` published as real pages on the allow-list, two separate unchecked consent boxes beside the phone field, policy links in the footer of every page, and `/book` added as the opt-in URL named in the campaign registration. **The three LEADS headers are not on the live tab yet — add them by hand before sending any message.** `tests/sms-consent.test.js` guards the whole surface. |
 | 2026-08-14 | **Service area.** Six ZIPs that had never been listed — 02210 Seaport, 02215 Fenway/Kenmore, 02199 Back Bay, 02163 Allston/HBS, 02136 Hyde Park, 02447 Brookline Village — added to `ZIP_TIERS.CORE` after a Seaport visitor was shown the waitlist instead of a price. Coverage 53 → 59, purely additive. `tests/service-area.test.js` pins the sold-to list so a dropped ZIP fails the suite rather than silently costing a lead. |

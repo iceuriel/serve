@@ -35,7 +35,13 @@ mkdir -p "$OUT"
 # advertised everywhere and staged nowhere 404s in production while working
 # perfectly on a local file open, which is the failure mode this list exists to
 # make impossible to reach by accident.
-cp index.html pricing.html services.html privacy.html sms-terms.html script.js style.css "$OUT"/
+#
+# serve-geo-data.js is loaded by a <script> tag on all three script-bearing
+# pages and read by the pricing engine. Staged but not listed, every page would
+# still render — the engine falls back to neutral pricing when it is absent —
+# so the failure would be silent: correct-looking prices with the entire
+# geographic adjustment quietly switched off in production only.
+cp index.html pricing.html services.html privacy.html sms-terms.html serve-geo-data.js script.js style.css "$OUT"/
 cp sitemap.xml "$OUT"/
 cp -r images "$OUT"/
 

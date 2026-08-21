@@ -237,14 +237,29 @@
                         </div>
                     </div>
 
-                    <!-- Bathrooms -->
+                    <!-- Bathrooms. Steps by 0.5: a half bath is a real category
+                         (most Boston single-families have one) and it is the
+                         convention listings are written in. -->
                     <div class="field-block">
                         <span class="field-label">Bathrooms</span>
-                        <div class="stepper" id="stepper-bathrooms" data-min="1" data-max="5" data-value="1">
+                        <div class="stepper" id="stepper-bathrooms" data-min="1" data-max="5" data-step="0.5" data-value="1">
                             <button type="button" class="stepper__btn" data-dir="-1" aria-label="Fewer bathrooms">&minus;</button>
                             <span class="stepper__value" id="bathrooms-value">1</span>
                             <button type="button" class="stepper__btn" data-dir="1" aria-label="More bathrooms">+</button>
                         </div>
+                        <p class="field-hint">Count a half bath &mdash; toilet and sink, no shower &mdash; as 0.5.</p>
+                    </div>
+
+                    <!-- Levels. The hint is not decoration: without it, someone
+                         on the 8th floor of a Seaport tower answers "8". -->
+                    <div class="field-block">
+                        <span class="field-label">How many levels are in your home?</span>
+                        <div class="stepper" id="stepper-levels" data-min="1" data-max="3" data-value="1">
+                            <button type="button" class="stepper__btn" data-dir="-1" aria-label="Fewer levels">&minus;</button>
+                            <span class="stepper__value" id="levels-value">1</span>
+                            <button type="button" class="stepper__btn" data-dir="1" aria-label="More levels">+</button>
+                        </div>
+                        <p class="field-hint">Floors inside your unit &mdash; not the floor your building is on.</p>
                     </div>
 
                     <!-- Service -->
@@ -555,7 +570,7 @@
     <section class="serve-teaser serve-teaser--pricing" id="pricing-teaser">
         <div class="serve-teaser__inner">
             <h2 class="serve-teaser__title">What Boston homes actually pay</h2>
-            <p class="serve-teaser__sub">Your first clean with Serve, at half price. Tap any price to load that home into the calculator.</p>
+            <p class="serve-teaser__sub">Your first clean with Serve, at half price. Typical for a Boston home this size &mdash; tap any price to load it into the calculator and get your exact number.</p>
 
             <div class="serve-teaser__table">
                 <div class="serve-table-wrap">
@@ -714,6 +729,11 @@
         </div>
     </footer>
 
+    <!-- serve-geo-data.js MUST load before script.js: it supplies the ZIP zone
+         and parking tables the pricing engine reads. Classic scripts run in
+         order, so the tag order is the whole guarantee. If it is missing, every
+         home prices as the neutral case rather than breaking. -->
+    <script src="serve-geo-data.js"></script>
     <script src="script.js"></script>
 </body>
 </html>
