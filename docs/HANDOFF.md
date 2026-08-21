@@ -952,6 +952,45 @@ before the first text goes out, not before the first booking.
 Format `sms_consent_at` as a date column. The webhook writes a real `Date`; a
 column formatted as plain text will hold something that only looks like one.
 
+### 5-1. What happens when someone types a ZIP we don't recognise · deferred 2026-08-21
+
+Uriel entered **02216** on the live site and was shown the out-of-area waitlist.
+It looks like a coverage gap next to 02215 Fenway/Kenmore. **It is not.**
+
+Checked against the 184,552-parcel Boston assessment: **02216 has zero parcels of
+any kind** — no residential, no commercial. It is a PO Box / institutional ZIP,
+not a place anyone lives. Turning it away is arguably the correct answer.
+
+The same sweep says coverage is complete: **every Boston ZIP with 25 or more
+residential parcels is already in `ZIP_TIERS`.** There is no missing
+neighbourhood. The only unserved ZIPs carrying any residential parcels at all
+are 02026 (4 homes — Dedham, outside the area), and **02146, the retired
+Brookline ZIP** that was split into 02445/02446. Someone in Brookline who still
+writes their old ZIP from memory gets the waitlist today; that one is worth
+adding, and is the single real instance of this.
+
+**So the thing to work on is the failure mode, not the list.** An unrecognised
+ZIP currently means "we do not serve you", when it can equally mean a typo, a PO
+Box, a retired code, or somewhere genuinely outside the area. Convention #5 says
+a ZIP in neither tier is a lost lead, and that already cost a real Seaport
+visitor on 2026-08-14.
+
+Options when this is picked up, roughly in order of how much they change:
+
+1. **Add 02146** and any other retired-but-still-used codes. Trivial, purely
+   additive, no downside.
+2. **Separate "unknown" from "outside our area".** A ZIP that is not in
+   `ZIP_TIERS` and not in the parcel data is probably a typo or a PO Box — worth
+   saying "check that ZIP" rather than "we're not there yet", because the second
+   ends the conversation.
+3. **Quote unknown ZIPs anyway at the neutral factor and flag the row for
+   review.** The engine already prices a ZIP it has never seen without throwing
+   (`DEFAULT_GEO`), so this is a UI decision, not an engine one. Trades a
+   possible out-of-area job for a lead that is currently discarded.
+
+Nothing here is urgent — coverage is genuinely complete — but option 1 is a
+five-minute fix and option 2 is where the lost leads actually are.
+
 ### 5a. Clear the stale `open` rows in AVAILABILITY · trivial, do it first
 
 Not code. `AVAILABILITY` accumulates past-dated rows that stay `open` forever
