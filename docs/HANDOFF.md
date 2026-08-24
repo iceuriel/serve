@@ -988,8 +988,38 @@ Options when this is picked up, roughly in order of how much they change:
    (`DEFAULT_GEO`), so this is a UI decision, not an engine one. Trades a
    possible out-of-area job for a lead that is currently discarded.
 
-Nothing here is urgent — coverage is genuinely complete — but option 1 is a
-five-minute fix and option 2 is where the lost leads actually are.
+**Reviewed and deliberately deferred on 2026-08-24.** Uriel looked at all three
+options and chose to change nothing, on the grounds that the waitlist already
+captures the person's email into `EVENTS` — so this is a booking downgraded to a
+lead, not a lead lost — and that the decision is better made with numbers than
+with a guess. Both this and the service-area expansion below stay parked.
+
+**The measurement already exists, which is why waiting is cheap.** Every
+rejection writes a `waitlist_zip` row to the `EVENTS` tab carrying the ZIP the
+visitor actually typed. Once real traffic runs, filter that tab and the answer
+falls out:
+
+- **Mostly dead ZIPs** (02216, 02201, and the ~40 other Boston PO Box / firm
+  codes) → it is a typo problem. Take option 2, the "check that ZIP" prompt.
+- **Mostly real towns** (Quincy 02169, Milton 02186, Belmont 02478, Waltham
+  02451–3, Dedham 02026, Needham 02492/4) → it is a demand signal telling you
+  where to expand next, and it comes with the customer's email attached.
+
+That is a genuinely better input than either of us guessing today, and it costs
+nothing to collect because the plumbing is already there.
+
+### Service-area expansion · also deferred 2026-08-24
+
+The close-in ring — Quincy, Milton, Belmont, Waltham, Dedham, Needham — is real
+territory with thousands of homes, and adding ZIPs is a two-minute edit: the
+engine prices an unmapped ZIP at the neutral factor without throwing, so nothing
+breaks. **It was deferred because it is a roster question, not a code one.**
+Quoting a job you cannot staff is a worse failure than the waitlist, and there
+are no cleaners committed to those towns yet.
+
+If it is picked up later, those towns would price at the neutral factor until
+their MassGIS parcel files are pulled — the same four-file exercise that produced
+the Boston, Cambridge, Somerville, Brookline and Newton factors.
 
 ### 5a. Clear the stale `open` rows in AVAILABILITY · trivial, do it first
 
