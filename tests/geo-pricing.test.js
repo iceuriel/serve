@@ -33,7 +33,7 @@ const t = (label, cond, extra) => {
 };
 
 /* ---------- load the engine exactly as a page does ---------- */
-const engineFrom = SITE.indexOf('const PRICING = {');
+const engineFrom = SITE.indexOf('const WORK_RATE =');
 const engineTo   = SITE.indexOf('/* ============================================================', engineFrom);
 if (engineFrom === -1 || engineTo === -1) throw new Error('could not slice script.js — the banners moved');
 

@@ -26,40 +26,134 @@
 
 
 /* ============================================================
-   Serve Pricing Engine  (spec §3 — deterministic)
-   Edit PRICING and ZIP_TIERS to adjust rates / coverage.
+   SERVE PRICING ENGINE
 
-   WHERE THESE NUMBERS CAME FROM — read this before tuning them.
+   The whole region from here to the ATTRIBUTION banner is the engine. Test
+   harnesses slice it out and run it, anchoring on `const WORK_RATE` — if you
+   move that declaration, update tests/geo-pricing.test.js and
+   tests/pricing-and-services.test.js with it.
 
-   BASE, PER_BEDROOM and PER_BATHROOM have no recorded derivation. They arrived
-   whole in the 2026-07-20 rebuild, which cites a "spec §3.2 / §3.3" and rules
-   R1-R11 that are annotated all the way down this function. That document is
-   not in this repo and never was; SCHEMA.md records it as lost to a truncated
-   paste. Nothing measured backs them. The shape is conventional for flat-rate
-   cleaning — a fixed base for setup, kitchen and common areas, plus per-room
-   adders with a bathroom at 2x a bedroom — but that is an inference from the
-   numbers, not their provenance.
+   HOW A PRICE IS BUILT, in order:
 
-   HALF_BATHROOM and PER_LEVEL, added 2026-08-20, are no better founded. They
-   were set from the minute priors in the geo pricing spec (a half bath at half
-   a full one; a level at roughly a bedroom's work) and that spec says plainly
-   that its own coefficients are priors, not measurements.
+     size base      BASE + beds + baths + levels        the home
+     x geo          only the AREA_SHARE of it            the neighbourhood
+     x condition    one-time services only               how dirty
+     x service      derived from work + margin           what they bought
+     + flat fees    parking, extended area, add-ons      never scaled
+     x frequency    recurring track only
 
-   So: every absolute dollar here is an untested guess. The one thing in the
-   pricing path that IS data-backed is serve-geo-data.js, and it only yields
-   RELATIVE factors — it knows a Back Bay 2BR is larger than a typical 2BR, not
+   WHAT IS MEASURED AND WHAT IS NOT — read before tuning anything.
+
+   MEASURED, from real timed jobs:
+     PER_LEVEL          a 3BR/2BA biweekly went 4h to 6h when it gained a
+                        storey. Same home, same service, one variable. The
+                        cleanest number in this file.
+     WORK_MODEL.move    one 10-12h move-in on a 3BR/2BA
+     WORK_MODEL.biweekly  one 4h visit on a one-storey 3BR/2BA
+     WORK_RATE          solved from one 7h deep clean on a 2BR/1BA
+
+   NOT MEASURED:
+     BASE, PER_BEDROOM, PER_BATHROOM, HALF_BATHROOM — these arrived whole in
+       the 2026-07-20 rebuild, from a spec lost to a truncated paste. The 2:1
+       bathroom-to-bedroom ratio is convention, not evidence. Two deep cleans
+       at different sizes would test it; there is only one.
+     WORK_MODEL.weekly and .monthly — from the frequency curve, no observations.
+     AREA_SHARE — a judgement about how much of a clean scales with floor area.
+
+   The one genuinely data-backed input is serve-geo-data.js, and it yields only
+   RELATIVE factors: it knows a Back Bay 2BR is larger than a typical 2BR, not
    what an hour of cleaning is worth.
 
-   JOBS.duration_min is what changes that. Once real measured durations
-   accumulate, these become fittable for the first time. Until then, treat a
-   change here as a business decision, not a correction.
+   JOBS.duration_min is what retires the guesses. Until then, a change here is
+   a business decision, not a correction.
    ============================================================ */
+
+/* ============================================================
+   THE WORK MODEL — what a job costs in labour, before any price exists.
+
+   Prices are DERIVED from these three blocks:
+
+       hours = size base x work multiplier / WORK_RATE
+       price = hours x TARGET_WAGE / (1 - margin)
+
+   Kept separate on purpose. A work multiplier is a claim about reality that
+   a stopwatch can confirm or refute; a margin is a business decision. When
+   the two are fused into one "price multiplier" — as they were until
+   2026-08-24 — neither can be checked, and they drift apart silently. That
+   is how recurring ended up billing $33/cleaner-hour while move-out billed
+   $56 with nobody choosing it.
+
+   TO RE-TUNE: change WORK_MODEL when you measure a job, change MARGIN when
+   you make a pricing decision. Never edit the multipliers they produce.
+   ============================================================ */
+
+/* Size-base dollars of work per cleaner-hour. Solved from the one measured
+   deep clean: a 2BR/1BA (size base $282) at DEEP 1.40 took 7 hours.
+   EVERY hours figure in this system is anchored here — if that job was
+   unusual, all of it moves. */
+const WORK_RATE = 56.4;
+
+/* What one cleaner-hour must earn the contractor. A floor, not a target. */
+const TARGET_WAGE = 35;
+
+/* Work relative to the size base. Measured where it says measured.
+     deep      the 7h anchor — true by construction, never independently tested
+     move      one 10-12h job on a 3BR/2BA
+     biweekly  one 4h job on a ONE-STOREY 3BR/2BA
+     weekly    NOT MEASURED — from the frequency curve below
+     monthly   NOT MEASURED — from the frequency curve below
+
+   The frequency curve: every visit has a fixed part (the toilet gets cleaned
+   whatever the interval) plus accumulation that grows with days elapsed. At a
+   50% fixed share anchored on the measured biweekly, 7/14/30 days gives
+   0.44 / 0.59 / 0.93. Monthly stays under the deep-clean ceiling of 1.40,
+   which it must — no home gets dirtier than dirty. */
+const WORK_MODEL = {
+    deep:     1.40,
+    move:     1.63,
+    weekly:   0.44,
+    biweekly: 0.59,
+    monthly:  0.93,
+};
+
+/* Share of the price left after paying the contractor. Supplies, card fees
+   and everything else come out of this.
+
+   Deliberately thinnest on weekly: that cash flow is the most predictable and
+   the customer the most loyal, so the discount for commitment is taken out of
+   margin rather than out of the contractor. It widens through biweekly to
+   monthly, whose visits are heavier and whose relationship is loosest.
+
+   WEEKLY HAS A HARD FLOOR NEAR 15%. Weekly jobs are small, so the flat
+   per-job cost — supplies plus the card fee, about $19 — is a large share of
+   them. Below roughly 22% a weekly visit stops being worth running. */
+const MARGIN = {
+    deep:     0.33,
+    move:     0.33,
+    weekly:   0.25,
+    biweekly: 0.33,
+    monthly:  0.41,
+};
+
+function priceMultiplier(kind) {
+    return WORK_MODEL[kind] * TARGET_WAGE / (WORK_RATE * (1 - MARGIN[kind]));
+}
+
 const PRICING = {
     BASE: 150,
     PER_BEDROOM: 33,
     PER_BATHROOM: 66,
     HALF_BATHROOM: 33,   // toilet + sink + mirror + floor; no shower or tub to detail
-    PER_LEVEL: 50,       // charged for each level BEYOND the first — see LEVELS below
+
+    /* A second storey measured +50% on a 3BR/2BA biweekly — 4h to 6h, same
+       home, same service, one variable changed. That is the cleanest
+       measurement in this system, and it put PER_LEVEL up from $50, which had
+       been charging 13% for something worth 50%.
+
+       UNRESOLVED: whether a storey scales with the service or is a fixed cost.
+       Both fit the one observation and they disagree by 3.5h on a deep clean.
+       Timing one multi-storey deep clean settles it. */
+    PER_LEVEL: 191,
 
     /* How much of the size base scales with FLOOR AREA rather than with fixture
        count or fixed setup. The geographic factor is applied only to this share.
@@ -77,20 +171,19 @@ const PRICING = {
        widens the geographic spread; lowering it flattens it. */
     AREA_SHARE: 0.6,
 
-    DEEP_MULT: 1.4,
-    DEEP_MULT_SMALL: 1.2,        // bedrooms <= 1 (studio or 1BR)
-    /* Calibrated 2026-08-21 against the first measured move-in: a 3BR/2BA took
-       12 cleaner-hours, and 12h at the $60/cleaner-hour implied by the measured
-       2BR/1BA deep clean is $720, which is 1.82x that home's size base. Was 2.0,
-       which billed the same job at $66/hr. ONE observation — revisit as
-       duration_min fills. The SMALL variant moved in proportion; it has no
-       observation of its own. */
-    MOVEOUT_MULT: 1.8,
-    MOVEOUT_MULT_SMALL: 1.6,     // bedrooms <= 1
+    /* THESE FIVE ARE DERIVED, NOT SET. See WORK_MODEL above — edit the work
+       multiplier or the margin, never the number that comes out here. */
+    DEEP_MULT:    priceMultiplier('deep'),
+    MOVEOUT_MULT: priceMultiplier('move'),
 
     FIRST_CLEAN_FACTOR: 0.5,     // first clean = deep price x 0.5
 
-    FREQ: { weekly: 0.39, biweekly: 0.43, monthly: 0.50 },  // x standard, condition 1.0
+    /* x standard, condition 1.0 — recurring never takes a condition factor */
+    FREQ: {
+        weekly:   priceMultiplier('weekly'),
+        biweekly: priceMultiplier('biweekly'),
+        monthly:  priceMultiplier('monthly'),
+    },
 
     CONDITION: { light: 0.9, standard: 1.0, heavy: 1.3 },
 
@@ -239,10 +332,15 @@ function computeQuote(input) {
     const geoEffect = (1 - PRICING.AREA_SHARE) + PRICING.AREA_SHARE * geo.factor;
     const standard  = sizeBase * geoEffect;
 
-    // R2 — small-unit multipliers
+    /* R2 — WITHDRAWN 2026-08-24. There used to be a second, lower multiplier
+       for studios and 1BRs (DEEP_MULT_SMALL / MOVEOUT_MULT_SMALL). It
+       discounted small homes twice: the size base already charges a studio
+       $216 against a 3BR/2BA's $381, and the small multiplier then cut that
+       again. Nothing measured supported it. `smallUnit` is still reported for
+       any caller that wants to know, but it no longer changes a price. */
     const smallUnit = bedrooms <= 1;
-    const deepMult  = smallUnit ? PRICING.DEEP_MULT_SMALL : PRICING.DEEP_MULT;
-    const moveMult  = smallUnit ? PRICING.MOVEOUT_MULT_SMALL : PRICING.MOVEOUT_MULT;
+    const deepMult  = PRICING.DEEP_MULT;
+    const moveMult  = PRICING.MOVEOUT_MULT;
 
     // R3 — condition applies to one-time services only
     const condFactor   = PRICING.CONDITION[condition] != null ? PRICING.CONDITION[condition] : 1.0;

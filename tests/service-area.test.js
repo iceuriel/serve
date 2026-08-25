@@ -23,7 +23,7 @@ const t = (label, cond, extra) => {
 };
 
 /* Slice the pricing/coverage block, stopping before the attribution section. */
-const from   = SITE.indexOf('const PRICING = {');
+const from   = SITE.indexOf('const WORK_RATE =');
 const attrib = SITE.indexOf('ATTRIBUTION — src / segment / UTM');
 const to     = SITE.lastIndexOf('/*', attrib);
 if (from === -1 || attrib === -1) throw new Error('could not slice pricing/coverage code from script.js');

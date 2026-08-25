@@ -6,10 +6,115 @@ assistant with no access to this repo. Self-contained on purpose.
 **Companion doc:** `/docs/SCHEMA.md` — authoritative for every column's meaning
 and who writes it. This file is the narrative; that file is the contract.
 
-**Latest session: 2026-08-21.** Jump to
-[what changed on 2026-08-21](#session-2026-08-21) for the current state. The
+**Latest session: 2026-08-24.** Jump to
+[what changed on 2026-08-24](#session-2026-08-24) for the current state. The
 sections below it describe earlier builds and remain accurate except where a
 later section supersedes them.
+
+---
+
+## Session 2026-08-24
+
+**Prices are now derived from a work model instead of being set directly.**
+This is the first time any price on the site has had a stated reason.
+
+### The architecture inverted
+
+`PRICING.DEEP_MULT`, `MOVEOUT_MULT` and all three `FREQ` values used to be
+numbers somebody chose. They are now **computed**:
+
+```
+hours = size base x WORK_MODEL[service] / WORK_RATE
+price = hours x TARGET_WAGE / (1 - MARGIN[service])
+```
+
+`WORK_MODEL` is a claim about reality a stopwatch can refute. `MARGIN` is a
+business decision. Fusing them into one "price multiplier" is what let recurring
+drift to $33/cleaner-hour while move-out sat at $56 with nobody choosing it.
+
+**Edit `WORK_MODEL` when you measure a job. Edit `MARGIN` when you make a pricing
+decision. Never edit the multipliers they produce.**
+
+The derived values, for reference: DEEP_MULT 1.297 (was 1.40), MOVEOUT_MULT
+1.510 (was 1.80), FREQ 0.364 / 0.546 / 0.978 (was 0.39 / 0.43 / 0.50).
+
+### What the model is built on
+
+`TARGET_WAGE = 35` — a floor for what a contractor earns per cleaner-hour, set
+by Uriel. `WORK_RATE = 56.4` — size-base dollars of work per cleaner-hour,
+solved from one measured 7h deep clean on a 2BR/1BA. **Every hours figure in the
+system is anchored on that single job.**
+
+Margin ladder, thinnest on weekly by deliberate choice: **weekly 25%, biweekly
+33%, monthly 41%**, one-time services 33%. Weekly is thinnest because that cash
+flow is the most predictable and the customer the most loyal — the commitment
+discount comes out of margin rather than out of the contractor.
+
+> **Weekly has a hard floor near 15% margin.** Weekly jobs are small, so the flat
+> per-job cost — supplies plus card fee, about $19 — is a large share of them.
+> Below roughly 22% a weekly visit stops being worth running. That floor is a
+> property of the cost structure, not a preference.
+
+### PER_LEVEL $50 → $191
+
+The best measurement in the system: a 3BR/2BA biweekly went **4h to 6h** when it
+gained a storey. Same home, same service, one variable changed. `PER_LEVEL` had
+been charging 13% for something worth 50%.
+
+**Unresolved:** whether a storey scales with the service or is a fixed cost. Both
+fit the one observation and they disagree by 3.5h on a deep clean. Timing one
+multi-storey deep clean settles it.
+
+### The small-unit multipliers are gone
+
+`DEEP_MULT_SMALL` and `MOVEOUT_MULT_SMALL` discounted studios and 1BRs a second
+time — the size base already charges a studio $216 against a 3BR/2BA's $381.
+Nothing measured supported the extra cut. `smallUnit` is still reported by
+`computeQuote` for any caller that wants it, but it no longer changes a price.
+
+### The first-clean discount stays at 50%, knowingly
+
+At a $35 floor, **every first clean sells below contractor cost** — $62 on a
+2BR/1BA, $83 on a 3BR/2BA. Uriel reviewed this on 2026-08-24 and chose to keep
+it as customer-acquisition spend. Recovery is about two biweekly visits, so
+roughly one month of a plan.
+
+**This is a decision, not an oversight. Do not "fix" it.** The number to watch is
+conversion: a first clean that does not become a plan is a pure loss. The
+deepest discount that would still cover the contractor is 33%.
+
+### What moved on the public pages
+
+`/pricing` and `/services` render from `computeQuote`, so they moved too.
+Roughly: **recurring +27%**, **move in/out −16%**, **first clean −7%** on 2BR and
+up, **+8%** on the two smallest sizes (the small-unit removal).
+
+### Test harnesses re-anchored
+
+Three test files sliced the engine starting at `const PRICING = {`. The work
+model now sits above that, so they slice from **`const WORK_RATE =`** instead.
+If that declaration moves, update `geo-pricing`, `pricing-and-services` and
+`service-area` together.
+
+### Still open
+
+- **Weekly and monthly work multipliers are unmeasured.** 0.44 and 0.93 come
+  from the frequency curve — a fixed part plus accumulation growing with days
+  elapsed, anchored on the measured biweekly at a 50% fixed share. One timed
+  weekly and one timed monthly visit replace the two biggest guesses in the
+  ladder.
+- **A 3BR/2BA deep clean is the highest-value single measurement.** There is a
+  move-in and a biweekly on that exact spec and no deep clean to anchor them
+  against.
+- **The bed:bath ratio is untested.** 2:1 is convention. Two deep cleans at
+  different sizes would test it; there is one.
+- **Travel erodes the $35 floor.** At ~7.5 jobs a week and 30 minutes between
+  them, a contractor on paper-$35 clears about **$31.45**. Either pay for travel
+  or cluster jobs by neighbourhood — which is what the per-ZIP data is for.
+- **Roster, not demand, is the binding constraint.** A 10-customer book is ~133
+  cleaner-hours a month, but a 9.5h deep clean and an 11h move-out cannot be
+  done by one person in a day. You need a second contractor available about two
+  days a month for a book that only keeps one busy.
 
 ---
 

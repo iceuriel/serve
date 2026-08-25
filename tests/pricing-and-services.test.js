@@ -108,7 +108,7 @@ function runModule(opts) {
   /* Slice 1 — the pricing engine. Slice 2 — the shared module. The attribution
      code and the booking IIFE between them need a far larger DOM and are
      already covered by segment-and-skins and static-checks. */
-  const engineFrom = SITE.indexOf('const PRICING = {');
+  const engineFrom = SITE.indexOf('const WORK_RATE =');
   const engineTo   = SITE.indexOf('/* ============================================================', engineFrom);
   const moduleFrom = SITE.indexOf('   SERVE — SHARED PAGE MODULE');
   if (engineFrom === -1 || engineTo === -1 || moduleFrom === -1) {
