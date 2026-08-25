@@ -177,7 +177,11 @@ t('a storey costs the same whatever condition is selected',
 console.log('\n--- the geographic spread that is the point of the change ---');
 const large = qz({ zip: '02210' });
 const small = qz({ zip: '02113' });
-const ratio = (large.displayPrice - large.parkAdder) / (small.displayPrice - small.parkAdder);
+/* Measured on the ANCHOR, not the shown price: the first clean is half of
+   everything including the parking adder, so subtracting the full adder from a
+   halved price would leave the wrong number. The anchor is the undiscounted
+   ticket, which is where a flat fee sits at full value. */
+const ratio = (large.deepAnchorDisplay - large.parkAdder) / (small.deepAnchorDisplay - small.parkAdder);
 const expected = effectOf('02210') / effectOf('02113');
 t('identical homes in 02210 and 02113 differ by exactly the ratio of their '
   + 'geo EFFECTS — the damped factor, not the raw one',
@@ -221,14 +225,21 @@ t('02115 and 02121 do share a factor — the premise of the next assertion',
   factorOf('02115') === factorOf('02121'), [factorOf('02115'), factorOf('02121')]);
 t('a P2 ZIP quote exceeds the same home in a P0 ZIP of identical size',
   qz({ zip: '02115' }).displayPrice > qz({ zip: '02121' }).displayPrice);
-t('and by exactly the P2 adder, with nothing else leaking in',
-  qz({ zip: '02115' }).displayPrice - qz({ zip: '02121' }).displayPrice === PARK_ADDER.P2);
+t('and by exactly the P2 adder on the undiscounted ticket',
+  qz({ zip: '02115' }).deepAnchorDisplay - qz({ zip: '02121' }).deepAnchorDisplay === PARK_ADDER.P2);
+/* On the SHOWN price it is half the adder, because the first clean halves the
+   whole ticket. That is the intended behaviour and worth pinning too. */
+t('and about half of it on the shown first-clean price, since the discount is '
+  + 'total — exactly half is not reachable once both prices are whole dollars',
+  Math.abs((qz({ zip: '02115' }).displayPrice - qz({ zip: '02121' }).displayPrice)
+           - PARK_ADDER.P2 / 2) <= 1,
+  qz({ zip: '02115' }).displayPrice - qz({ zip: '02121' }).displayPrice);
 
 /* The extended-area fee and the geo adjustment must stack, not replace. Both
    ZIPs here are unmapped, so both price at the neutral factor with no parking
    adder and the only difference left is the travel fee. */
 t('the $25 extended-area fee still applies on top of geo',
-  qz({ zip: '02155' }).displayPrice - qz({ zip: '99999' }).displayPrice === PRICING.EXTENDED_ZIP_FEE);
+  qz({ zip: '02155' }).deepAnchorDisplay - qz({ zip: '99999' }).deepAnchorDisplay === PRICING.EXTENDED_ZIP_FEE);
 
 /* ============================================================
    3. Nothing that already worked stopped working
@@ -245,8 +256,8 @@ t('first clean is still deep x 0.50 — the struck-through anchor is the price '
   [fc.deepAnchorDisplay, fc.displayPrice]);
 t('and the discount is actually shown as applying', fc.discountApplies === true);
 t('condition still moves the price', q({ condition: 'heavy' }).displayPrice > q({ condition: 'light' }).displayPrice);
-t('add-ons are still First Clean only and still flat dollars',
-  q({ addonFridge: true }).displayPrice - q().displayPrice === PRICING.ADDONS.fridge &&
+t('add-ons are still First Clean only, and full price on the undiscounted ticket',
+  q({ addonFridge: true }).deepAnchorDisplay - q().deepAnchorDisplay === PRICING.ADDONS.fridge &&
   q({ service: 'move_out', addonFridge: true }).displayPrice === q({ service: 'move_out' }).displayPrice);
 t('the 4BR+ heavy no-stack rule still suppresses the discount',
   q({ bedrooms: 4, condition: 'heavy' }).noStack === true &&

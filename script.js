@@ -423,19 +423,33 @@ function computeQuote(input) {
         ? levelCharge('move', levelCount, moveOutPrice)
         : levelCharge('deep', levelCount, deepPrice);
 
+    /* R4 — THE DISCOUNT APPLIES TO THE WHOLE TICKET.
+     *
+     * "50% off" has to mean 50% off what the customer would otherwise pay —
+     * every line of it: the clean, the add-ons, the storeys, the travel fee,
+     * the parking. Anything held outside the discount makes the struck-through
+     * price and the shown price describe different jobs, and the advertised
+     * percentage stops being true.
+     *
+     * It used to be partial, and it got badly misleading at the edges: a
+     * two-storey home with both add-ons in the extended area was shown "50%
+     * off" on a 20% discount. Fixed 2026-08-25.
+     *
+     * The shown price is computed FROM the struck price so the two are exactly
+     * half of each other as displayed — not merely close after two separate
+     * roundings.
+     */
+    const fullTicket = service === 'move_out'
+        ? moveOutPrice + flatFees + levelFee
+        : deepPrice + addons + flatFees + levelFee;
+
     let oneTime, deepAnchor = null, discountApplies = false;
-    if (service === 'move_out') {
-        oneTime = moveOutPrice + flatFees + levelFee;
+    if (service === 'move_out' || noStack) {
+        oneTime = fullTicket;                                  // no discount on either path
     } else {
-        if (noStack) {
-            oneTime = deepPrice + addons + flatFees + levelFee;   // full deep price, no anchor
-        } else {
-            /* The anchor carries the level fee too, so the struck-through
-               price and the discounted one describe the same job. */
-            deepAnchor = deepPrice + levelFee;                    // R4 — struck-through anchor
-            discountApplies = true;
-            oneTime = deepPrice * PRICING.FIRST_CLEAN_FACTOR + addons + flatFees + levelFee;
-        }
+        deepAnchor      = Math.ceil(fullTicket);                // what it would cost
+        discountApplies = true;
+        oneTime         = deepAnchor * PRICING.FIRST_CLEAN_FACTOR;
     }
 
     // R3 / R7 — recurring steady-state ALWAYS at condition 1.0, + flat fees

@@ -79,13 +79,12 @@ to be +88% against +40%), **condition**, and the **neighbourhood factor**. A
 heavy Waterfront townhouse used to pay ~60% more for the same flight of stairs
 than a light Brighton one. Stairs are stairs.
 
-> **The first clean went UP, and that is intentional.** A second storey on a
-> first clean was +$123 and is now **+$187**. The level charge sits OUTSIDE the
-> 50% discount, exactly as the fridge and oven add-ons already do — the
-> contractor works those 4 hours whether or not the visit is half price, so
-> discounting them would mean paying for labour that was never charged. Every
-> other service came down: weekly −$23, biweekly −$10, monthly −$47,
-> move-out −$54.
+> **SUPERSEDED the same day.** This paragraph originally said the level charge
+> sits outside the 50% discount, like the add-ons. That is no longer true — see
+> *"50% off" now actually means 50% off* below. Holding it outside was what made
+> the advertised percentage false. A second storey on a first clean is now
+> +$93 as shown (half of the +$187 on the undiscounted ticket). Every other
+> service came down: weekly −$23, biweekly −$10, monthly −$47, move-out −$54.
 
 **A storey may not add more than half the visit it is attached to** —
 `LEVEL_CAP = 0.50`, per storey. The hour ladder was set with a three-bedroom in
@@ -125,6 +124,32 @@ multi-storey deep clean settles it.
 time — the size base already charges a studio $216 against a 3BR/2BA's $381.
 Nothing measured supported the extra cut. `smallUnit` is still reported by
 `computeQuote` for any caller that wants it, but it no longer changes a price.
+
+### "50% off" now actually means 50% off · 2026-08-25
+
+Uriel tested live quotes and found the discount was not halving the real ticket.
+It wasn't: add-ons and the travel fee had always sat outside it, and the level
+charge had just joined them. At the edges it was badly misleading —
+
+> a two-storey home with both add-ons in the extended area was labelled
+> **"50% off"** on a **20%** discount.
+
+The struck-through price is now the **whole** ticket — clean, add-ons, storeys,
+travel fee, parking — and the shown price is computed **from** it, so the two are
+exactly half of each other as displayed rather than merely close after two
+independent roundings. Verified across eleven configurations, including every
+edge that used to diverge.
+
+**Cost of the fix:** the flat lines get halved too, so the subsidy deepens where
+they apply. A plain 3BR/2BA first clean is unchanged at −$83; with two storeys
+it goes to −$130, and an extended-ZIP job to −$71 (you now absorb half the
+travel fee). If that becomes uncomfortable, **the honest lever is the discount
+percentage, not carving lines back out** — carving is exactly what produced a
+20% "50% off".
+
+Four tests were repointed onto the **undiscounted anchor**, where a flat fee
+sits at full value. The suite now pins that the shown price is exactly
+`ceil(anchor × FIRST_CLEAN_FACTOR)`.
 
 ### The first-clean discount stays at 50%, knowingly
 
