@@ -227,6 +227,37 @@ t('and falls back to the neutral case rather than half-applying a factor',
 t('published prices are byte-identical with and without the geo file',
   noGeo.els.priceRows.innerHTML === priceHtml);
 
+/**
+ * The published ranges are computed at ONE LEVEL. Once PER_LEVEL became $191
+ * (a measured +50%, up from $50) a two-storey home began quoting well outside
+ * the published band — a 3BR/2BA first clean publishes $223–$322 and a
+ * two-storey standard-condition one quotes $371. The pages must say so.
+ *
+ * This is the "published price disagrees with the quote" failure that the
+ * shared-render rule exists to prevent, and rendering alone does not catch it:
+ * the number is correctly computed, it just answers a different question than
+ * the visitor is asking.
+ */
+console.log('\n=== 1b. the published ranges disclose that they are single-level ===');
+const levelWords = /single[- ]level|one level|single storey|one storey/i;
+t('/pricing says the ranges are for single-level homes', levelWords.test(PRICING));
+t('/pricing warns that a multi-storey home costs more',
+  /half again|two floors|multi-?storey|over two floors/i.test(PRICING));
+t('the homepage teaser says it too', levelWords.test(INDEX));
+t('/services labels its typical ranges as single-level',
+  /Typical range, single level/.test(SERVICES));
+/* And the reason it matters, asserted numerically so the threshold cannot
+   drift back without someone noticing. */
+const oneLvl = computeQuote({ bedrooms: 3, bathrooms: 2, levels: 1, service: 'first_clean',
+  condition: 'heavy', addonFridge: false, addonOven: false,
+  zip: run.mod.SERVE_RANGE_ZIP, geo: run.mod.SERVE_RANGE_GEO, frequency: 'once' }).displayPrice;
+const twoLvl = computeQuote({ bedrooms: 3, bathrooms: 2, levels: 2, service: 'first_clean',
+  condition: 'standard', addonFridge: false, addonOven: false,
+  zip: run.mod.SERVE_RANGE_ZIP, geo: run.mod.SERVE_RANGE_GEO, frequency: 'once' }).displayPrice;
+t('a two-storey home really does quote outside the published band — which is '
+  + 'why the disclosure above is required, not decorative',
+  twoLvl > oneLvl, [oneLvl, twoLvl]);
+
 /* ---------- 2. price cells are real, reachable controls ---------- */
 console.log('\n=== 2. every price cell is a keyboard-reachable button ===');
 t('cells are <button>, not <div> or <a>', /<button type="button" class="serve-prefill serve-cell__btn"/.test(priceHtml));

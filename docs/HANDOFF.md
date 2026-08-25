@@ -89,6 +89,26 @@ deepest discount that would still cover the contractor is 33%.
 Roughly: **recurring +27%**, **move in/out −16%**, **first clean −7%** on 2BR and
 up, **+8%** on the two smallest sizes (the small-unit removal).
 
+### The published ranges are single-level, and now they say so
+
+Raising `PER_LEVEL` to $191 broke the published-range promise without touching
+the rendering code. `/pricing` publishes **$223–$322** for a 3BR/2BA first clean;
+a **two-storey** one at standard condition quotes **$371** — outside the band a
+visitor was just shown.
+
+Convention #10 makes published prices render from `computeQuote` so they cannot
+drift. That guard does not catch this: the number was computed correctly, it
+just answered a different question than the visitor was asking. All three
+surfaces now disclose that the ranges are for single-level homes and that a
+two-storey runs about half again. `tests/pricing-and-services.test.js` §1b pins
+the disclosure **and** asserts numerically that a two-storey really does exceed
+the band, so the wording cannot be dropped as redundant later.
+
+**The general lesson:** a published range has two ways to go wrong. It can
+disagree with the calculator — which the shared-render rule prevents — or it can
+be silently conditional on an input the table does not vary. Adding any new
+pricing input re-opens the second one.
+
 ### Test harnesses re-anchored
 
 Three test files sliced the engine starting at `const PRICING = {`. The work
