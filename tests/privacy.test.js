@@ -30,7 +30,7 @@ const t = (label, cond, extra) => {
  * page already. A real address that is not the business one should fail here.
  */
 const PUBLIC_CONTACTS = [
-  /servehomecleaning@gmail\.com/gi,              // printed in the footer
+  /management@servecos.com/gi,              // printed in the footer
   /[A-Za-z0-9._%+-]+@example\.(com|org)/gi,      // RFC-reserved, test fixtures
   /you@email\.com/gi,                            // form placeholder
 ];

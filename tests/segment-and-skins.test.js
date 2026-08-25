@@ -166,9 +166,9 @@ console.log('\n=== 5. the 15-minute promise ===');
 t('promise present in the confirmation panel', /within 15 minutes/.test(HTML));
 t('states a fallback action', /If it doesn't arrive/.test(HTML));
 t('fallback uses the address the footer already carries',
-  (HTML.match(/mailto:servehomecleaning@gmail\.com/g) || []).length >= 2);
+  (HTML.match(/mailto:management@servecos.com/g) || []).length >= 2);
 t('no phone number was invented — only the existing one appears',
-  (HTML.match(/tel:\+?\d+/g) || []).every(x => x === 'tel:+12062097707'),
+  (HTML.match(/tel:\+?\d+/g) || []).every(x => x === 'tel:+16178047201'),
   [...new Set(HTML.match(/tel:\+?\d+/g) || [])]);
 t('TODO left for the Twilio swap', /TODO\(twilio\)/.test(HTML));
 t('promise appears exactly once', (HTML.match(/within 15 minutes/g) || []).length === 1);

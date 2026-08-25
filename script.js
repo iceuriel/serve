@@ -1441,7 +1441,7 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
             reserveSubmit.disabled = false;
             reserveSubmit.textContent = 'Reserve my clean';
             reserveError.textContent =
-                "We couldn't confirm your booking. Please email servehomecleaning@gmail.com and we'll book you in.";
+                "We couldn't confirm your booking. Please email management@servecos.com and we'll book you in.";
             return;
         }
 
@@ -1462,7 +1462,7 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
                 'Requested: ' + when + '\n' +
                 (payload.customer_notes ? 'Notes: ' + payload.customer_notes + '\n' : '') +
                 '\nRef: ' + payload.submission_id + '\n';
-            link.href = 'mailto:servehomecleaning@gmail.com' +
+            link.href = 'mailto:management@servecos.com' +
                         '?subject=' + encodeURIComponent('Booking that did not go through — ' + payload.name) +
                         '&body='    + encodeURIComponent(body);
         }

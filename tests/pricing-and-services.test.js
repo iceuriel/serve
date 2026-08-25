@@ -459,7 +459,7 @@ t('/services names all three services in its description',
   t(name + ' carries the privacy and SMS links in its footer',
     /href="\/privacy"/.test(doc) && /href="\/sms-terms"/.test(doc));
   t(name + ' uses the published contact details and no others',
-    doc.includes('servehomecleaning@gmail.com') && doc.includes('+12062097707'));
+    doc.includes('management@servecos.com') && doc.includes('+16178047201'));
   t(name + ' has a sticky CTA back to the quote flow', /serve-sticky-cta[\s\S]*href="\/#quote"/.test(doc));
 });
 t('/pricing publishes FAQPage structured data', /"@type":\s*"FAQPage"/.test(PRICING));

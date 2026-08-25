@@ -205,7 +205,7 @@ console.log('\n=== 7. the failure UI exists and is reachable ===');
   t('it shows a reference the operator can match to a submission_id',
     /id="failed-ref"/.test(html));
   t('the phone shown is the existing one, not invented',
-    (html.match(/tel:\+?\d+/g) || []).every(x => x === 'tel:+12062097707'));
+    (html.match(/tel:\+?\d+/g) || []).every(x => x === 'tel:+16178047201'));
   t('step map includes the failed view', /failed:\s*\$\('state-failed'\)/.test(site));
   t('confirmation is shown ONLY when confirmed',
     /if \(result\.confirmed\) \{[\s\S]{0,80}setView\('confirmed'\)/.test(site));
