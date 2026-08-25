@@ -87,6 +87,21 @@ than a light Brighton one. Stairs are stairs.
 > other service came down: weekly −$23, biweekly −$10, monthly −$47,
 > move-out −$54.
 
+**A storey may not add more than half the visit it is attached to** —
+`LEVEL_CAP = 0.50`, per storey. The hour ladder was set with a three-bedroom in
+mind and overshoots on very small homes: a two-storey studio deep clean reached
+**9.4 cleaner-hours**, the same as a single-storey 3BR/2BA with two bathrooms
+and three bedrooms. The cap pulls that to 8.4h and leaves everything from
+2BR/2BA upward untouched.
+
+It is measured against the service's price **before** the first-clean discount.
+Capping against the discounted price would bind on every home rather than the
+small ones — the discount halves the job but not the stairs, so the level charge
+is inherently large next to it.
+
+Where it binds today: Studio and 1BR on every service, 2BR/1BA on everything
+except weekly. Everything 2BR/2BA and up pays the full ladder.
+
 **The hours model is now in two places.** `WORK_MODEL` gives hours proportional
 to the size base; `LEVEL_HOURS` gives absolute hours for storeys. Both convert
 to dollars through the same `TARGET_WAGE`, so a change to the wage floor still

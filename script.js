@@ -168,13 +168,30 @@ const LEVEL_HOURS = {
 };
 const LEVEL_MARGIN = 0.25;
 
+/* A storey may never add more than this share of the job it is attached to,
+   per storey. The hour ladder was set with a three-bedroom home in mind, and
+   on a very small one it overshoots: a two-storey studio deep clean came out
+   at 9.4 cleaner-hours, the same as a single-storey 3BR/2BA with two
+   bathrooms and three bedrooms. A two-storey studio is a small loft with a
+   staircase, not a house.
+
+   The cap is measured against the service's price BEFORE the first-clean
+   discount. Capping against the discounted price would bind on every home
+   rather than the small ones — the discount halves the job but not the
+   stairs, so the level charge is inherently large next to it. */
+const LEVEL_CAP = 0.50;
+
 /* Flat dollars for every storey beyond the first. Never scaled by geo,
-   condition or the service multiplier — stairs are stairs. */
-function levelCharge(kind, levels) {
+   condition or the service multiplier — stairs are stairs.
+
+   `basePrice` is that service's own per-visit price at one storey, undiscounted
+   and before flat fees. It is only used for the cap. */
+function levelCharge(kind, levels, basePrice) {
     const extra = Math.max(0, (levels || 1) - 1);
     if (!extra) return 0;
-    const hours = LEVEL_HOURS[kind] * extra;
-    return Math.ceil(hours * TARGET_WAGE / (1 - LEVEL_MARGIN));
+    const uncapped = LEVEL_HOURS[kind] * extra * TARGET_WAGE / (1 - LEVEL_MARGIN);
+    const cap      = LEVEL_CAP * basePrice * extra;
+    return Math.ceil(Math.min(uncapped, cap));
 }
 
 const PRICING = {
@@ -402,7 +419,9 @@ function computeQuote(input) {
        Like the add-ons, this sits OUTSIDE the first-clean discount: the
        contractor works those hours whether or not the visit is half price, so
        discounting them would mean paying for labour that was never charged. */
-    const levelFee = levelCharge(service === 'move_out' ? 'move' : 'deep', levelCount);
+    const levelFee = service === 'move_out'
+        ? levelCharge('move', levelCount, moveOutPrice)
+        : levelCharge('deep', levelCount, deepPrice);
 
     let oneTime, deepAnchor = null, discountApplies = false;
     if (service === 'move_out') {
@@ -422,7 +441,8 @@ function computeQuote(input) {
     // R3 / R7 — recurring steady-state ALWAYS at condition 1.0, + flat fees
     const freqSteady = {};
     Object.keys(PRICING.FREQ).forEach(f => {
-        freqSteady[f] = Math.ceil(standard * PRICING.FREQ[f] + flatFees + levelCharge(f, levelCount));
+        const visit = standard * PRICING.FREQ[f];
+        freqSteady[f] = Math.ceil(visit + flatFees + levelCharge(f, levelCount, visit));
     });
 
     const steadySelected = (service === 'first_clean' && frequency && frequency !== 'once' && PRICING.FREQ[frequency] != null)

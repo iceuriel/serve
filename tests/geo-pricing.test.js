@@ -134,12 +134,38 @@ const lvlIn = (over) => {
 };
 t('a storey costs the same in a dear ZIP as a cheap one — stairs are stairs',
   lvlIn({ zip: '02110' }) === lvlIn({ zip: '02135' }), [lvlIn({ zip: '02110' }), lvlIn({ zip: '02135' })]);
-t('and the same on a studio as on a 4BR — it is not a share of the home',
+/* The charge is flat in dollars EXCEPT where the 50% cap binds. The hour
+   ladder was set with a three-bedroom in mind, so on a very small home it
+   overshoots — a two-storey studio deep clean reached 9.4 cleaner-hours, the
+   same as a single-storey 3BR/2BA with two baths and three bedrooms. */
+const lvlFee = (bd, ba, extra) => {
+  const two = computeQuote(Object.assign(base({ bedrooms: bd, bathrooms: ba, levels: 2 }), extra || {}, { geo: NEUTRAL }));
+  const one = computeQuote(Object.assign(base({ bedrooms: bd, bathrooms: ba, levels: 1 }), extra || {}, { geo: NEUTRAL }));
+  return two.freqSteady.biweekly - one.freqSteady.biweekly;
+};
+t('the charge is flat across mid and large homes — 2BR/2BA up to 4BR/3BA',
+  lvlFee(2, 2) === lvlFee(3, 2) && lvlFee(3, 2) === lvlFee(4, 3),
+  [lvlFee(2, 2), lvlFee(3, 2), lvlFee(4, 3)]);
+t('but a studio pays LESS, because the 50% cap binds there',
+  lvlFee(0, 1) < lvlFee(3, 2), [lvlFee(0, 1), lvlFee(3, 2)]);
+t('the cap never lets a storey exceed half the visit it is attached to',
   (() => {
-    const s2 = computeQuote(Object.assign(base({ bedrooms: 0, bathrooms: 1, levels: 2 }), { geo: NEUTRAL }));
-    const s1 = computeQuote(Object.assign(base({ bedrooms: 0, bathrooms: 1, levels: 1 }), { geo: NEUTRAL }));
-    return s2.freqSteady.biweekly - s1.freqSteady.biweekly
-        === bw2.freqSteady.biweekly - bw1.freqSteady.biweekly;
+    for (const [bd, ba] of [[0,1],[1,1],[2,1],[2,2],[3,2],[4,3]]) {
+      const one = computeQuote(Object.assign(base({ bedrooms: bd, bathrooms: ba, levels: 1 }), { geo: NEUTRAL }));
+      if (lvlFee(bd, ba) > one.freqSteady.biweekly * 0.5 + 1) return false;
+    }
+    return true;
+  })());
+/* And it must still be immune to condition — the cap reads the service price,
+   which for recurring is condition-free by construction. */
+t('a storey costs the same whatever condition is selected',
+  (() => {
+    const f = c => {
+      const two = computeQuote(Object.assign(base({ bedrooms: 3, bathrooms: 2, levels: 2, condition: c }), { geo: NEUTRAL }));
+      const one = computeQuote(Object.assign(base({ bedrooms: 3, bathrooms: 2, levels: 1, condition: c }), { geo: NEUTRAL }));
+      return two.freqSteady.biweekly - one.freqSteady.biweekly;
+    };
+    return f('light') === f('standard') && f('standard') === f('heavy');
   })());
 
 /* The headline claim of the whole change: two identical homes, priced apart by
