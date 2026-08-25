@@ -139,21 +139,55 @@ function priceMultiplier(kind) {
     return WORK_MODEL[kind] * TARGET_WAGE / (WORK_RATE * (1 - MARGIN[kind]));
 }
 
+/* ------------------------------------------------------------
+   LEVELS — priced as their own line, not as part of the home.
+
+   An extra storey used to sit in the size base, which meant it was scaled by
+   the neighbourhood factor, the condition factor AND the service multiplier.
+   That compounded a single 2-hour measurement into 5.5 extra hours on a
+   move-out, and made a second floor cost +88% on a studio against +40% on a
+   4BR — because a flat dollar amount is a bigger share of a small base.
+
+   Now it is what it actually is: a fixed number of extra cleaner-hours, set
+   per service, charged at cost plus a margin of its own.
+
+   LEVEL_HOURS is per extra storey. The biweekly 2 is measured — a 3BR/2BA
+   went 4h to 6h. The rest are Uriel's ladder, and they land within half an
+   hour of what the old scaling model implied, so this is mostly a change of
+   MARGIN rather than of hours.
+
+   LEVEL_MARGIN is deliberately below every service's own margin. A second
+   floor is priced close to cost so a townhouse quote stays competitive —
+   the same reasoning that makes weekly the thinnest plan. */
+const LEVEL_HOURS = {
+    weekly:   1,
+    biweekly: 2,     // measured: 4h -> 6h on a 3BR/2BA
+    monthly:  3,
+    deep:     4,
+    move:     5,
+};
+const LEVEL_MARGIN = 0.25;
+
+/* Flat dollars for every storey beyond the first. Never scaled by geo,
+   condition or the service multiplier — stairs are stairs. */
+function levelCharge(kind, levels) {
+    const extra = Math.max(0, (levels || 1) - 1);
+    if (!extra) return 0;
+    const hours = LEVEL_HOURS[kind] * extra;
+    return Math.ceil(hours * TARGET_WAGE / (1 - LEVEL_MARGIN));
+}
+
 const PRICING = {
     BASE: 150,
     PER_BEDROOM: 33,
     PER_BATHROOM: 66,
     HALF_BATHROOM: 33,   // toilet + sink + mirror + floor; no shower or tub to detail
 
-    /* A second storey measured +50% on a 3BR/2BA biweekly — 4h to 6h, same
-       home, same service, one variable changed. That is the cleanest
-       measurement in this system, and it put PER_LEVEL up from $50, which had
-       been charging 13% for something worth 50%.
-
-       UNRESOLVED: whether a storey scales with the service or is a fixed cost.
-       Both fit the one observation and they disagree by 3.5h on a deep clean.
-       Timing one multi-storey deep clean settles it. */
-    PER_LEVEL: 191,
+    /* PER_LEVEL is GONE from the size base as of 2026-08-25. Levels are now
+       LEVEL_HOURS + LEVEL_MARGIN above — a flat per-service charge added after
+       the multipliers, alongside parking and the extended-area fee. Putting a
+       storey in the size base compounded it through geo, condition and the
+       service multiplier, which is not how stairs work. */
 
     /* How much of the size base scales with FLOOR AREA rather than with fixture
        count or fixed setup. The geographic factor is applied only to this share.
@@ -302,18 +336,15 @@ function computeQuote(input) {
        already 91% condo, and asking property type on top of levels adds exactly
        nothing.
 
-       PER_LEVEL of $50 comes from: a second floor is 1.215x the living area at
-       the same bed/bath spec (measured), of which AREA_SHARE is chargeable
-       (~13%), plus stairs and hauling equipment up and down (~4% of a deep
-       clean). ~17% of a 2BR/1BA size base is about $50. Was $35. */
+       A storey is NOT in the size base. It is charged as its own flat amount
+       per service — see LEVEL_HOURS and levelCharge() above, and G4 below. */
     const levelCount = Math.max(1, Math.floor(Number(levels) || 1));
 
-    // R1 — base formula
+    // R1 — base formula. Levels deliberately absent; see G4.
     const sizeBase = PRICING.BASE
         + PRICING.PER_BEDROOM   * bedrooms
         + PRICING.PER_BATHROOM  * fullBaths
-        + PRICING.HALF_BATHROOM * halfBaths
-        + PRICING.PER_LEVEL     * (levelCount - 1);
+        + PRICING.HALF_BATHROOM * halfBaths;
 
     /* G3 — the geographic factor scales only the AREA-DRIVEN SHARE of the size
        base, not all of it.
@@ -366,23 +397,32 @@ function computeQuote(input) {
        it at the same stage. */
     const flatFees = zipFee + geo.park;
 
+    /* Levels join the flat fees, but at a rate that depends on the service —
+       a second storey is 5 extra hours on a move-out and 1 on a weekly visit.
+       Like the add-ons, this sits OUTSIDE the first-clean discount: the
+       contractor works those hours whether or not the visit is half price, so
+       discounting them would mean paying for labour that was never charged. */
+    const levelFee = levelCharge(service === 'move_out' ? 'move' : 'deep', levelCount);
+
     let oneTime, deepAnchor = null, discountApplies = false;
     if (service === 'move_out') {
-        oneTime = moveOutPrice + flatFees;
+        oneTime = moveOutPrice + flatFees + levelFee;
     } else {
         if (noStack) {
-            oneTime = deepPrice + addons + flatFees;           // full deep price, no anchor
+            oneTime = deepPrice + addons + flatFees + levelFee;   // full deep price, no anchor
         } else {
-            deepAnchor = deepPrice;                            // R4 — struck-through anchor
+            /* The anchor carries the level fee too, so the struck-through
+               price and the discounted one describe the same job. */
+            deepAnchor = deepPrice + levelFee;                    // R4 — struck-through anchor
             discountApplies = true;
-            oneTime = deepPrice * PRICING.FIRST_CLEAN_FACTOR + addons + flatFees;
+            oneTime = deepPrice * PRICING.FIRST_CLEAN_FACTOR + addons + flatFees + levelFee;
         }
     }
 
     // R3 / R7 — recurring steady-state ALWAYS at condition 1.0, + flat fees
     const freqSteady = {};
     Object.keys(PRICING.FREQ).forEach(f => {
-        freqSteady[f] = Math.ceil(standard * PRICING.FREQ[f] + flatFees);
+        freqSteady[f] = Math.ceil(standard * PRICING.FREQ[f] + flatFees + levelCharge(f, levelCount));
     });
 
     const steadySelected = (service === 'first_clean' && frequency && frequency !== 'once' && PRICING.FREQ[frequency] != null)
@@ -395,7 +435,7 @@ function computeQuote(input) {
         deepAnchorDisplay: deepAnchor != null ? Math.ceil(deepAnchor) : null,
         freqSteady, steadySelected,
         /* For the sheet and for tests. Never render any of these. */
-        fullBaths, halfBaths, levels: levelCount,
+        fullBaths, halfBaths, levels: levelCount, levelFee,
         geoFactor: geo.factor, parkTier: geo.parkTier, parkAdder: geo.park, geoMapped: geo.mapped,
     };
 }

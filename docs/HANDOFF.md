@@ -55,7 +55,46 @@ discount comes out of margin rather than out of the contractor.
 > Below roughly 22% a weekly visit stops being worth running. That floor is a
 > property of the cost structure, not a preference.
 
-### PER_LEVEL $50 → $191
+### Levels became their own line item · 2026-08-25
+
+**A storey is no longer part of the size base.** It is a flat per-service charge
+added after the multipliers, alongside parking and the extended-area fee:
+
+| service | extra hours | labour at $35 | charged | Serve keeps |
+|---|---|---|---|---|
+| Weekly | 1h | $35 | **$47** | $12 |
+| Biweekly | 2h | $70 | **$94** | $24 |
+| Monthly | 3h | $105 | **$140** | $35 |
+| First Clean | 4h | $140 | **$187** | $47 |
+| Move In/Out | 5h | $175 | **$234** | $59 |
+
+`LEVEL_HOURS` per storey, `LEVEL_MARGIN` 25% — deliberately under every
+service's own margin, so a townhouse quote stays competitive. Only the biweekly
+2h is measured; the rest is Uriel's ladder, and it lands within half an hour of
+what the old scaling model implied, so this is mostly a change of **margin**.
+
+**Three things a storey no longer interacts with**, all of which it did before:
+the **size base** (so it is the same $94 on a studio as on a 4BR, where it used
+to be +88% against +40%), **condition**, and the **neighbourhood factor**. A
+heavy Waterfront townhouse used to pay ~60% more for the same flight of stairs
+than a light Brighton one. Stairs are stairs.
+
+> **The first clean went UP, and that is intentional.** A second storey on a
+> first clean was +$123 and is now **+$187**. The level charge sits OUTSIDE the
+> 50% discount, exactly as the fridge and oven add-ons already do — the
+> contractor works those 4 hours whether or not the visit is half price, so
+> discounting them would mean paying for labour that was never charged. Every
+> other service came down: weekly −$23, biweekly −$10, monthly −$47,
+> move-out −$54.
+
+**The hours model is now in two places.** `WORK_MODEL` gives hours proportional
+to the size base; `LEVEL_HOURS` gives absolute hours for storeys. Both convert
+to dollars through the same `TARGET_WAGE`, so a change to the wage floor still
+moves everything together — but a re-measurement now touches two constants, and
+they can disagree. If a timed multi-storey job ever contradicts `LEVEL_HOURS`,
+fix that constant and leave `WORK_MODEL` alone.
+
+### PER_LEVEL $50 → $191 · superseded 2026-08-25, see above
 
 The best measurement in the system: a 3BR/2BA biweekly went **4h to 6h** when it
 gained a storey. Same home, same service, one variable changed. `PER_LEVEL` had

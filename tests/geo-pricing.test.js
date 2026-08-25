@@ -107,10 +107,40 @@ t('baths=3 -> fullBaths 3, halfBaths 0',
    the size base, and level 1 costs nothing. */
 t('levels=1 adds nothing',
   q({ levels: 1 }).standard === PRICING.BASE + PRICING.PER_BEDROOM * 2 + PRICING.PER_BATHROOM * 1);
-t('levels=2 adds exactly one PER_LEVEL to the size base',
-  q({ levels: 2 }).standard - q({ levels: 1 }).standard === PRICING.PER_LEVEL);
-t('levels=3 adds exactly two — charged beyond the first, not per level',
-  q({ levels: 3 }).standard - q({ levels: 1 }).standard === PRICING.PER_LEVEL * 2);
+/* Since 2026-08-25 a storey is NOT in the size base — it is a flat per-service
+   charge added after the multipliers, so the base must not move at all. */
+t('a storey never touches the size base — that is the whole point of the change',
+  q({ levels: 3 }).standard === q({ levels: 1 }).standard);
+t('levels=1 carries no level fee', q({ levels: 1 }).levelFee === 0);
+t('levels=2 charges one storey, levels=3 charges two — beyond the first, not per level',
+  q({ levels: 3 }).levelFee === q({ levels: 2 }).levelFee * 2,
+  [q({ levels: 2 }).levelFee, q({ levels: 3 }).levelFee]);
+/* The measured job: a 3BR/2BA biweekly went 4h to 6h, so a storey is 2 hours
+   of a biweekly visit, charged at cost plus the level margin. */
+const bw2 = computeQuote(Object.assign(base({ bedrooms: 3, bathrooms: 2, levels: 2 }), { geo: NEUTRAL }));
+const bw1 = computeQuote(Object.assign(base({ bedrooms: 3, bathrooms: 2, levels: 1 }), { geo: NEUTRAL }));
+t('a storey adds 2 biweekly hours at the level margin — the measured case',
+  bw2.freqSteady.biweekly - bw1.freqSteady.biweekly === Math.ceil(2 * 35 / 0.75),
+  bw2.freqSteady.biweekly - bw1.freqSteady.biweekly);
+/* A move-out gets more hours than a weekly visit, because the ladder is per
+   service. Nothing else in the flat-fee block behaves this way. */
+t('the level charge is bigger on a move-out than on a weekly visit',
+  bw2.levelFee > (bw2.freqSteady.weekly - bw1.freqSteady.weekly));
+/* And it must be immune to everything the size base is exposed to. */
+const lvlIn = (over) => {
+  const two = computeQuote(base(Object.assign({ bedrooms: 3, bathrooms: 2, levels: 2 }, over)));
+  const one = computeQuote(base(Object.assign({ bedrooms: 3, bathrooms: 2, levels: 1 }, over)));
+  return two.freqSteady.biweekly - one.freqSteady.biweekly;
+};
+t('a storey costs the same in a dear ZIP as a cheap one — stairs are stairs',
+  lvlIn({ zip: '02110' }) === lvlIn({ zip: '02135' }), [lvlIn({ zip: '02110' }), lvlIn({ zip: '02135' })]);
+t('and the same on a studio as on a 4BR — it is not a share of the home',
+  (() => {
+    const s2 = computeQuote(Object.assign(base({ bedrooms: 0, bathrooms: 1, levels: 2 }), { geo: NEUTRAL }));
+    const s1 = computeQuote(Object.assign(base({ bedrooms: 0, bathrooms: 1, levels: 1 }), { geo: NEUTRAL }));
+    return s2.freqSteady.biweekly - s1.freqSteady.biweekly
+        === bw2.freqSteady.biweekly - bw1.freqSteady.biweekly;
+  })());
 
 /* The headline claim of the whole change: two identical homes, priced apart by
    where they are. The magnitude is read from the live map rather than frozen —
