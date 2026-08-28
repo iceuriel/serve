@@ -280,17 +280,31 @@ const LEADS_FIELDS = ["lead_id", "name", "email", "phone", "phone_e164", "addres
                       "contact_id"];
 
 /**
- * E.164, or blank. Never a guess.
+ * E.164 DIGITS — country code included, leading "+" deliberately omitted.
  *
  * A phone number is the routing key for an inbound text, and a wrong one fails
- * silently — the message simply matches nobody and you conclude the lookup is
- * broken rather than the data. So anything that is not unambiguously a US
- * number returns "" and a human fills it in.
+ * silently: the message matches nobody and you conclude the lookup is broken
+ * rather than the data. So anything not unambiguously a US number returns ""
+ * and a human fills it in.
+ *
+ * WHY NO "+":
+ * A Sheets cell beginning with "+" is parsed as a FORMULA — "+16178527117"
+ * becomes "=+16178527117", which evaluates to a number. The formula bar still
+ * shows the plus, so it looks stored, but getValue() returns the number and the
+ * column ends up holding a mix of data cells and formula cells. That is worse
+ * than a format mismatch: formulas behave differently under sort, fill and
+ * paste, and nothing warns you.
+ *
+ * The apostrophe trick that works when typing by hand is not available to a
+ * script writing via appendRow, so the honest fix is to not emit a character
+ * the sheet cannot hold. The country code is always present, so "16178527117"
+ * is unambiguous. Prepend "+" when handing it to Twilio, the same way zipN()
+ * restores a leading zero the sheet has eaten.
  */
 function toE164(raw) {
   const d = String(raw == null ? "" : raw).replace(/[^0-9]/g, "");
-  if (d.length === 10)                        return "+1" + d;
-  if (d.length === 11 && d.charAt(0) === "1") return "+"  + d;
+  if (d.length === 10)                        return "1" + d;
+  if (d.length === 11 && d.charAt(0) === "1") return d;
   return "";
 }
 

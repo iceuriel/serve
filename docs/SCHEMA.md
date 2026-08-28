@@ -139,7 +139,24 @@ Anything that's reference data for a single job → `quote_meta`.
 | 21 | `sms_promotional` | **WH** | `yes` or blank. Separate consent to marketing texts. Never bundled with column 20 — bundling them is an A2P 10DLC violation. **ADD THIS HEADER.** |
 | 22 | `sms_consent_at` | **WH** | Real Sheets datetime, stamped from the **server** clock when either consent above is first recorded. Blank when neither was given. **ADD THIS HEADER.** |
 
-**The script writes only:** `lead_id`, `name`, `email`, `phone`, `service_address`, `unit`, `zip`, `source`, `segment`, `source_history`, `first_touch`, `last_touch`, `sms_transactional`, `sms_promotional`, `sms_consent_at`.
+**The script writes only:** `lead_id`, `contact_id`, `name`, `email`, `phone`, `phone_e164`, `service_address`, `unit`, `zip`, `source`, `segment`, `source_history`, `first_touch`, `last_touch`, `sms_transactional`, `sms_promotional`, `sms_consent_at`.
+
+> **`phone_e164` holds DIGITS, with no leading `+`.** `16178527117`, not
+> `+16178527117`. Prepend the `+` when calling Twilio.
+>
+> This is not a style choice. A Sheets cell beginning with `+` is parsed as a
+> **formula** — `+16178527117` becomes `=+16178527117` — which evaluates to a
+> number. The formula bar still shows the plus so it looks stored, but
+> `getValue()` returns the number, and the column ends up holding a mix of data
+> cells and formula cells. That is worse than a format mismatch: formulas
+> behave differently under sort, fill and paste, and nothing warns you.
+>
+> The apostrophe prefix that works when typing by hand is not available to a
+> script writing via `appendRow`, so the fix is to not emit a character the
+> sheet cannot hold. Same principle as `zip`, which the sheet stores without
+> its leading zero and `zipN()` restores on read: **store lossy, normalise on
+> read** — consistently, rather than fighting the spreadsheet in two different
+> ways in two different columns.
 **Everything else is yours** and is skipped silently.
 
 **Write rules, in precedence order:**
