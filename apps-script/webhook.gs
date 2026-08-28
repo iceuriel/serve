@@ -1913,10 +1913,26 @@ function cleanupTestRows() {
     function (v) { return String(v).indexOf(TEST_PREFIX) === 0; }));
   report.push(deleteMatching(ss, LEADS_TAB, "email",
     function (v) { return /@example\.com$/i.test(String(v).trim()); }));
+  /* PROPERTY_MEMORY rows carry ONLY a property_id — there is no address on them
+     to match "TESTING-WAY" against. So collect the ids off the test PROPERTIES
+     rows BEFORE those rows are deleted. Doing it after loses the link and
+     leaves the memory row orphaned, which is exactly what r9 shipped with. */
+  const testPropertyIds = idsOfMatchingProperties(ss,
+    function (key) { return String(key).toUpperCase().indexOf("TESTING-WAY") !== -1; });
+
   report.push(deleteMatching(ss, PROPERTIES_TAB, "property_key",
     function (v) { return String(v).toUpperCase().indexOf("TESTING-WAY") !== -1; }));
+  report.push(deleteMatching(ss, PROPERTY_MEMORY_TAB, "property_id",
+    function (v) { return testPropertyIds.indexOf(String(v).trim()) !== -1; }));
   report.push(deleteMatching(ss, EVENTS_TAB, "submission_id",
     function (v) { return String(v).indexOf(TEST_PREFIX) === 0; }));
+
+  /* Sweep any memory row left pointing at a property that no longer exists —
+     from an earlier test run, or a property deleted by hand. Only BLANK rows
+     are removed: one carrying real knowledge is reported and left alone, on the
+     principle that nothing here should ever silently delete what a person
+     learned by going to the home. */
+  report.push(sweepOrphanMemoryRows(ss));
 
   console.log("--- cleanup ---");
   report.forEach(function (line) { console.log("  " + line); });
@@ -1941,6 +1957,76 @@ function isTestJobId(ss, jobId) {
 }
 
 /** Delete rows of `tab` where `column` satisfies `pred`. Bottom-up. */
+/** property_id values from PROPERTIES rows whose key satisfies `pred`. */
+function idsOfMatchingProperties(ss, pred) {
+  const sheet = ss.getSheetByName(PROPERTIES_TAB);
+  if (!sheet) return [];
+  const h = sheetHeaders(sheet);
+  const iKey = h.indexOf("property_key"), iId = h.indexOf("property_id");
+  const last = sheet.getLastRow();
+  if (iKey === -1 || iId === -1 || last < 2) return [];
+  const rows = sheet.getRange(2, 1, last - 1, h.length).getValues();
+  const out = [];
+  for (let r = 0; r < rows.length; r++) {
+    if (pred(rows[r][iKey]) && isSet(rows[r][iId])) out.push(String(rows[r][iId]).trim());
+  }
+  return out;
+}
+
+/**
+ * Delete PROPERTY_MEMORY rows that point at a property_id no longer present in
+ * PROPERTIES — but ONLY when the row is otherwise empty.
+ *
+ * A blank orphan is bookkeeping left behind by a deleted property and is safe
+ * to drop. An orphan carrying access notes, a pet, a parking quirk is a person's
+ * knowledge that outlived a mis-deleted property row; it is reported for a human
+ * to reattach, never removed. Losing that is the one failure this whole table
+ * exists to prevent.
+ */
+function sweepOrphanMemoryRows(ss) {
+  const mem = ss.getSheetByName(PROPERTY_MEMORY_TAB);
+  if (!mem) return PROPERTY_MEMORY_TAB + ": no tab";
+  const props = ss.getSheetByName(PROPERTIES_TAB);
+  if (!props) return PROPERTY_MEMORY_TAB + ": PROPERTIES missing — not sweeping";
+
+  const mh = sheetHeaders(mem), iMemId = mh.indexOf("property_id");
+  const ph = sheetHeaders(props), iPropId = ph.indexOf("property_id");
+  if (iMemId === -1 || iPropId === -1) return PROPERTY_MEMORY_TAB + ": no property_id column";
+
+  const pLast = props.getLastRow();
+  const live = pLast > 1
+    ? props.getRange(2, iPropId + 1, pLast - 1, 1).getValues()
+        .map(function (r) { return String(r[0]).trim(); }).filter(Boolean)
+    : [];
+
+  const mLast = mem.getLastRow();
+  if (mLast < 2) return PROPERTY_MEMORY_TAB + ": no data rows";
+  const rows = mem.getRange(2, 1, mLast - 1, mh.length).getValues();
+
+  /* Columns that do not count as content: the id itself, and the timestamp the
+     webhook stamps when it creates the row. */
+  const ignore = [iMemId, mh.indexOf("updated_at")];
+
+  let deleted = 0; const kept = [];
+  for (let r = rows.length - 1; r >= 0; r--) {
+    const id = String(rows[r][iMemId]).trim();
+    if (!id || live.indexOf(id) !== -1) continue;          // no id, or still live
+    const hasContent = rows[r].some(function (v, c) {
+      return ignore.indexOf(c) === -1 && isSet(v);
+    });
+    if (hasContent) { kept.push(id); continue; }
+    mem.deleteRow(r + 2);
+    deleted++;
+  }
+
+  let msg = PROPERTY_MEMORY_TAB + ": " + deleted + " blank orphan(s) deleted";
+  if (kept.length) {
+    msg += " — KEPT " + kept.length + " orphan(s) WITH CONTENT: " + kept.reverse().join(", ") +
+           ". Reattach these to a property by hand; nothing here deletes what a person learned.";
+  }
+  return msg;
+}
+
 function deleteMatching(ss, tabName, column, pred) {
   const sheet = ss.getSheetByName(tabName);
   if (!sheet) return tabName + ": no tab";
