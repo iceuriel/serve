@@ -375,8 +375,15 @@ t('webhook carries geo_factor and park_tier in quote_meta',
   /QUOTE_META_KEYS[\s\S]*?"geo_factor",\s*"park_tier"/.test(WEBHOOK));
 t('webhook treats levels as an ops field, so a real column picks it up later',
   /OPS_PREFERRED_KEYS\s*=\s*\[[^\]]*"levels"/.test(WEBHOOK));
-t('the version stamp moved — the only drift detector between repo and deployment',
-  /VERSION STAMP:[^\n]*r8/.test(WEBHOOK) && /version:\s*"[^"]*r8"/.test(WEBHOOK));
+/* "r8 or later", not "equals r8". Pinned exactly, this fails on the next
+   unrelated bump and reports the geo work as broken when nothing about it
+   changed — the same trap sms-consent.test.js already fell into with r7. */
+const whRev = (WEBHOOK.match(/VERSION STAMP:[^\n]*\br(\d+)\b/) || [])[1];
+const whGet = (WEBHOOK.match(/version:\s*"[^"]*\br(\d+)"/) || [])[1];
+t('the version stamp is r8 or later — the only drift detector between repo and deployment',
+  Number(whRev) >= 8, whRev);
+t('and doGet reports the same revision as the stamp',
+  whGet !== undefined && whGet === whRev, [whRev, whGet]);
 
 /* ============================================================
    9. The form collects it

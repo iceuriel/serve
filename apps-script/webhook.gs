@@ -1,7 +1,15 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-08-20  ·  master  ·  r8 — levels + geo pricing fields
+ * VERSION STAMP:  2026-08-28  ·  master  ·  r9 — stable property + contact ids
+ *
+ * r9 = PROPERTIES gains a stable `property_id` (PROP-nnnn) and LEADS a
+ *      `contact_id` (CON-nnnn); both are written onto the JOBS row so history
+ *      joins on an id rather than on a string built from typed input.
+ *      Property matching now compares NORMALISED FIELDS (zip, address, unit)
+ *      instead of the property_key string, which is what let one apartment
+ *      become three records. A new property also gets a blank PROPERTY_MEMORY
+ *      row so there is always somewhere to put what the crew learns.
  *
  * r8 = `levels` (floors inside the unit) joins the ops-preferred keys, and
  *      `geo_factor` / `park_tier` join quote_meta. All three are additive: no
@@ -159,7 +167,11 @@ function notifyEmail() {
  */
 const PROTECTED_TABS = [
   // Leads MASTER
-  "PROPERTIES", "RAW_INTAKE", "OUTREACH_LOG", "DASHBOARD",
+  // PROPERTY_MEMORY is hand-curated knowledge — what the crew learned about a
+  // home. The webhook may only ever CREATE a blank row for a new property, via
+  // assertPropertyMemoryWritable(). It must never fill or overwrite a cell:
+  // a form submission knows nothing about a sticky gate latch.
+  "PROPERTIES", "PROPERTY_MEMORY", "RAW_INTAKE", "OUTREACH_LOG", "DASHBOARD",
   // Ops workbook — reachable by id now that availability write-back exists.
   // OPS_DASHBOARD normalises to OPS_DASHBOARD, not DASHBOARD, so it needs its
   // own entry rather than relying on the one above.
@@ -262,9 +274,25 @@ const OPS_PREFERRED_KEYS = ["address", "unit", "zip", "levels"];
  * Everything else on that tab is the operator's — source_detail, contacted_via,
  * status, first_variant, dnc_scrub, ltv, notes — and is skipped silently.
  */
-const LEADS_FIELDS = ["lead_id", "name", "email", "phone", "address",
+const LEADS_FIELDS = ["lead_id", "name", "email", "phone", "phone_e164", "address",
                       "unit", "zip", "source", "segment", "source_history",
-                      "sms_transactional", "sms_promotional", "sms_consent_at"];
+                      "sms_transactional", "sms_promotional", "sms_consent_at",
+                      "contact_id"];
+
+/**
+ * E.164, or blank. Never a guess.
+ *
+ * A phone number is the routing key for an inbound text, and a wrong one fails
+ * silently — the message simply matches nobody and you conclude the lookup is
+ * broken rather than the data. So anything that is not unambiguously a US
+ * number returns "" and a human fills it in.
+ */
+function toE164(raw) {
+  const d = String(raw == null ? "" : raw).replace(/[^0-9]/g, "");
+  if (d.length === 10)                        return "+1" + d;
+  if (d.length === 11 && d.charAt(0) === "1") return "+"  + d;
+  return "";
+}
 
 /** LEADS-specific payload key -> header, where the two differ. */
 const LEADS_HEADER_MAP = { address: "service_address" };
@@ -318,6 +346,13 @@ const LEADS_IMMUTABLE_ON_MATCH = [LEADS_FIRST_TOUCH];
    written here: a booking is a future intention, not a service that happened.
    ============================================================ */
 const PROPERTIES_TAB = "PROPERTIES";
+
+/* One row per property, holding what has been learned by cleaning it — access,
+   parking, pets, no-go areas. The webhook only ever appends a blank row for a
+   new property; a human fills it. Door codes are NOT here: they live in a
+   separate Access MASTER file so that nothing which reads this tab can leak
+   them. */
+const PROPERTY_MEMORY_TAB = "PROPERTY_MEMORY";
 
 /** Payload keys the webhook may write to PROPERTIES. Nothing else. */
 const PROPERTIES_FIELDS = ["property_key", "address", "unit", "zip", "bedrooms", "bathrooms"];
@@ -407,20 +442,29 @@ function doPost(e) {
       console.error("LEADS upsert failed (JOBS row still written): " + leadErr);
     }
 
-    const record = buildJobRecord(data, sched, leadId, jobs);
+    /* PROPERTIES — moved AHEAD of the JOBS write as of r9.
+       The JOBS row now carries property_id, so the property has to be resolved
+       before the row is built. This does not weaken the guarantee that only the
+       JOBS write can fail a booking: the call is wrapped, and a failure leaves
+       property_id blank rather than stopping anything. The worst case is a
+       property row for a booking that then fails to write — harmless, since the
+       tab is blank-fill-only and the row is reused on the next attempt. */
+    let propertyResult;
+    try {
+      propertyResult = upsertProperty(ss, data, propertyKey(data));
+    } catch (propErr) {
+      propertyResult = { ok: false, action: "failed", error: String(propErr), property_id: "" };
+      console.error("PROPERTIES upsert failed (booking continues): " + propErr);
+    }
+
+    const record = buildJobRecord(data, sched, leadId, jobs, {
+      property_id: propertyResult.property_id || "",
+      contact_id:  leadResult.contact_id || "",
+    });
     const write  = writeRow(jobs, record);
 
     /* Everything below happens AFTER the booking is safely recorded. None of it
        can fail the booking; each failure is reported in the notification. */
-
-    /* PROPERTIES — the durable asset the join key has been pointing at. */
-    let propertyResult;
-    try {
-      propertyResult = upsertProperty(ss, data, record.property_key);
-    } catch (propErr) {
-      propertyResult = { ok: false, action: "failed", error: String(propErr) };
-      console.error("PROPERTIES upsert failed (JOBS row still written): " + propErr);
-    }
 
     /* Ops AVAILABILITY — stop the slot being sold twice. Reads at write time,
        inside the script lock doPost already holds. Never throws. */
@@ -478,7 +522,7 @@ function handleEvent(ss, data, eventType) {
 
 /** Health check — open the /exec URL in a browser. */
 function doGet() {
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-08-20 r8" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-08-28 r9" });
 }
 
 
@@ -511,15 +555,84 @@ function makeJobId(data, sched) {
   return "SRV-" + day + "-" + tail;
 }
 
-/** ZIP + address + unit, normalised. The same home always produces the same key. */
+/* ============================================================
+   PROPERTY IDENTITY
+
+   The old key was [zip, address, unit] upper-cased with punctuation collapsed,
+   and its comment claimed "the same home always produces the same key". It did
+   not. One apartment at 15 Buswell St became THREE property records:
+
+     02118-15-BUSWELL-ST-UNIT-0006     ("unit 0006", and a typo'd ZIP)
+     02215-15-BUSWELL-ST-6             ("6")
+     02215-15-BUSWELL-ST-0006          ("0006")
+
+   Two causes, neither of them exotic:
+     - unit strings were never normalised, so "unit 0006" and "6" differed
+     - Sheets strips leading zeros from anything that looks numeric, so the
+       same unit round-tripped as "0006" one time and "6" the next
+
+   ZIP STAYS IN THE KEY. Dropping it was considered and rejected: Greater
+   Boston recycles street names across the towns we serve, so "15 Main St #2"
+   without a ZIP would merge two different homes — and showing one customer
+   another's access notes is far worse than a typo forking a record, which is
+   at least visible and fixable.
+
+   The real fix is that MATCHING no longer uses this string at all — see
+   upsertProperty(), which compares normalised fields. The key is now a
+   human-readable label, so its format can change again without breaking
+   anything that already exists.
+   ============================================================ */
+
+/** 5 digits, leading zeros restored. Survives Sheets' numeric coercion. */
+function zipN(z) {
+  const d = String(z == null ? "" : z).replace(/[^0-9]/g, "");
+  return d ? ("00000" + d).slice(-5) : "";
+}
+
+/** Upper-cased, punctuation collapsed to single dashes. */
+function addrN(a) {
+  return String(a == null ? "" : a).toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+/**
+ * The one that was missing. Drops the words people put in front of a unit
+ * number, strips separators, then removes leading zeros — but only when digits
+ * follow, so "4B" survives and a unit genuinely called "0" survives too.
+ *   "unit 0006" -> "6"     "Apt 3131" -> "3131"     "4B" -> "4B"
+ */
+function unitN(u) {
+  return String(u == null ? "" : u).toUpperCase()
+    .replace(/\b(UNIT|APT|APARTMENT|NO|NUM)\b\.?/g, " ")
+    .replace(/[^A-Z0-9]+/g, "")
+    .replace(/^0+(?=\d)/, "");
+}
+
+/** A human-readable label. NOT the match key — see upsertProperty(). */
 function propertyKey(data) {
-  return [data.zip, data.address, data.unit]
-    .filter(isSet)
-    .map(function (v) {
-      return String(v).trim().toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-    })
+  return [zipN(data.zip), addrN(data.address), unitN(data.unit)]
     .filter(function (v) { return v !== ""; })
     .join("-");
+}
+
+/** True when two payloads describe the same home. This IS the match. */
+function sameProperty(a, b) {
+  return zipN(a.zip)      === zipN(b.zip)
+      && addrN(a.address)  === addrN(b.address)
+      && unitN(a.unit)     === unitN(b.unit);
+}
+
+/**
+ * Next id in a PREFIX-nnnn series, scanned from a column. Ids are never reused
+ * and never derived from input — that is the whole point of having them.
+ */
+function nextSeqId(values, colIndex, prefix) {
+  let max = 0;
+  for (let i = 0; i < values.length; i++) {
+    const m = String(values[i][colIndex] || "").match(new RegExp("^" + prefix + "-(\\d+)$"));
+    if (m) { const n = parseInt(m[1], 10); if (n > max) max = n; }
+  }
+  return prefix + "-" + ("0000" + (max + 1)).slice(-4);
 }
 
 
@@ -588,11 +701,19 @@ function upsertLead(ss, data, leadId) {
   const smsT = data.sms_transactional === "yes" ? "yes" : "";
   const smsP = data.sms_promotional   === "yes" ? "yes" : "";
 
+  /* r9 — E.164, the format an inbound text actually arrives in. Stored so a
+     reply can be resolved to a person without asking them who they are.
+     US-only assumption: 10 digits gets +1, 11 starting with 1 gets a +.
+     Anything else is left blank rather than guessed at — a wrong routing key
+     fails silently, which is worse than an empty one. */
+  const phoneE164 = toE164(data.phone);
+
   const incoming = {
     lead_id: leadId,
     name:    data.name  || "",
     email:   normalizeEmail(data.email),
     phone:   data.phone || "",
+    phone_e164: phoneE164,
     address: data.address || "",     // -> service_address
     unit:    data.unit || "",
     zip:     data.zip  || "",
@@ -617,9 +738,15 @@ function upsertLead(ss, data, leadId) {
     [LEADS_FIRST_TOUCH, LEADS_LAST_TOUCH].forEach(function (f) {
       if (col[f] !== undefined) { row[col[f]] = stamp; written.push(f); }
     });
+    let contactId = "";
+    if (col.contact_id !== undefined) {
+      contactId = nextSeqId(existing, col.contact_id, "CON");
+      row[col.contact_id] = contactId;
+      written.push("contact_id");
+    }
     sheet.appendRow(row);
-    return { ok: true, action: "created", lead_id: leadId, row: sheet.getLastRow(),
-             fields: written, missing: missing, headers: headers };
+    return { ok: true, action: "created", lead_id: leadId, contact_id: contactId,
+             row: sheet.getLastRow(), fields: written, missing: missing, headers: headers };
   }
 
   /* ---- Match: fill blanks, append history, bump last_touch ---- */
@@ -658,7 +785,16 @@ function upsertLead(ss, data, leadId) {
     lastTouchBumped = true;
   }
 
-  return { ok: true, action: "matched", lead_id: leadId, row: rowIndex,
+  /* A row that predates contact_id gets one here, same self-backfilling
+     behaviour as property_id. */
+  let contactId = col.contact_id === undefined ? "" : String(current[col.contact_id] || "");
+  if (col.contact_id !== undefined && !contactId) {
+    contactId = nextSeqId(existing, col.contact_id, "CON");
+    setLeadCell(sheet, rowIndex, col.contact_id, "contact_id", contactId);
+    filled.push("contact_id");
+  }
+
+  return { ok: true, action: "matched", lead_id: leadId, contact_id: contactId, row: rowIndex,
            fields: filled, history_appended: historyAppended,
            last_touch_bumped: lastTouchBumped, missing: missing, headers: headers };
 }
@@ -721,7 +857,7 @@ function upsertProperty(ss, data, propertyKey) {
   if (missing.length) console.log("PROPERTIES has no column for: " + missing.join(", ") + " — skipped.");
 
   if (col.property_key === undefined) {
-    throw new Error('PROPERTIES has no "property_key" column — cannot match rows.');
+    throw new Error('PROPERTIES has no "property_key" column — cannot label rows.');
   }
 
   const incoming = {
@@ -736,22 +872,53 @@ function upsertProperty(ss, data, propertyKey) {
   const lastRow  = sheet.getLastRow();
   const existing = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, headers.length).getValues() : [];
 
-  const needle = String(propertyKey).trim().toLowerCase();
+  const idCol   = headers.indexOf("property_id");
+  const addrCol = headers.indexOf(propertiesHeaderFor("address"));
+  const unitCol = headers.indexOf(propertiesHeaderFor("unit"));
+  const zipCol  = headers.indexOf(propertiesHeaderFor("zip"));
+
+  /* ---- MATCH ON NORMALISED FIELDS, never on the key string ----
+     A stored key was built by whatever version of propertyKey() was deployed
+     the day it was written, and Sheets may since have eaten a leading zero out
+     of the unit or zip cell. Comparing the FIELDS sidesteps both: it asks
+     "is this the same home?" rather than "did two strings come out the same?" */
   let rowIndex = -1;
-  for (let i = 0; i < existing.length; i++) {
-    if (String(existing[i][col.property_key]).trim().toLowerCase() === needle) { rowIndex = i + 2; break; }
+  if (addrCol !== -1 && unitCol !== -1 && zipCol !== -1) {
+    for (let i = 0; i < existing.length; i++) {
+      const row = existing[i];
+      if (sameProperty(data, { zip: row[zipCol], address: row[addrCol], unit: row[unitCol] })) {
+        rowIndex = i + 2; break;
+      }
+    }
+  } else {
+    /* Fallback for a tab missing one of those columns: the old exact-key
+       comparison. Worse, but better than matching nothing and forking a row. */
+    const needle = String(propertyKey).trim().toLowerCase();
+    for (let i = 0; i < existing.length; i++) {
+      if (String(existing[i][col.property_key]).trim().toLowerCase() === needle) { rowIndex = i + 2; break; }
+    }
   }
 
-  /* ---- No match: create ---- */
+  /* ---- No match: create, and mint an id ---- */
   if (rowIndex === -1) {
+    const propertyId = idCol === -1 ? "" : nextSeqId(existing, idCol, "PROP");
     const row = new Array(headers.length).fill("");
     const written = [];
     Object.keys(incoming).forEach(function (f) {
       if (col[f] !== undefined && isSet(incoming[f])) { row[col[f]] = incoming[f]; written.push(f); }
     });
+    if (idCol !== -1) { row[idCol] = propertyId; written.push("property_id"); }
     sheet.appendRow(row);
-    return { ok: true, action: "created", property_key: propertyKey,
-             row: sheet.getLastRow(), fields: written, missing: missing };
+
+    /* A new home gets a blank memory row immediately, so there is always
+       somewhere waiting for what the crew learns on the first visit. Never
+       fatal — a missing PROPERTY_MEMORY tab must not cost a booking. */
+    let memory = "skipped";
+    try { memory = ensurePropertyMemoryRow(ss, propertyId); }
+    catch (memErr) { console.error("PROPERTY_MEMORY row not created: " + memErr); }
+
+    return { ok: true, action: "created", property_key: propertyKey, property_id: propertyId,
+             row: sheet.getLastRow(), fields: written, missing: missing, memory: memory };
   }
 
   /* ---- Match: fill blanks only ---- */
@@ -765,8 +932,50 @@ function upsertProperty(ss, data, propertyKey) {
     filled.push(f);
   });
 
-  return { ok: true, action: "matched", property_key: propertyKey,
+  /* An existing row that predates property_id gets one now, so the backfill
+     happens by itself the next time someone books an address we already know. */
+  let propertyId = idCol === -1 ? "" : String(current[idCol] || "");
+  if (idCol !== -1 && !propertyId) {
+    propertyId = nextSeqId(existing, idCol, "PROP");
+    sheet.getRange(rowIndex, idCol + 1).setValue(propertyId);
+    filled.push("property_id");
+    try { ensurePropertyMemoryRow(ss, propertyId); } catch (memErr) { /* never fatal */ }
+  }
+
+  return { ok: true, action: "matched", property_key: propertyKey, property_id: propertyId,
            row: rowIndex, fields: filled, missing: missing };
+}
+
+/**
+ * Append a blank PROPERTY_MEMORY row for a property that has none.
+ *
+ * Writes exactly two cells — property_id and updated_at — and never touches an
+ * existing row. Everything else on that tab is knowledge a person put there,
+ * and a form submission has no business filling any of it.
+ */
+function ensurePropertyMemoryRow(ss, propertyId) {
+  if (!isSet(propertyId)) return "skipped (no property_id)";
+
+  const sheet = ss.getSheetByName(PROPERTY_MEMORY_TAB);
+  if (!sheet) return "skipped (no " + PROPERTY_MEMORY_TAB + " tab)";
+  assertPropertyMemoryWritable(PROPERTY_MEMORY_TAB);
+
+  const headers = sheetHeaders(sheet);
+  const idCol = headers.indexOf("property_id");
+  if (idCol === -1) return "skipped (no property_id column)";
+
+  const lastRow = sheet.getLastRow();
+  const existing = lastRow > 1 ? sheet.getRange(2, idCol + 1, lastRow - 1, 1).getValues() : [];
+  for (let i = 0; i < existing.length; i++) {
+    if (String(existing[i][0]).trim() === String(propertyId).trim()) return "already present";
+  }
+
+  const row = new Array(headers.length).fill("");
+  row[idCol] = propertyId;
+  const upd = headers.indexOf("updated_at");
+  if (upd !== -1) row[upd] = receivedAt();
+  sheet.appendRow(row);
+  return "created";
 }
 
 
@@ -951,8 +1160,14 @@ function prettyDate(ymd) {
    7. JOBS RECORD
    ============================================================ */
 
-function buildJobRecord(data, sched, leadId, sheet) {
+function buildJobRecord(data, sched, leadId, sheet, ids) {
+  ids = ids || {};
   const record = {
+    /* r9 — the join keys. property_key and lead_id stay for continuity, but
+       history should be read through these: an id is minted once and never
+       rebuilt from typed input, so it cannot fork the way a key can. */
+    property_id:        ids.property_id || "",
+    contact_id:         ids.contact_id  || "",
     job_id:             makeJobId(data, sched),
     lead_id:            leadId,
     src_first:          firstSet(data.src_first, data.src, ""),
@@ -1051,6 +1266,18 @@ function assertPropertiesWritable(name) {
   if (normalizeTabName(name) !== normalizeTabName(PROPERTIES_TAB)) {
     throw new Error('assertPropertiesWritable("' + name + '") — this allowance exists ' +
                     'only for ' + PROPERTIES_TAB + '. Use assertWritable().');
+  }
+}
+
+/**
+ * The same narrow allowance for PROPERTY_MEMORY — and it is narrower still.
+ * The only write this permits is appending a blank row carrying a property_id.
+ * Everything else on that tab is written by a human who has been to the home.
+ */
+function assertPropertyMemoryWritable(name) {
+  if (normalizeTabName(name) !== normalizeTabName(PROPERTY_MEMORY_TAB)) {
+    throw new Error('assertPropertyMemoryWritable("' + name + '") — this allowance ' +
+                    'exists only for ' + PROPERTY_MEMORY_TAB + '. Use assertWritable().');
   }
 }
 

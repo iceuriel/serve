@@ -10,7 +10,7 @@ const vm = require('vm');
 const SRC = fs.readFileSync(require('path').join(REPO_ROOT, 'apps-script', 'webhook.gs'), 'utf8');
 
 /* LIVE shape, verified by reportLeadsSchema() on 2026-07-27: 19 columns. */
-const LEADS_LIVE = ['lead_id','name','email','phone','service_address','unit','zip','source',
+const LEADS_LIVE = ['lead_id','contact_id','name','email','phone','phone_e164','service_address','unit','zip','source',
   'source_detail','contacted_via','source_history','status','first_variant','dnc_scrub',
   'first_touch','last_touch','ltv','notes','segment'];
 
@@ -185,7 +185,7 @@ console.log('  LEADS row -> ' + JSON.stringify(created.map(v => isDate(v) ? '<Da
 t('service_address from payload `address`', created[li('service_address')] === '123 Beacon St');
 t('unit', created[li('unit')] === '4B');
 t('zip',  created[li('zip')] === '02134');
-t('no plain "address" column invented', LEADS_LIVE.indexOf('address') === -1 && created.length === 19);
+t('no plain "address" column invented', LEADS_LIVE.indexOf('address') === -1 && created.length === LEADS_LIVE.length);
 t('first_touch is a real Date object', isDate(created[li('first_touch')]), String(created[li('first_touch')]));
 t('last_touch is a real Date object',  isDate(created[li('last_touch')]));
 t('first_touch is NOT a string', typeof created[li('first_touch')] !== 'string');

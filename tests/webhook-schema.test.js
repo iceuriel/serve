@@ -14,7 +14,7 @@ const JOBS_36 = ['job_id','lead_id','source','property_key','service_type','freq
   'scheduling_type','address','unit','zip','quote_meta'];
 
 /* LEADS exactly as SCHEMA.md documents it, segment header included. */
-const LEADS_19 = ['lead_id','name','email','phone','service_address','unit','zip','source',
+const LEADS_LIVE = ['lead_id','contact_id','name','email','phone','phone_e164','service_address','unit','zip','source',
   'source_detail','contacted_via','source_history','status','first_variant','dnc_scrub',
   'first_touch','last_touch','ltv','notes','segment'];
 
@@ -64,7 +64,7 @@ function formatDate(d, tz, fmt) {
 
 function build(tabNames) {
   const audit = [], mails = [], logs = [];
-  const tabs = { JOBS: makeSheet('JOBS', JOBS_36, audit), LEADS: makeSheet('LEADS', LEADS_19, audit) };
+  const tabs = { JOBS: makeSheet('JOBS', JOBS_36, audit), LEADS: makeSheet('LEADS', LEADS_LIVE, audit) };
   (tabNames || []).forEach(n => { tabs[n] = makeSheet(n, ['a','b'], audit); });
   const ssObj = { getSheetByName: n => tabs[n] || null,
                   insertSheet: n => (tabs[n] = makeSheet(n, null, audit)),
@@ -135,7 +135,7 @@ t('regression proof: the old space-separated list would NOT have matched RAW_INT
 console.log('\n=== 2. LEADS upsert against the documented 19-column tab ===');
 const B = build([]);
 console.log('  ' + JSON.stringify(B.post(Object.assign({}, BASE, { submission_id: 'u-1' }))));
-const L = B.tabs.LEADS, li = n => LEADS_19.indexOf(n);
+const L = B.tabs.LEADS, li = n => LEADS_LIVE.indexOf(n);
 console.log('  LEADS row -> ' + JSON.stringify(L._rows[1]));
 
 t('service_address populated from payload `address`', L._rows[1][li('service_address')] === '123 Beacon St', L._rows[1][li('service_address')]);
@@ -145,7 +145,7 @@ t('lead_id normalized email', L._rows[1][li('lead_id')] === 'test.customer@examp
 t('source = first touch', L._rows[1][li('source')] === 'dh-bh-01');
 t('segment written now the header exists', L._rows[1][li('segment')] === 'movein');
 t('source_history seeded', L._rows[1][li('source_history')] === 'dh-bh-01');
-t('no LEADS column named plain "address" was invented', LEADS_19.indexOf('address') === -1 && L._rows[0].length === 19);
+t('no LEADS column named plain "address" was invented', LEADS_LIVE.indexOf('address') === -1 && L._rows[0].length === LEADS_LIVE.length);
 
 // first_touch / last_touch moved OPS -> WH: they are record-activity stamps now.
 const OPERATOR_ONLY = ['source_detail','contacted_via','status','first_variant','dnc_scrub','ltv','notes'];
@@ -154,7 +154,7 @@ t('every operator-owned column left blank', OPERATOR_ONLY.every(c => L._rows[1][
 t('first_touch / last_touch stamped as Dates, not strings',
   ['first_touch','last_touch'].every(c =>
     Object.prototype.toString.call(L._rows[1][li(c)]) === '[object Date]'));
-t('no columns appended to LEADS', L._rows.every(r => r.length <= 19));
+t('no columns appended to LEADS', L._rows.every(r => r.length <= LEADS_LIVE.length));
 /* The consent columns (SCHEMA.md 20-22) are NOT on the live tab yet, so the
    upsert is expected to report and skip exactly those three and nothing else.
    Narrow the expected set the moment the operator adds the headers. */

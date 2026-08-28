@@ -40,7 +40,21 @@ narrative.
 | 15 | `completed_date` | **OPS** | Filled after the job. Never touched by the script. |
 | 16 | `cleaner` | **OPS** | Who performed it. Never touched by the script. |
 | 17 | `start_time` | WH | Requested window (e.g. `9–11 AM`) or preference label. |
-| 18 | `duration_min` | **OPS** | Measured minutes. **Input to the frontier time standard — protect this data.** |
+| 18 | `duration_min` | **OPS** | **CLEANER-minutes, not elapsed minutes.** Two people for 3.5 hours is `420`, not `210`. **Input to the frontier time standard — protect this data.** See below. |
+
+> **`duration_min` is cleaner-minutes.** Multiply elapsed time by the number of
+> people who worked. This is the single most consequential definition in the
+> workbook and it was ambiguous until 2026-08-28.
+>
+> Every hours figure in `script.js` — `WORK_RATE`, `WORK_MODEL`, `LEVEL_HOURS`,
+> the $35 floor, every margin scenario — is denominated in cleaner-hours,
+> because that is the quantity a second cleaner does not change: two people
+> halve the clock and halve the rate each. A single row logged as elapsed time
+> on a two-person job would halve the apparent work and silently reprice
+> everything downstream.
+>
+> `SRV-20260812-11B353` is recorded as `420` for a job that ran 3.5 hours with
+> two people. That is correct and is the convention.
 | 19 | `photos_passed` | **OPS** | `TRUE`/`FALSE`. Photo-verification QA gate. |
 | 20 | `payment_status` | **OPS** | Never touched by the script. |
 | 21 | `job_status` | WH → OPS | Script writes `new` at booking. Operator updates thereafter. |
@@ -360,6 +374,7 @@ held `direct ×1` and blank ×12, with no channel values anywhere.
 
 | Date | Change |
 |---|---|
+| 2026-08-28 | **Webhook r9 — stable ids, and property matching stops using the key.** PROPERTIES gains `property_id` (`PROP-nnnn`), LEADS gains `contact_id` (`CON-nnnn`) and `phone_e164`, and both ids are written onto the JOBS row. New tab **`PROPERTY_MEMORY`** (11 cols) holds what the crew learns; the webhook only ever appends a blank row for a new property and is barred from filling any cell by `assertPropertyMemoryWritable()`. **The real fix is that `upsertProperty()` now matches on normalised FIELDS — zip, address, unit — not on the `property_key` string.** One apartment had become three records because `unit 0006` / `6` / `0006` produced three keys and Sheets strips leading zeros; field matching is immune to both, and to any future key-format change. ZIP stays in the key deliberately: Greater Boston recycles street names across the towns served, so dropping it would merge two different homes — worse than a typo forking one. Door codes are **not** in this workbook; they live in a separate `Access MASTER` file. `duration_min` is now defined as **cleaner-minutes**, not elapsed. See `HANDOFF.md` §2026-08-28. |
 | 2026-08-24 | **Prices derived from a work model — no schema change.** `DEEP_MULT`, `MOVEOUT_MULT` and all three `FREQ` values are now computed from `WORK_MODEL` (labour, measurable with a stopwatch) and `MARGIN` (a business decision), rather than set directly — so a price has a stated reason for the first time. `PER_LEVEL` $50 → $191 on a measured 4h→6h storey comparison; the small-unit multipliers withdrawn as a double discount. No column added, renamed or repurposed, and the booking payload is untouched. Recorded here for one reason: **every published price moved**, and `/pricing` and `/services` render from `computeQuote` — recurring +27%, move in/out −16%, first clean −7% on 2BR and up. The 50% first-clean discount was reviewed and deliberately kept below contractor cost as acquisition spend. See `HANDOFF.md` §2026-08-24. |
 | 2026-08-21 | **Geo factors recalibrated against the parcel data — no new column.** The three tiers (`LARGE` / `STD` / `SMALL` at 1.30 / 1.00 / 0.85) were withdrawn before deployment and replaced by a continuous per-ZIP factor. **The reason is a double-count:** the tier index controlled for bedrooms × levels, but the calculator also charges `PER_BATHROOM`, so bathroom-driven size was billed twice — which is why LARGE read 1.30 when the data supported 1.09. Rebuilt on bedrooms × baths × levels, with Boston figures scaled by 0.9825 to share one regional footing with the MassGIS towns. Schema impact is a **rename inside `quote_meta` only**: `zone` → `geo_factor`, now a number. Nothing was ever written under the old key — r8 is still undeployed. Published prices did not move: the tables now state their neutral basis outright (`SERVE_RANGE_GEO`) instead of borrowing whichever ZIP sat nearest 1.00, so a future data refresh cannot silently reprice three pages. All 15 published cells verified byte-identical. See `HANDOFF.md` §2026-08-21. |
 | 2026-08-20 | **Geographic pricing — webhook r8.** The quote gains a `levels` input, half-step bathrooms, a silent per-ZIP zone factor and a parking adder, all from `serve-geo-data.js` (49 ZIPs, derived from 184,552 Boston parcels plus four MassGIS layers). Schema impact is additive and needs no header: `zone` and `park_tier` join `QUOTE_META_KEYS`, `levels` joins `OPS_PREFERRED_KEYS` so a `levels` header on JOBS would pick it up automatically. **Nothing geographic is user-facing** — see the `quote_meta` note above. Published prices did not move: `SERVE_RANGE_ZIP` was repointed 02116 → 02130 in the same commit, because the new map rates Back Bay LARGE and leaving the anchor there would have raised every published price on three pages by about a third as a side effect. All 15 published cells verified byte-identical against the previous engine. Real quotes now spread $183–$282 for a 2BR/1BA first clean where they were a flat $198 across CORE. See `HANDOFF.md` §2026-08-20. |
