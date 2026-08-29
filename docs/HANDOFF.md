@@ -35,12 +35,18 @@ r9 contains three things, and was revised twice before ever being deployed:
   leaving the column holding a mix of data and formula cells. The `+` is
   re-attached on read, wherever E.164 is actually required (Twilio's `To`/`From`
   is the only consumer that will need it, and none of that code exists yet).
-- **The reservation email reports levels.** Added via `homeSummary()`, which
-  feeds both the subject line and the SERVICE block, so one change covers both.
-  Shown only above one floor, matching `unitLabel()` on the site and therefore
-  the `unit_label` already stored on JOBS. Covered by SCENARIO 5 in
-  `tests/webhook-routing.test.js`, including the stale-cached-`script.js` case
-  where no `levels` key is sent at all.
+- **The reservation email reports levels**, on its own `Levels:` line in the
+  SERVICE block and in the subject line. **Always** — "1 floor" included.
+  The first attempt suppressed the single-storey case as noise, copying
+  `unitLabel()` on the site. That was wrong here, and the difference is who is
+  reading. On the site the customer already knows their own home, so the line
+  is redundant. In an ops email the reader is checking what the customer
+  entered, and a blank is indistinguishable from a field that never arrived —
+  so suppressing it removed exactly the confirmation the line exists to give.
+  A payload with no `levels` key now says `NOT REPORTED` out loud rather than
+  rendering blank. Covered by SCENARIO 5 in `tests/webhook-routing.test.js`,
+  which asserts the one-floor case explicitly and that the line is never
+  missing from any booking email.
 
 ### Sheet reorganisation — the tab map changed
 

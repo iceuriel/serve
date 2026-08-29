@@ -1454,6 +1454,7 @@ function sendReservationEmail(data, sched, leadId, leadResult, propertyResult, s
     "— SERVICE —\n" +
     "Service:    " + serviceLabel(data) + "\n" +
     "Home:       " + homeSummary(data) + "\n" +
+    "Levels:     " + levelsLabel(data) + "\n" +
     "Condition:  " + (data.condition || "") + "\n" +
     "Add-ons:    " + (addonsLabel(data) || "(none)") + "\n" +
     "Frequency:  " + (data.frequency_selected || "once") + "\n" +
@@ -1565,20 +1566,32 @@ function serviceLabel(data) {
 }
 
 /**
- * Levels ride along here rather than on their own line, so they reach the
- * subject line and the SERVICE block from one place.
+ * Levels ride along here so they reach the subject line and the SERVICE block
+ * from one place.
  *
- * Shown only above one floor, matching unitLabel() on the site and therefore
- * the unit_label already stored on JOBS — "1 floor" on every single-storey
- * condo is noise in three places at once. A payload from a stale cached
- * script.js carries no `levels` at all; Number(undefined) > 1 is false, so
- * that case reads as single-storey instead of printing "NaN floors".
+ * ALWAYS shown when the payload carries a count, "1 floor" included. An
+ * earlier version suppressed the single-storey case as noise. That was wrong:
+ * a blank reads identically to "the form never asked", so suppressing it left
+ * the reader unable to tell a one-floor condo from a field that never
+ * arrived — which is the exact doubt this line exists to remove.
  */
 function homeSummary(data) {
   const bd = (Number(data.bedrooms) === 0) ? "Studio" : (valOrBlank(data.bedrooms) + " BR");
   const base = bd + " / " + valOrBlank(data.bathrooms) + " BA";
-  const levels = Number(data.levels);
-  return levels > 1 ? base + " / " + levels + " floors" : base;
+  const n = Number(data.levels);
+  return (n >= 1) ? base + " / " + floorWord(n) : base;
+}
+
+function floorWord(n) { return n + (n === 1 ? " floor" : " floors"); }
+
+/**
+ * Never blank, so the SERVICE block can always be read as a complete record of
+ * what the customer actually entered. A missing count is stated outright
+ * rather than left as an empty space to be interpreted.
+ */
+function levelsLabel(data) {
+  const n = Number(data.levels);
+  return (n >= 1) ? floorWord(n) : "NOT REPORTED — booked from a cached form";
 }
 
 function addonsLabel(data) {

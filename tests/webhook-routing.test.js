@@ -269,22 +269,31 @@ const atFloors = n => Object.assign({}, slot, {
 
 EM.post(atFloors(3));
 let lm = EM.mails[EM.mails.length - 1];
-t('SERVICE block reports 3 floors', /Home:\s+2 BR \/ 1\.5 BA \/ 3 floors/.test(lm.body),
-  (lm.body.match(/Home:.*/) || [])[0]);
+t('SERVICE block reports 3 floors', /Levels:\s+3 floors/.test(lm.body),
+  (lm.body.match(/Levels:.*/) || [])[0]);
 t('subject line reports 3 floors', /2 BR \/ 1\.5 BA \/ 3 floors/.test(lm.subject), lm.subject);
 
+/* The single-storey case is the whole point of the field. Suppressing it once
+   left a real booking looking as though levels had never been captured. */
 EM.post(atFloors(1));
 lm = EM.mails[EM.mails.length - 1];
-t('single storey stays silent', !/floor/.test(lm.body), (lm.body.match(/Home:.*/) || [])[0]);
+t('ONE floor is stated, not suppressed', /Levels:\s+1 floor\b/.test(lm.body),
+  (lm.body.match(/Levels:.*/) || [])[0]);
+t('one floor is singular, not "1 floors"', !/1 floors/.test(lm.body));
+t('one floor reaches the subject too', /2 BR \/ 1\.5 BA \/ 1 floor/.test(lm.subject), lm.subject);
 
-/* A stale cached script.js sends no `levels` at all. That must read as
-   single-storey, never as "NaN floors" in an ops email. */
+/* A stale cached script.js sends no `levels` at all. That must say so out
+   loud — never a blank, which reads identically to "one floor". */
 const noLevels = Object.assign({}, slot, { submission_id: 'uuid-lv-absent' });
 delete noLevels.levels;
 EM.post(noLevels);
 lm = EM.mails[EM.mails.length - 1];
-t('absent levels never prints NaN', !/NaN|undefined floors/.test(lm.body),
-  (lm.body.match(/Home:.*/) || [])[0]);
+t('absent levels says NOT REPORTED', /Levels:\s+NOT REPORTED/.test(lm.body),
+  (lm.body.match(/Levels:.*/) || [])[0]);
+t('absent levels never prints NaN', !/NaN|undefined/.test(lm.body));
+
+/* Every booking email carries the line, whatever the payload. */
+t('Levels line is never missing', EM.mails.every(m => /^Levels:/m.test(m.body)));
 
 console.log('\n' + (bad ? 'FAILURES: ' + bad : 'ALL ASSERTIONS PASSED'));
 process.exit(bad ? 1 : 0);
