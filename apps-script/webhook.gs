@@ -10,6 +10,12 @@
  *      instead of the property_key string, which is what let one apartment
  *      become three records. A new property also gets a blank PROPERTY_MEMORY
  *      row so there is always somewhere to put what the crew learns.
+ *      (r9 was revised twice before ever being deployed. First: toE164 now
+ *      emits bare digits, because a leading "+" makes Sheets parse the cell as
+ *      =+1617... — a formula that happens to evaluate to the right number,
+ *      leaving the column holding a mix of data and formula cells. The "+" is
+ *      re-attached on read, wherever E.164 is actually required. Second: the
+ *      reservation email reports levels, via homeSummary.)
  *
  * r8 = `levels` (floors inside the unit) joins the ops-preferred keys, and
  *      `geo_factor` / `park_tier` join quote_meta. All three are additive: no
@@ -1558,9 +1564,21 @@ function serviceLabel(data) {
   return s;
 }
 
+/**
+ * Levels ride along here rather than on their own line, so they reach the
+ * subject line and the SERVICE block from one place.
+ *
+ * Shown only above one floor, matching unitLabel() on the site and therefore
+ * the unit_label already stored on JOBS — "1 floor" on every single-storey
+ * condo is noise in three places at once. A payload from a stale cached
+ * script.js carries no `levels` at all; Number(undefined) > 1 is false, so
+ * that case reads as single-storey instead of printing "NaN floors".
+ */
 function homeSummary(data) {
   const bd = (Number(data.bedrooms) === 0) ? "Studio" : (valOrBlank(data.bedrooms) + " BR");
-  return bd + " / " + valOrBlank(data.bathrooms) + " BA";
+  const base = bd + " / " + valOrBlank(data.bathrooms) + " BA";
+  const levels = Number(data.levels);
+  return levels > 1 ? base + " / " + levels + " floors" : base;
 }
 
 function addonsLabel(data) {

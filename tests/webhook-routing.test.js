@@ -257,5 +257,34 @@ if (isJson(meta)) {
 }
 function isJson(s) { try { JSON.parse(s); return true; } catch (e) { return false; } }
 
+/* ============ SCENARIO 5: levels reach the notification ============
+   The crew needs stairs before they arrive, not after. homeSummary() feeds
+   both the subject line and the SERVICE block, so both are asserted — a
+   regression in one is a regression in the other. */
+console.log('\n\n=== SCENARIO 5 — levels in the reservation email ===');
+const EM = build(LEADS_FULL);
+const atFloors = n => Object.assign({}, slot, {
+  submission_id: 'uuid-lv-' + n, levels: n, bedrooms: 2, bathrooms: 1.5,
+});
+
+EM.post(atFloors(3));
+let lm = EM.mails[EM.mails.length - 1];
+t('SERVICE block reports 3 floors', /Home:\s+2 BR \/ 1\.5 BA \/ 3 floors/.test(lm.body),
+  (lm.body.match(/Home:.*/) || [])[0]);
+t('subject line reports 3 floors', /2 BR \/ 1\.5 BA \/ 3 floors/.test(lm.subject), lm.subject);
+
+EM.post(atFloors(1));
+lm = EM.mails[EM.mails.length - 1];
+t('single storey stays silent', !/floor/.test(lm.body), (lm.body.match(/Home:.*/) || [])[0]);
+
+/* A stale cached script.js sends no `levels` at all. That must read as
+   single-storey, never as "NaN floors" in an ops email. */
+const noLevels = Object.assign({}, slot, { submission_id: 'uuid-lv-absent' });
+delete noLevels.levels;
+EM.post(noLevels);
+lm = EM.mails[EM.mails.length - 1];
+t('absent levels never prints NaN', !/NaN|undefined floors/.test(lm.body),
+  (lm.body.match(/Home:.*/) || [])[0]);
+
 console.log('\n' + (bad ? 'FAILURES: ' + bad : 'ALL ASSERTIONS PASSED'));
 process.exit(bad ? 1 : 0);

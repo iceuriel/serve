@@ -6,10 +6,77 @@ assistant with no access to this repo. Self-contained on purpose.
 **Companion doc:** `/docs/SCHEMA.md` — authoritative for every column's meaning
 and who writes it. This file is the narrative; that file is the contract.
 
-**Latest session: 2026-08-24.** Jump to
-[what changed on 2026-08-24](#session-2026-08-24) for the current state. The
+**Latest session: 2026-08-28.** Jump to
+[what changed on 2026-08-28](#session-2026-08-28) for the current state. The
 sections below it describe earlier builds and remain accurate except where a
 later section supersedes them.
+
+---
+
+## Session 2026-08-28
+
+### webhook.gs r9 is written but NOT DEPLOYED
+
+This is the single most important line in this file right now. `/exec` is still
+answering with **r8**. Open the `/exec` URL in a browser: if `doGet` reports
+anything other than `2026-08-28 r9`, the repo copy has not been pasted into the
+Apps Script editor yet. Everything in this section is inert until it is.
+
+r9 contains three things, and was revised twice before ever being deployed:
+
+- **Stable ids.** PROPERTIES gains `property_id` (`PROP-nnnn`), LEADS gains
+  `contact_id` (`CON-nnnn`), and both are written onto the JOBS row, so history
+  joins on an id rather than on a string built from typed input. Property
+  matching now compares **normalised fields** (zip, address, unit) instead of
+  the `property_key` string — that string comparison is what let one apartment
+  become three records via `unit 0006` / `6` / `0006`.
+- **`toE164` emits bare digits, no leading `+`.** A leading `+` makes Sheets
+  parse the cell as `=+1617…` — a formula that evaluates to the right number,
+  leaving the column holding a mix of data and formula cells. The `+` is
+  re-attached on read, wherever E.164 is actually required (Twilio's `To`/`From`
+  is the only consumer that will need it, and none of that code exists yet).
+- **The reservation email reports levels.** Added via `homeSummary()`, which
+  feeds both the subject line and the SERVICE block, so one change covers both.
+  Shown only above one floor, matching `unitLabel()` on the site and therefore
+  the `unit_label` already stored on JOBS. Covered by SCENARIO 5 in
+  `tests/webhook-routing.test.js`, including the stale-cached-`script.js` case
+  where no `levels` key is sent at all.
+
+### Sheet reorganisation — the tab map changed
+
+`PROPERTY_MEMORY` is new: one row per property, holding what the crew learns
+(access method, parking, pets, priority rooms, product notes). It is in
+`PROTECTED_TABS`; the webhook only ever creates a **blank** row for a new
+property, never overwrites a populated cell.
+
+Two moves were made for privacy, and both are load-bearing:
+
+- **`access_secret` (door codes) lives in a separate `Access MASTER` file**,
+  owner-only. Never in Leads MASTER, never handed to an agent or a VA. Data the
+  model never receives cannot leak from it.
+- **`RAW_INTAKE` and `OUTREACH_LOG` moved to a separate `Prospecting MASTER`.**
+  Roughly 130 real people with phones, LinkedIn profiles, sale prices and
+  personal notes should not sit in a workbook an assistant reads.
+
+### Still open
+
+- **DASHBOARD is throwing `#VALUE!`** across the source/conversion, apollo,
+  variant and CAC blocks. Cause: `LEADS.status` was deleted on my
+  recommendation and the formulas still reference it. My miss, not yet repaired.
+- **`EVENTS` is empty but must not be deleted.** Three live paths write to it —
+  `waitlist_zip` (`script.js:1039`), `quote_emailed` (`script.js:1205`),
+  `custom_quote_request` (`script.js:1558`). All three are people who did *not*
+  book, which is the one thing JOBS can never tell you. `waitlist_zip` in
+  particular is the expansion data: it records every out-of-area ZIP anyone
+  actually tried.
+- **A `CONTACTS` tab exists and is genuinely dead** — no reference anywhere in
+  `webhook.gs`, `availability.gs`, `script.js` or `SCHEMA.md`. LEADS is the
+  contacts table; it carries `contact_id` and `phone_e164`. Safe to delete.
+- **Dhruv's `phone_e164` cell** may still hold the old `=+1617…` formula. Clear
+  it and retype the digits.
+- **Dhruv asked for bed cover changes**, which is outside First Clean scope
+  (linen change is `0` on deep in `SERVE_SCOPE`). Needs resolving before 09-01,
+  and is the first real `PROPERTY_MEMORY` entry.
 
 ---
 
