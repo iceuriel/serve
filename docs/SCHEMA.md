@@ -87,8 +87,9 @@ accuracy can be analysed by area once completed jobs accumulate.
 > withdrawn before ever reaching production — their index double-counted
 > bathrooms — and the key now carries the measured factor itself, which is
 > strictly more informative and cannot go stale as a taxonomy. **No row was ever
-> written with `zone`:** webhook r8 has not been deployed, so nothing in the
-> workbook uses either spelling.
+> written with `zone`:** the rename landed while r8 was still undeployed, and the
+> first deployment to reach production was r9 on 2026-08-29, so only
+> `geo_factor` has ever been written.
 
 **Neither is ever shown to a customer, named in copy, or itemised on a quote.**
 The customer sees one price. `tests/geo-pricing.test.js` §7 greps every rendered
@@ -305,19 +306,26 @@ workbook changed accounts — keep it current.
 | Reads / writes | JOBS, LEADS, EVENTS | AVAILABILITY (read-only) |
 | Called from | `SHEETS_URL`, `script.js` ~line 155 | `AVAILABILITY_SOURCE_URL`, `script.js` ~line 174 |
 | Method | `POST`, `Content-Type: text/plain` | `GET` |
-| Deployed version | `2026-07-27 SCHEMA.md r4` | `2026-07-27 avail r2` |
+| Deployed version | `2026-08-28 r9` (deployed 08-29) | `2026-07-27 avail r2` |
 | Health check | open the `/exec` URL — `doGet` returns the stamp | the `/exec` URL *is* the feed |
 | Editor dry-run | `reportLeadsSchema()`, then `testPayload()` | `testAvailability()` |
 
-> **The repo is at `2026-08-20 r8` and that is NOT deployed yet.** r8 adds
-> `zone` / `park_tier` / `levels` to what the webhook records. It is purely
-> additive — an r7 deployment receiving an r8 payload ignores the three new keys
-> and writes every existing column exactly as before, so **bookings are not at
-> risk while this sits undeployed**; the only cost is that the new fields are
-> not recorded. The site can ship before the webhook without breaking anything.
-> This table's "Deployed version" row has been stale since at least 2026-07-28
-> (it reads r4 while `HANDOFF.md` §3 reads r6) — open the `/exec` URL and read
-> the stamp rather than trusting either.
+> **Repo and deployment agree as of 2026-08-29: both are r9.** r8 was never
+> deployed on its own; its additions (`geo_factor` / `park_tier` / `levels`)
+> reached production inside r9, along with the stable `property_id` /
+> `contact_id`, the digits-only `phone_e164`, and levels on the booking email.
+>
+> This row has been stale before — it read `r4` while `HANDOFF.md` §3 read `r6`,
+> and neither matched what was actually deployed. **Two files claiming a version
+> is not evidence.** Open the `/exec` URL and read the stamp `doGet` returns;
+> that is the only statement about the deployed version that cannot be wrong.
+>
+> Webhook revisions have been additive so far, which is why a lagging deployment
+> has never cost a booking: an older deployment receiving a newer payload ignores
+> keys it does not know and writes every existing column exactly as before. The
+> site can therefore ship ahead of the webhook. That property is a design choice,
+> not a guarantee — a revision that changes an existing column's meaning would
+> break it, and would need the deployment to go first.
 
 **Deploy settings both need:** Execute as **Me**, Who has access **Anyone**.
 Anything else and the browser gets a login page instead of JSON.
@@ -391,6 +399,7 @@ held `direct ×1` and blank ×12, with no channel values anywhere.
 
 | Date | Change |
 |---|---|
+| 2026-08-29 | **r9 deployed — repo and production agree for the first time since r6.** `/exec` confirmed reporting `2026-08-28 r9`. This is a deployment, not a schema change: every column below was already documented, but until today none of `property_id`, `contact_id`, `phone_e164` or `PROPERTY_MEMORY` was being written by a real booking. Two "Deployed version" rows that had been stale for a month (this file said `r4`, `HANDOFF.md` §3 said `r6`, production was actually r8) are corrected. **Neither file is evidence — read the stamp from `/exec`.** Also shipped in the same paste: the booking notification email now states `Levels:` on its own line, always, including one floor, and says `NOT REPORTED` when a cached browser sends no `levels` key at all — a blank there is indistinguishable from a field that never arrived, which defeats the point of the line. |
 | 2026-08-28 | **Webhook r9 — stable ids, and property matching stops using the key.** PROPERTIES gains `property_id` (`PROP-nnnn`), LEADS gains `contact_id` (`CON-nnnn`) and `phone_e164`, and both ids are written onto the JOBS row. New tab **`PROPERTY_MEMORY`** (11 cols) holds what the crew learns; the webhook only ever appends a blank row for a new property and is barred from filling any cell by `assertPropertyMemoryWritable()`. **The real fix is that `upsertProperty()` now matches on normalised FIELDS — zip, address, unit — not on the `property_key` string.** One apartment had become three records because `unit 0006` / `6` / `0006` produced three keys and Sheets strips leading zeros; field matching is immune to both, and to any future key-format change. ZIP stays in the key deliberately: Greater Boston recycles street names across the towns served, so dropping it would merge two different homes — worse than a typo forking one. Door codes are **not** in this workbook; they live in a separate `Access MASTER` file. `duration_min` is now defined as **cleaner-minutes**, not elapsed. See `HANDOFF.md` §2026-08-28. |
 | 2026-08-24 | **Prices derived from a work model — no schema change.** `DEEP_MULT`, `MOVEOUT_MULT` and all three `FREQ` values are now computed from `WORK_MODEL` (labour, measurable with a stopwatch) and `MARGIN` (a business decision), rather than set directly — so a price has a stated reason for the first time. `PER_LEVEL` $50 → $191 on a measured 4h→6h storey comparison; the small-unit multipliers withdrawn as a double discount. No column added, renamed or repurposed, and the booking payload is untouched. Recorded here for one reason: **every published price moved**, and `/pricing` and `/services` render from `computeQuote` — recurring +27%, move in/out −16%, first clean −7% on 2BR and up. The 50% first-clean discount was reviewed and deliberately kept below contractor cost as acquisition spend. See `HANDOFF.md` §2026-08-24. |
 | 2026-08-21 | **Geo factors recalibrated against the parcel data — no new column.** The three tiers (`LARGE` / `STD` / `SMALL` at 1.30 / 1.00 / 0.85) were withdrawn before deployment and replaced by a continuous per-ZIP factor. **The reason is a double-count:** the tier index controlled for bedrooms × levels, but the calculator also charges `PER_BATHROOM`, so bathroom-driven size was billed twice — which is why LARGE read 1.30 when the data supported 1.09. Rebuilt on bedrooms × baths × levels, with Boston figures scaled by 0.9825 to share one regional footing with the MassGIS towns. Schema impact is a **rename inside `quote_meta` only**: `zone` → `geo_factor`, now a number. Nothing was ever written under the old key — r8 is still undeployed. Published prices did not move: the tables now state their neutral basis outright (`SERVE_RANGE_GEO`) instead of borrowing whichever ZIP sat nearest 1.00, so a future data refresh cannot silently reprice three pages. All 15 published cells verified byte-identical. See `HANDOFF.md` §2026-08-21. |

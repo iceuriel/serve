@@ -15,14 +15,14 @@ later section supersedes them.
 
 ## Session 2026-08-28
 
-### webhook.gs r9 is written but NOT DEPLOYED
+### webhook.gs r9 — deployed 2026-08-29
 
-This is the single most important line in this file right now. `/exec` is still
-answering with **r8**. Open the `/exec` URL in a browser: if `doGet` reports
-anything other than `2026-08-28 r9`, the repo copy has not been pasted into the
-Apps Script editor yet. Everything in this section is inert until it is.
+`/exec` confirmed reporting `2026-08-28 r9`. The repo copy and the deployed copy
+agree. To re-check at any time, open the `/exec` URL in a browser: `doGet`
+returns the version stamp, and anything older than the repo means what is
+deployed is stale. Saving the editor does not redeploy.
 
-r9 contains three things, and was revised twice before ever being deployed:
+r9 contains three things, and was revised twice before it was deployed:
 
 - **Stable ids.** PROPERTIES gains `property_id` (`PROP-nnnn`), LEADS gains
   `contact_id` (`CON-nnnn`), and both are written onto the JOBS row, so history
@@ -1114,7 +1114,7 @@ not depend on a project setting nobody remembers to check.
 | Spreadsheet | Leads MASTER | Ops |
 | Constant | `SHEETS_URL`, `script.js` ~155 | `AVAILABILITY_SOURCE_URL`, `script.js` ~174 |
 | Deployment id starts | `AKfycbxVWfrn2Mos…` | `AKfycbzumNZZ9KI5…` |
-| Version | `2026-07-28 r6` | `2026-07-27 avail r2` |
+| Version | `2026-08-28 r9` (deployed 08-29) | `2026-07-27 avail r2` |
 | Dry-run in editor | `reportLeadsSchema()` → `testPayload()` | `testAvailability()` |
 
 Both deployed **Execute as: Me**, **Access: Anyone**. Anything else and the

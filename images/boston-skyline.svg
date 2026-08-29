@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" preserveAspectRatio="none" fill="currentColor" aria-hidden="true">
+  
+  <path d="M0,300 V240 H36 V222 H78 V255 H108 V196 H126 V150 H162 V196 H186 V244 H214 V120 H236 V96 H262 V88 H300 V132 H322 V174 H344 V150 H372 V210 H396 V250 H430 V168 H448 V120 L458,92 L468,120 H486 V168 H500 V236 H540 V206 H612 A28,28 0 0 1 668,206 H690 V240 H720 V214 H744 V150 L754,110 L764,150 H784 V214 H800 V246 H840 V190 H878 V210 H906 V160 H944 V128 H980 V186 H1010 V232 H1046 V204 H1080 V226 H1120 V246 H1160 V236 H1200 V300 Z"></path>
+  
+  <g opacity="0.42">
+    <polygon points="150,388 150,328 190,388"></polygon>
+    <polygon points="146,388 146,344 116,388"></polygon>
+    <polygon points="640,392 640,336 676,392"></polygon>
+    <polygon points="1010,390 1010,330 1048,390"></polygon>
+    <rect x="0" y="396" width="1200" height="2.5"></rect>
+  </g>
+</svg>
