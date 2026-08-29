@@ -255,23 +255,15 @@ a {
 
 /* Boston skyline along the bottom of the hero.
    ---------------------------------------------------------------
-   The artwork carries its OWN depth: two skyline bands at 0.5 and 0.8, the
-   harbour line at 0.92, boats at 0.5/0.62 and their reflections at 0.18. The
-   single opacity below multiplies through all of that, so the layering
-   survives — near buildings still sit in front of far ones. Flattening it to
-   one tone would throw away the whole point of the second version.
-
-   It is authored in a fixed teal (#0f3d52) rather than currentColor, so it
-   tints the hero cool instead of only darkening it. Over #1F2937 the front
-   band lands near #1A2F3F — a harbour-at-dusk shift rather than a shadow.
-   That is the artwork's decision, not ours, and it is the one visible
-   difference from the first version beyond the extra detail.
+   Drawn in BLACK at low opacity, so it lands a shade DARKER than the section
+   it sits on rather than lighter. That reads as depth — a city receding into
+   the dark — instead of as a picture pasted on top, and it means the artwork
+   can never compete with the headline or the button for attention.
 
    The file sets preserveAspectRatio="none", so `background-size: 100% 100%`
-   is the intended fit: it stretches to whatever band we give it. This version
-   is 1200x520 where the first was 1200x420 — proportionally taller — so every
-   height below grew to match. Stretch the boats and the spire horizontally
-   and the added detail is exactly what breaks first.
+   is the intended fit: it stretches to whatever band we give it. Heights step
+   up with the breakpoints to keep that stretch mild — a fixed height would
+   squash the buildings on a phone and smear them on a wide desktop.
 
    A pseudo-element rather than a <div> because it is pure decoration: nothing
    in the markup, nothing for a screen reader to skip. */
@@ -281,10 +273,10 @@ a {
     left: 0;
     right: 0;
     bottom: 0;
-    height: 160px;
-    background: url("images/boston-skyline-2.svg") no-repeat center bottom;
+    height: 130px;
+    background: url("images/boston-skyline.svg") no-repeat center bottom;
     background-size: 100% 100%;
-    opacity: 0.35;
+    opacity: 0.3;
     z-index: -1;
     pointer-events: none;
 }
@@ -1570,7 +1562,7 @@ a {
     }
 
     .hero::before {
-        height: 240px;
+        height: 200px;
     }
 
     .hero__content {
@@ -1652,7 +1644,7 @@ a {
     }
 
     .hero::before {
-        height: 320px;
+        height: 260px;
     }
 
     .hero__image img {
