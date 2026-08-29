@@ -601,10 +601,10 @@ const SERVE_ATTRIBUTION = readAttribution();
    ============================================================ */
 const HERO_SKINS = {
     movein: {
-        headline: 'Just closed on a new home? It was cleaned for the last owner — not for you. Start fresh with Serve.',
+        headline: 'Just closed on a new home? It was cleaned for the last owner — not for you. Start fresh with Serve',
     },
     pro: {
-        headline: 'Come back Friday to a clean home. Get your weekends back with Serve.',
+        headline: 'Come back Friday to a clean home. Get your weekends back with Serve',
     },
 };
 

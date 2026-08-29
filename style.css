@@ -245,6 +245,40 @@ a {
     display: flex;
     flex-direction: column;
     gap: 2rem;
+    /* Both are for the skyline below: position anchors it, overflow keeps it
+       from bleeding into the trust bar, isolate keeps its negative z-index
+       inside this section rather than escaping behind the page. */
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+}
+
+/* Boston skyline along the bottom of the hero.
+   ---------------------------------------------------------------
+   Drawn in BLACK at low opacity, so it lands a shade DARKER than the section
+   it sits on rather than lighter. That reads as depth — a city receding into
+   the dark — instead of as a picture pasted on top, and it means the artwork
+   can never compete with the headline or the button for attention.
+
+   The file sets preserveAspectRatio="none", so `background-size: 100% 100%`
+   is the intended fit: it stretches to whatever band we give it. Heights step
+   up with the breakpoints to keep that stretch mild — a fixed height would
+   squash the buildings on a phone and smear them on a wide desktop.
+
+   A pseudo-element rather than a <div> because it is pure decoration: nothing
+   in the markup, nothing for a screen reader to skip. */
+.hero::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 130px;
+    background: url("images/boston-skyline.svg") no-repeat center bottom;
+    background-size: 100% 100%;
+    opacity: 0.3;
+    z-index: -1;
+    pointer-events: none;
 }
 
 .hero__content {
@@ -1527,6 +1561,10 @@ a {
         gap: 3rem;
     }
 
+    .hero::before {
+        height: 200px;
+    }
+
     .hero__content {
         flex: 1;
         max-width: none;
@@ -1603,6 +1641,10 @@ a {
 
     .hero__headline {
         font-size: 3rem;
+    }
+
+    .hero::before {
+        height: 260px;
     }
 
     .hero__image img {
