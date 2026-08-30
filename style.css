@@ -1397,6 +1397,55 @@ a {
 /* ============================================================
    STEP 3 — Live scheduler (open agenda)
    ============================================================ */
+/* Broadcast-style LIVE pill beside "Pick your day and time".
+   ---------------------------------------------------------------
+   Honest by construction: script.js only unhides it in 'scheduler' mode, so it
+   appears when real slots from the availability feed are on screen and never
+   while loading or while the fallback radios are standing in. That is the
+   whole licence for using this device — the times genuinely are live.
+
+   #dc2626 rather than the #ef4444 used by .form-error and .flow-input.error.
+   A red pill a few inches from a form field should not read as a validation
+   failure, so the two reds are deliberately different weights of red. */
+.live-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.38rem;
+    margin-left: 0.5rem;
+    padding: 0.14rem 0.48rem 0.14rem 0.4rem;
+    border: 1px solid rgba(220, 38, 38, 0.32);
+    border-radius: 999px;
+    background: rgba(220, 38, 38, 0.09);
+    color: #dc2626;
+    font-size: 0.62rem;
+    font-weight: 800;
+    letter-spacing: 0.10em;
+    /* .field-block sets uppercase and wide tracking on the label; the pill
+       carries its own so it does not inherit the heading's spacing. */
+    text-transform: uppercase;
+    vertical-align: 1px;
+}
+
+.live-badge__dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #dc2626;
+    animation: serve-live-blink 2.4s ease-in-out infinite;
+}
+
+/* Dim-and-swell rather than an on/off blink. A hard blink is a warning light;
+   this should read as a signal that is simply alive. The halo fades outward at
+   the same time so the pulse is legible without the dot ever going dark. */
+@keyframes serve-live-blink {
+    0%, 100% { opacity: 1;    box-shadow: 0 0 0 0   rgba(220, 38, 38, 0.40); }
+    50%      { opacity: 0.42; box-shadow: 0 0 0 4px rgba(220, 38, 38, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .live-badge__dot { animation: none; }
+}
+
 .scheduler-sub {
     font-family: var(--flow-serif);
     font-size: 0.95rem;

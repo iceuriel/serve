@@ -90,5 +90,44 @@ console.log('  slot_time = ' + pick.time + '    -> JOBS.start_time');
 console.log('  notes     = ' + formatSlotDate(pick.date) + ' at ' + pick.time);
 t('slot_date is the ISO form the sheet expects', /^\d{4}-\d{2}-\d{2}$/.test(pick.date));
 
+/* ============================================================
+   The LIVE badge must never outrun the feed.
+   ------------------------------------------------------------
+   It is a claim about data, not decoration: it says the times on screen came
+   from the availability feed just now. In 'loading' the scheduler block is
+   already on screen with no slots in it, and in 'fallback' the feed did not
+   answer at all — a badge in either state is advertising something that is
+   not there. setTimeUi is the single place that decides, so drive the real
+   function rather than trusting the one line that sets it.
+
+   Sliced separately because the harness above deliberately stops short of
+   setTimeUi: everything before it is pure, and this needs a DOM. */
+const uiSrc = SITE.slice(SITE.indexOf('function setTimeUi'),
+                         SITE.indexOf('/* Build the agenda'));
+const seen = {};
+const uiBox = {
+  console,
+  timeUi: null,
+  $: (id) => (seen[id] = seen[id] || { hidden: null }),
+};
+vm.createContext(uiBox);
+vm.runInContext(uiSrc, uiBox);
+const setTimeUi = vm.runInContext('setTimeUi', uiBox);
+
+console.log('\n=== LIVE badge tracks the feed, not the block ===');
+
+setTimeUi('loading');
+t('loading: block visible but badge hidden',
+  seen['scheduler-block'].hidden === false && seen['scheduler-live'].hidden === true,
+  { block: seen['scheduler-block'].hidden, badge: seen['scheduler-live'].hidden });
+
+setTimeUi('scheduler');
+t('scheduler: badge shown once slots are rendered',
+  seen['scheduler-live'].hidden === false, seen['scheduler-live'].hidden);
+
+setTimeUi('fallback');
+t('fallback: feed never answered, badge hidden',
+  seen['scheduler-live'].hidden === true, seen['scheduler-live'].hidden);
+
 console.log('\n' + (bad ? 'FAILURES: ' + bad : 'ALL CHECKS PASSED'));
 process.exit(bad ? 1 : 0);

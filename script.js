@@ -1317,6 +1317,10 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
         $('timepref-block').hidden     = mode !== 'fallback';
         $('scheduler-loading').hidden  = mode !== 'loading';
         $('scheduler-fallback').hidden = mode !== 'scheduler';
+        /* The LIVE badge tracks rendered slots, not the block's visibility. In
+           'loading' the block is already on screen with nothing in it, and a
+           badge there would be advertising a feed that has not answered yet. */
+        $('scheduler-live').hidden     = mode !== 'scheduler';
     }
 
     /* Build the agenda: one section per day, one chip per open time */

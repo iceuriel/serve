@@ -453,7 +453,16 @@
                     <!-- Live scheduler (rendered by script.js when availability loads;
                          the time-preference radios below remain as the fallback) -->
                     <div class="field-block" id="scheduler-block" hidden>
-                        <span class="field-label">Pick your day and time</span>
+                        <span class="field-label">Pick your day and time
+                            <!-- Shown only in 'scheduler' mode — setTimeUi() keeps it
+                                 hidden while the feed is loading and while the radios
+                                 are standing in, so the badge cannot claim a live feed
+                                 that has not answered. The dot is decorative; "LIVE"
+                                 is real text so it reaches a screen reader. -->
+                            <span class="live-badge" id="scheduler-live" hidden>
+                                <span class="live-badge__dot" aria-hidden="true"></span>LIVE
+                            </span>
+                        </span>
                         <p class="scheduler-sub">Every open time for the next three weeks — pick what fits.</p>
                         <p class="scheduler-loading" id="scheduler-loading">Loading times&hellip;</p>
                         <div class="scheduler-days" id="scheduler-days"><!-- rendered by script.js --></div>
