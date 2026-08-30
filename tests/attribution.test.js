@@ -25,13 +25,22 @@ function fakeStorage() {
            removeItem: k => m.delete(k), _dump: () => Object.fromEntries(m) };
 }
 
-function load(search, storage) {
-  const sandbox = { sessionStorage: storage, location: { search, pathname: '/' },
-                    URLSearchParams, window: {}, console };
+/* `now` lets a test place a visit at an arbitrary point on the calendar without
+   sleeping, which is the only way to assert a 30-day window. Date is replaced
+   wholesale rather than stubbed, so the code under test cannot reach a real
+   clock by another route. */
+function load(search, storage, now) {
+  const FakeDate = now === undefined ? Date : Object.assign(
+    function (...a) { return a.length ? new Date(...a) : new Date(now); },
+    Date, { now: () => now });
+  const sandbox = { localStorage: storage, location: { search, pathname: '/' },
+                    URLSearchParams, window: {}, console, Date: FakeDate };
   vm.createContext(sandbox);
   vm.runInContext(slice, sandbox);
   return sandbox;
 }
+
+const DAY = 86400000;
 
 let bad = 0;
 const t = (label, got, want) => {
@@ -66,7 +75,42 @@ t('FIRST touch is NOT overwritten',  second.src_first, 'dh-bh-01');
 t('chain records both, in order',    second.src_chain, 'dh-bh-01>deed-batch-04');
 // A deed tag arriving second must NOT reclassify a pro lead as a mover.
 t('segment still reflects first touch', second.segment, 'pro');
-console.log('  sessionStorage: ' + JSON.stringify(st1._dump()));
+console.log('  localStorage: ' + JSON.stringify(st1._dump()));
+
+console.log('\n=== A2b. the card scanned Tuesday, booked Thursday ===');
+/* The whole reason this moved off sessionStorage. A closed tab used to erase
+   the tag; the card then earned a booking it could not be credited for. */
+const st3 = fakeStorage();
+const DAY0 = Date.UTC(2026, 7, 1);
+load('?src=qr-card-01', st3, DAY0).readAttribution();
+const twoDaysLater = load('', st3, DAY0 + 2 * DAY).readAttribution();
+t('2 days later, untagged visit still credits the card', twoDaysLater.src_first, 'qr-card-01');
+t('and still carries its segment',                       twoDaysLater.segment,   'pro');
+
+const day29 = load('', st3, DAY0 + 29 * DAY).readAttribution();
+t('day 29: inside the window, still credited', day29.src_first, 'qr-card-01');
+
+const day31 = load('', st3, DAY0 + 31 * DAY).readAttribution();
+t('day 31: window closed, credit released', day31.src_first, null);
+t('day 31: segment falls back to direct',   day31.segment,   'direct');
+
+console.log('\n=== A2c. the window is FIXED, not sliding ===');
+/* A sliding window would let someone who drops by every few weeks carry one
+   scan forever, so a visit inside the window must not extend it. */
+const st4 = fakeStorage();
+load('?src=qr-card-02', st4, DAY0).readAttribution();
+load('', st4, DAY0 + 20 * DAY).readAttribution();          // a visit that must NOT extend
+const stillExpires = load('', st4, DAY0 + 31 * DAY).readAttribution();
+t('day 20 visit did not push the expiry out', stillExpires.src_first, null);
+
+console.log('\n=== A2d. the clock starts at the TAG, not the first visit ===');
+/* Someone browses untagged for weeks, then scans. The card gets a full 30 days
+   from the scan — not whatever was left of an anonymous visit's window. */
+const st5 = fakeStorage();
+load('', st5, DAY0).readAttribution();                      // anonymous arrival
+load('?src=qr-card-03', st5, DAY0 + 25 * DAY).readAttribution();   // scans on day 25
+const day50 = load('', st5, DAY0 + 50 * DAY).readAttribution();
+t('25 days after the scan, still credited', day50.src_first, 'qr-card-03');
 
 console.log('\n=== A3. no tag at all ===');
 const st2 = fakeStorage();

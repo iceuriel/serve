@@ -65,7 +65,7 @@ narrative.
 | 26 | `email` | WH | Snapshot. |
 | 27 | `phone` | WH | Snapshot. |
 | 28 | `segment` | WH | `movein` · `pro` · `direct`. Derived from the src prefix. |
-| 29 | `src_chain` | WH | Every tag seen in the session, comma-separated. |
+| 29 | `src_chain` | WH | Every tag seen within the 30-day attribution window, `>`-separated. Was "the session" until 2026-08-30, when attribution moved to localStorage so a card scanned on Tuesday still credits a booking made on Thursday. |
 | 30 | `customer_notes` | WH | **Customer free text only.** Never mixed with `notes`. |
 | 31 | `pets_flag` | WH | `TRUE`/`FALSE`. Keyword-derived from `customer_notes`. Negation-blind — over-flags on purpose. |
 | 32 | `scheduling_type` | WH | `slot` · `preference` · `label` · `none`. |
@@ -372,7 +372,7 @@ both confirmed returning 404.
 first-touch `src` prefix by `SRC_SEGMENTS` in `script.js` (~line 172).
 
 Channel is deliberately **not** what this column records — `source` already holds
-the full first-touch tag and `src_chain` holds every tag of the session, so a
+the full first-touch tag and `src_chain` holds every tag of the window, so a
 third channel field would say nothing new. Segment answers what the person
 *needs*, which is what selects the hero skin and the pricing emphasis.
 

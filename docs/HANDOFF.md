@@ -1015,7 +1015,7 @@ Added, without disturbing the existing behaviour:
 - `serve_src` — first touch, written once per session, never overwritten.
 - `serve_src_chain` — every distinct tag in order, e.g. `dh-bh-01>ref-jordan-m`.
 - `segment` — derived from the first-touch prefix via an editable table.
-- All of it degrades quietly if `sessionStorage` is unavailable (private mode).
+- All of it degrades quietly if `localStorage` is unavailable (private mode).
 
 Verified: survives refresh and back-button; a second tagged link moves last-touch
 but not first-touch.

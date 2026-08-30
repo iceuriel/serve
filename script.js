@@ -535,43 +535,81 @@ function segmentFor(src) {
     return hit ? hit[1] : 'direct';
 }
 
+/* How long a tag keeps credit for a booking, and where it is kept.
+   ---------------------------------------------------------------
+   localStorage, not sessionStorage: people do not book in one sitting. Someone
+   scans a card at a leasing office on Tuesday, closes the tab, and books on
+   Thursday by typing the URL. Session storage is gone by then and the card gets
+   no credit for the sale it caused — which for a QR code on a business card is
+   the normal path, not an edge case.
+
+   Thirty days because that is roughly the decision window for a home service.
+   Without a bound, a scan in January would still be claiming bookings in
+   November. The privacy policy states this window; if you change the number
+   here, change it there too. */
+const ATTR_KEY      = 'serve_attr';
+const ATTR_TTL_DAYS = 30;
+
 /**
- * Read once per page load, persist for the session.
+ * Read once per page load; persist for up to ATTR_TTL_DAYS.
  *
- * `src` / `utm_*` keep their original last-touch behaviour: a URL param wins,
- * otherwise the stored value carries through a refresh or a back-button hop.
- * Layered on top: `serve_src` is the FIRST tag of the session and is never
- * overwritten, and `serve_src_chain` records every distinct tag in order — so
- * a second tagged link can no longer erase the one that actually earned the visit.
+ * `src` / `utm_*` keep last-touch behaviour: a URL param wins, otherwise the
+ * stored value carries through a refresh, a back-button hop, or a return visit
+ * days later. Layered on top: `src_first` is the first TAGGED touch and is
+ * never overwritten, and `src_chain` records every distinct tag in order — so a
+ * second tagged link cannot erase the one that actually earned the visit.
+ *
+ * ONE RECORD, NOT THREE KEYS. This used to be `serve_attr` + `serve_src` +
+ * `serve_src_chain`. Separate keys cannot expire together: the window could
+ * close on one and not the others, leaving a first touch from sixty days ago
+ * paired with a last touch from today. A single object expires atomically or
+ * not at all.
  */
 function readAttribution() {
-    let saved = {};
-    try { saved = JSON.parse(sessionStorage.getItem('serve_attr') || '{}'); } catch (_) {}
     const params = new URLSearchParams(location.search);
-    const keys = ['src', 'utm_source', 'utm_medium', 'utm_campaign'];
+    const keys   = ['src', 'utm_source', 'utm_medium', 'utm_campaign'];
+
+    let saved = {};
+    try {
+        const raw = JSON.parse(localStorage.getItem(ATTR_KEY) || '{}');
+        if (raw.ts && Date.now() - raw.ts <= ATTR_TTL_DAYS * 86400000) {
+            saved = raw;
+        } else if (raw.ts) {
+            localStorage.removeItem(ATTR_KEY);      // window closed — start clean
+        }
+    } catch (_) { /* private mode / storage disabled — degrade to this load only */ }
+
     const attr = {};
     keys.forEach(k => { attr[k] = params.get(k) || saved[k] || null; });
-    try { sessionStorage.setItem('serve_attr', JSON.stringify(attr)); } catch (_) {}
 
     const urlSrc = params.get('src');
-    let firstSrc = null;
-    let chain = [];
-    try {
-        firstSrc = sessionStorage.getItem('serve_src');
-        if (!firstSrc && attr.src) {
-            firstSrc = attr.src;
-            sessionStorage.setItem('serve_src', firstSrc);   // first touch — write once
-        }
-        chain = (sessionStorage.getItem('serve_src_chain') || '').split('>').filter(Boolean);
-        if (urlSrc && chain[chain.length - 1] !== urlSrc) {
-            chain.push(urlSrc);
-            sessionStorage.setItem('serve_src_chain', chain.join('>'));
-        }
-    } catch (_) { /* private mode / storage disabled — degrade to last-touch only */ }
+    let chain = String(saved.src_chain || '').split('>').filter(Boolean);
+    if (urlSrc && chain[chain.length - 1] !== urlSrc) chain.push(urlSrc);
 
-    attr.src_first = firstSrc || attr.src || null;
+    attr.src_first = saved.src_first || attr.src || null;
     attr.src_chain = chain.length ? chain.join('>') : (attr.src || null);
     attr.segment   = segmentFor(attr.src_first);
+
+    /* The clock starts when a TAG is first recorded, not on an untagged visit.
+       Dating the record from someone's first anonymous browse would let a month
+       of direct traffic expire a card scan the day after they finally scanned. */
+    const tagIsNew = attr.src_first && !saved.src_first;
+
+    try {
+        localStorage.setItem(ATTR_KEY, JSON.stringify({
+            src:          attr.src,
+            utm_source:   attr.utm_source,
+            utm_medium:   attr.utm_medium,
+            utm_campaign: attr.utm_campaign,
+            src_first:    attr.src_first,
+            src_chain:    attr.src_chain,
+            /* Fixed window, never refreshed on a later visit. A sliding window
+               would let someone who drops by every 29 days carry one card scan
+               forever. */
+            ts: tagIsNew ? Date.now() : (saved.ts || Date.now()),
+        }));
+    } catch (_) { /* nothing to do — attribution degrades, booking is unaffected */ }
+
     return attr;
 }
 

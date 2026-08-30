@@ -33,7 +33,12 @@ function makeBox(search, storage, headlineSink) {
     console,
     location: { search, pathname: '/' },
     URLSearchParams,
-    sessionStorage: storage,
+    /* localStorage since 2026-08-30 — attribution outlives the tab so a card
+       scanned on Tuesday still credits a booking made on Thursday. Leaving this
+       as sessionStorage silently gives the code NO storage at all, which looks
+       exactly like private mode: first touch stops persisting and every skin
+       assertion below fails. */
+    localStorage: storage,
     document: {
       body,
       querySelector: sel => (sel === '.hero__headline'
