@@ -187,5 +187,36 @@ skyline ? ok('skyline block present in the hero')
   ? ok('skyline sets its own colour (currentColor would inherit #fff)')
   : fail('.hero__skyline must set color — it would otherwise inherit #fff from .hero');
 
+/* 12. The before/after photos stay collapsed.
+   They sit between the hero and the quote form, so expanding them by default
+   pushes the form down and costs ~1.2 MB of JPEG that a browser skips
+   entirely while the panel is shut. Adding `open` to take a screenshot and
+   forgetting to remove it would undo both, invisibly — the page would simply
+   look the way it used to. */
+head('Before/after photos collapsed');
+const workSection = (html.match(/<!-- WORK EXAMPLES -->[\s\S]*?<!-- QUOTE FLOW/) || [''])[0]
+  .replace(/<!--[\s\S]*?-->/g, '');          // my own comments mention <details>
+
+/<details class="work-acc">/.test(workSection)
+  ? ok('photo grid wrapped in <details>')
+  : fail('the .ba-grid must sit inside <details class="work-acc">');
+
+/<details class="work-acc"\s+open/.test(workSection)
+  ? fail('work-acc has `open` — the photos ship expanded, form pushed down')
+  : ok('collapsed by default');
+
+workSection.indexOf('<div class="ba-grid">') > workSection.indexOf('<details class="work-acc">')
+  ? ok('grid is inside the panel, not beside it')
+  : fail('.ba-grid is outside <details> — it would render regardless');
+
+/* Lazy loading is half of the saving: a closed <details> only avoids the
+   fetch because the images defer it. Eager images inside would load anyway. */
+const workImgs  = (workSection.match(/<img\b[^>]*>/g) || []);
+const lazyImgs  = workImgs.filter(t => /loading="lazy"/.test(t));
+workImgs.length > 0 && workImgs.length === lazyImgs.length
+  ? ok('all ' + workImgs.length + ' photos are loading="lazy"')
+  : fail((workImgs.length - lazyImgs.length) + ' of ' + workImgs.length +
+         ' photos are not lazy — those load even while collapsed');
+
 console.log('\n' + (fails ? 'FAILURES: ' + fails : 'ALL CHECKS PASSED'));
 process.exit(fails ? 1 : 0);

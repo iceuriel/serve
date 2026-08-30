@@ -502,6 +502,49 @@ a {
     background: var(--color-bg-light);
 }
 
+/* The before/after photos open on demand, so the quote form sits higher.
+   Only the SUMMARY is width-capped — capping the <details> itself would
+   squeeze the grid inside it down to button width when opened. */
+.work-acc {
+    margin-top: 1.75rem;
+}
+
+.work-acc__summary {
+    max-width: 340px;
+    margin: 0 auto;
+    padding: 0.85rem 1.4rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    background: var(--color-bg);
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--color-dark);
+    /* list-style plus the webkit rule below: between them they remove the
+       default disclosure triangle in every browser that ships one. */
+    list-style: none;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.55rem;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.work-acc__summary::-webkit-details-marker { display: none; }
+.work-acc__summary::after { content: "+"; color: var(--color-text-muted); font-size: 1.15rem; }
+.work-acc[open] .work-acc__summary::after { content: "\2013"; }
+
+.work-acc__summary:hover {
+    background: var(--color-bg-light);
+    border-color: var(--color-text-muted);
+}
+
+/* <summary> is focusable, so the ring has to be deliberate — this is the only
+   way to reach the photos from the keyboard. */
+.work-acc__summary:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+}
+
 .ba-grid {
     display: grid;
     grid-template-columns: 1fr;
