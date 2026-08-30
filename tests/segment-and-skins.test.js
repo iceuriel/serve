@@ -134,14 +134,60 @@ const rules = red.split('\n').filter(l => l.trim() && !l.trim().startsWith('#'))
 console.log('  ' + rules.map(r => r.join(' ')).join('\n  '));
 
 const byPath = Object.fromEntries(rules.map(r => [r[0], r]));
+
+/* A vanity path is a measurement instrument, and an untagged one silently
+   measures nothing — it looks identical to organic traffic in the sheet. This
+   used to name each path individually, which meant a path added later was
+   guarded only by whoever remembered to come back here. /q shipped untagged
+   through a Cloudflare dashboard rule for exactly that reason.
+
+   So the rule is now inverted: EVERY redirect must carry a src unless it is
+   listed below as deliberately exempt, and adding to that list should take a
+   reason rather than a shrug. */
+const UNTAGGED_BY_DESIGN = {
+  '/book': 'the opt-in URL in Twilio A2P 10DLC registration — reviewers follow ' +
+           'it by hand, and a campaign tag would route marketing traffic through ' +
+           'the one URL carriers re-fetch after approval',
+};
+
+/** The `src` a redirect target hands to the site. Strips the fragment first —
+    `...&utm_campaign=founder#quote` otherwise parses the anchor into the last
+    parameter's value. */
+function srcOf(target) {
+  const query = (String(target).split('?')[1] || '').split('#')[0];
+  return new URLSearchParams(query).get('src');
+}
+
+rules.forEach(([from, to]) => {
+  if (UNTAGGED_BY_DESIGN[from]) {
+    t(from + ' is untagged on purpose', !srcOf(to),
+      'exempt: ' + UNTAGGED_BY_DESIGN[from]);
+    return;
+  }
+  const src = srcOf(to);
+  t(from + ' carries a src tag', !!src, to);
+  t(from + ' resolves to a known segment', SEGMENTS.includes(segmentFor(src)),
+    segmentFor(src));
+});
+
+/* Named paths keep their own assertion on top of the blanket rule: these two
+   are printed on physical media, so which segment they resolve to is a fact
+   about paper that cannot be corrected after the fact. */
 t('/movein exists', !!byPath['/movein']);
 t('/clean exists',  !!byPath['/clean']);
-[['/movein', 'movein'], ['/clean', 'pro']].forEach(([p, want]) => {
-  const target = byPath[p] && byPath[p][1];
-  const src = target && new URLSearchParams(target.split('?')[1] || '').get('src');
-  t(p + ' carries a src tag', !!src, target);
-  t(p + ' resolves to segment ' + want, segmentFor(src) === want, segmentFor(src));
-});
+t('/q exists (founder card)',   !!byPath['/q']);
+t('/friend exists (referral card)', !!byPath['/friend']);
+[['/movein', 'movein'], ['/clean', 'pro'], ['/q', 'pro'], ['/friend', 'direct']]
+  .forEach(([p, want]) => {
+    const target = byPath[p] && byPath[p][1];
+    t(p + ' resolves to segment ' + want, segmentFor(srcOf(target)) === want,
+      segmentFor(srcOf(target)));
+  });
+
+/* Two cards must not share a slug — identical tags make the sheet unable to
+   tell them apart, which is the one thing the slug exists to do. */
+const srcs = rules.map(r => srcOf(r[1])).filter(Boolean);
+t('every vanity path has a distinct src', new Set(srcs).size === srcs.length, srcs);
 t('redirects are 302, not permanently cached',
   rules.every(r => r[2] === '302'), rules.map(r => r[2]));
 t('build stages _redirects',

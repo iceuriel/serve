@@ -15,6 +15,29 @@
 /movein   /?src=deed-movein   302
 /clean    /?src=dh-clean      302
 
+# Business cards.
+#
+# THESE LIVE HERE, NOT IN THE CLOUDFLARE DASHBOARD. A rule created in the
+# dashboard is invisible to this repo and to the test below, which is exactly
+# how /q first shipped pointing at an untagged URL. A vanity path in this file
+# gets checked; one in the dashboard gets checked by whoever remembers.
+#
+# The -01 is a PRINT RUN version, not decoration. Reprint with a different
+# design and it becomes -02: same channel, two slugs, and the sheet reports
+# which card stock or layout actually converted. Free to do now, impossible to
+# reconstruct later. Segment comes from the prefix only — everything after the
+# first `-` is yours to name, so the version costs nothing.
+#
+#   qr-  -> pro       the founder card, consumer
+#   ref- -> direct    a real person sent them, but we do not know why
+#
+# Both land on #quote rather than the top of the page. A card is handed over in
+# person, so the recipient already had the pitch — what they need is the form.
+# The tradeoff is that the segment hero never gets seen; drop the fragment to
+# land them on it instead. Attribution is recorded either way.
+/q        /?src=qr-card-founder-01&utm_source=card&utm_medium=print&utm_campaign=founder#quote    302
+/friend   /?src=ref-card-friend-01&utm_source=card&utm_medium=print&utm_campaign=referral#quote   302
+
 # /book is the opt-in URL named in Twilio's A2P 10DLC campaign registration.
 # A reviewer follows it by hand to confirm the consent checkbox is really there
 # and really unchecked, so it has to land ON the booking form, not the homepage
