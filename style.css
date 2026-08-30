@@ -504,9 +504,14 @@ a {
 
 /* The before/after photos open on demand, so the quote form sits higher.
    Only the SUMMARY is width-capped — capping the <details> itself would
-   squeeze the grid inside it down to button width when opened. */
+   squeeze the grid inside it down to button width when opened.
+
+   The margin carries the whole gap under the heading now. It used to come
+   from .section-sub's 2.5rem bottom margin; with the subhead gone, this
+   collapsed against .section-title's 0.5rem and left the button crowding
+   the heading. */
 .work-acc {
-    margin-top: 1.75rem;
+    margin-top: 2rem;
 }
 
 .work-acc__summary {
