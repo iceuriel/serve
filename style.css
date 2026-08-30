@@ -255,30 +255,75 @@ a {
 
 /* Boston skyline along the bottom of the hero.
    ---------------------------------------------------------------
-   Drawn in BLACK at low opacity, so it lands a shade DARKER than the section
-   it sits on rather than lighter. That reads as depth — a city receding into
-   the dark — instead of as a picture pasted on top, and it means the artwork
-   can never compete with the headline or the button for attention.
+   BLACK at low opacity, so it lands a shade DARKER than the section it sits on
+   rather than lighter. That reads as depth — a city receding into the dark —
+   instead of as a picture pasted on top, and it keeps the artwork from ever
+   competing with the headline or the button for attention.
 
-   The file sets preserveAspectRatio="none", so `background-size: 100% 100%`
-   is the intended fit: it stretches to whatever band we give it. Heights step
-   up with the breakpoints to keep that stretch mild — a fixed height would
-   squash the buildings on a phone and smear them on a wide desktop.
+   The SVG is inline in index.html rather than a background-image because CSS
+   cannot reach inside a background to animate part of it. The tint therefore
+   comes from `color` here, feeding fill="currentColor" on the markup: with no
+   colour set it would inherit #fff from .hero and paint a WHITE skyline.
 
-   A pseudo-element rather than a <div> because it is pure decoration: nothing
-   in the markup, nothing for a screen reader to skip. */
-.hero::before {
-    content: "";
+   preserveAspectRatio="none" means the drawing stretches to whatever band it
+   is given, so the heights step up with the breakpoints. One fixed height
+   would squash the buildings on a phone and smear them on a wide desktop.
+
+   z-index: -1 puts it above .hero's own background but below everything in
+   normal flow, so no hero content needs a stacking rule of its own. */
+.hero__skyline {
     position: absolute;
     left: 0;
     right: 0;
     bottom: 0;
     height: 130px;
-    background: url("images/boston-skyline.svg") no-repeat center bottom;
-    background-size: 100% 100%;
+    color: #000;
     opacity: 0.3;
     z-index: -1;
     pointer-events: none;
+}
+
+.hero__skyline svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+/* Sails. Drift carries each hull a full viewBox width to the right; its twin,
+   parked one width to the left in the markup, lands exactly where it began, so
+   the loop is seamless. Inside a transformed SVG element a `px` in translate
+   is a USER UNIT, not a screen pixel — 1200px here means one viewBox width at
+   any rendered size, which is why the loop holds on every screen.
+
+   Bob nests inside drift, so the two transforms compose into a slow diagonal
+   rather than fighting each other.
+
+   The three durations are deliberately non-harmonic. Round multiples would
+   re-sync the boats into a visible formation every few minutes. */
+@keyframes serve-sail-drift {
+    from { transform: translateX(0); }
+    to   { transform: translateX(1200px); }
+}
+
+@keyframes serve-sail-bob {
+    0%, 100% { transform: translateY(0); }
+    50%      { transform: translateY(-2.5px); }
+}
+
+.skyline__drift--a { animation: serve-sail-drift  96s linear infinite; }
+.skyline__drift--b { animation: serve-sail-drift 132s linear infinite; }
+.skyline__drift--c { animation: serve-sail-drift  78s linear infinite; }
+
+.skyline__bob--a { animation: serve-sail-bob 7.5s ease-in-out infinite; }
+.skyline__bob--b { animation: serve-sail-bob 9s   ease-in-out infinite; }
+.skyline__bob--c { animation: serve-sail-bob 8.2s ease-in-out infinite; }
+
+/* The skyline still renders — only the sailing stops. */
+@media (prefers-reduced-motion: reduce) {
+    .skyline__drift,
+    .skyline__bob {
+        animation: none;
+    }
 }
 
 .hero__content {
@@ -1561,7 +1606,7 @@ a {
         gap: 3rem;
     }
 
-    .hero::before {
+    .hero__skyline {
         height: 200px;
     }
 
@@ -1643,7 +1688,7 @@ a {
         font-size: 3rem;
     }
 
-    .hero::before {
+    .hero__skyline {
         height: 260px;
     }
 

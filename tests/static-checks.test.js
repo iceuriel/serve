@@ -137,5 +137,55 @@ cta.length === 3 && cta.every(c => c === 'Instant quote')
   ? ok('all ' + cta.length + ' CTA controls read "Instant quote"')
   : fail('CTA controls inconsistent: ' + JSON.stringify(cta));
 
+/* 11. The hero skyline, and specifically the thing that makes it loop.
+   Each sail is in the markup TWICE — once in place, once shifted one full
+   viewBox width left — and the drift animation moves both right by exactly
+   that width, so the twin arrives as the original leaves. The duplication
+   reads as redundant markup and is the obvious thing to "tidy up"; deleting
+   a twin leaves the sails vanishing at one edge and reappearing at the other
+   several seconds later, which is easy to miss on a page nobody stares at.
+   These assertions exist to make that deletion fail loudly instead. */
+head('Hero skyline');
+const skyline = (html.match(/<div class="hero__skyline"[\s\S]*?<\/div>/) || [''])[0];
+
+skyline ? ok('skyline block present in the hero')
+        : fail('no .hero__skyline block in index.html');
+
+/aria-hidden="true"/.test(skyline)
+  ? ok('decorative: aria-hidden from the screen reader tree')
+  : fail('.hero__skyline must be aria-hidden — it is pure decoration');
+
+['a', 'b', 'c'].forEach(lane => {
+  const drift = new RegExp('skyline__drift--' + lane, 'g');
+  const bob   = new RegExp('skyline__bob--'   + lane, 'g');
+  const drifts = (skyline.match(drift) || []).length;
+  const bobs   = (skyline.match(bob)   || []).length;
+  drifts === 1 && bobs === 2
+    ? ok('lane ' + lane + ': one drift group carrying two hulls')
+    : fail('lane ' + lane + ' has ' + drifts + ' drift / ' + bobs +
+           ' hulls — the loop needs exactly 1 and 2 (the twin makes it seamless)');
+});
+
+(skyline.match(/translate\(-1200,0\)/g) || []).length === 3
+  ? ok('all three twins offset by exactly one viewBox width')
+  : fail('each lane needs a twin at translate(-1200,0) — that offset IS the loop');
+
+/translateX\(1200px\)/.test(css)
+  ? ok('drift travels one full viewBox width')
+  : fail('serve-sail-drift must travel 1200px — anything else seams the loop');
+
+/* The animation is decorative motion across the whole viewport, which is
+   exactly what a vestibular trigger looks like. The site already honours the
+   setting for the CTA pulse; the sails must not be the one exception. */
+/prefers-reduced-motion[\s\S]{0,220}skyline__drift/.test(css)
+  ? ok('sailing stops under prefers-reduced-motion')
+  : fail('no prefers-reduced-motion guard covering .skyline__drift');
+
+/* fill="currentColor" inherits, and .hero sets color:#fff. Without an explicit
+   colour on the container the silhouette paints WHITE over the dark hero. */
+/\.hero__skyline\s*\{[^}]*color:/.test(css)
+  ? ok('skyline sets its own colour (currentColor would inherit #fff)')
+  : fail('.hero__skyline must set color — it would otherwise inherit #fff from .hero');
+
 console.log('\n' + (fails ? 'FAILURES: ' + fails : 'ALL CHECKS PASSED'));
 process.exit(fails ? 1 : 0);

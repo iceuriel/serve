@@ -63,6 +63,54 @@
 
     <!-- HERO -->
     <section class="hero">
+        <!-- Decorative Boston skyline. aria-hidden: it says nothing a screen
+             reader needs, and the sails would only be noise in a text tree.
+             Each sail appears TWICE — once in place, once shifted a full
+             viewBox width to the left. The drift animation moves both right by
+             exactly that width, so as one leaves the frame its twin arrives at
+             the position the first started from and the loop never seams.
+             Motion is disabled under prefers-reduced-motion; see style.css. -->
+        <div class="hero__skyline" aria-hidden="true">
+            <svg viewBox="0 0 1200 420" preserveAspectRatio="none" fill="currentColor">
+                <path d="M0,300 V240 H36 V222 H78 V255 H108 V196 H126 V150 H162 V196 H186 V244 H214 V120 H236 V96 H262 V88 H300 V132 H322 V174 H344 V150 H372 V210 H396 V250 H430 V168 H448 V120 L458,92 L468,120 H486 V168 H500 V236 H540 V206 H612 A28,28 0 0 1 668,206 H690 V240 H720 V214 H744 V150 L754,110 L764,150 H784 V214 H800 V246 H840 V190 H878 V210 H906 V160 H944 V128 H980 V186 H1010 V232 H1046 V204 H1080 V226 H1120 V246 H1160 V236 H1200 V300 Z"/>
+                <g opacity="0.42">
+                    <g class="skyline__drift skyline__drift--a">
+                        <g class="skyline__bob skyline__bob--a">
+                            <polygon points="150,388 150,328 190,388"/>
+                            <polygon points="146,388 146,344 116,388"/>
+                        </g>
+                        <g transform="translate(-1200,0)">
+                            <g class="skyline__bob skyline__bob--a">
+                                <polygon points="150,388 150,328 190,388"/>
+                                <polygon points="146,388 146,344 116,388"/>
+                            </g>
+                        </g>
+                    </g>
+                    <g class="skyline__drift skyline__drift--b">
+                        <g class="skyline__bob skyline__bob--b">
+                            <polygon points="640,392 640,336 676,392"/>
+                        </g>
+                        <g transform="translate(-1200,0)">
+                            <g class="skyline__bob skyline__bob--b">
+                                <polygon points="640,392 640,336 676,392"/>
+                            </g>
+                        </g>
+                    </g>
+                    <g class="skyline__drift skyline__drift--c">
+                        <g class="skyline__bob skyline__bob--c">
+                            <polygon points="1010,390 1010,330 1048,390"/>
+                        </g>
+                        <g transform="translate(-1200,0)">
+                            <g class="skyline__bob skyline__bob--c">
+                                <polygon points="1010,390 1010,330 1048,390"/>
+                            </g>
+                        </g>
+                    </g>
+                    <!-- Waterline sits outside the drift groups so it stays put. -->
+                    <rect x="0" y="396" width="1200" height="2.5"/>
+                </g>
+            </svg>
+        </div>
         <div class="hero__image">
             <img class="hero__logo" src="images/serve-logo-v2.svg" alt="Serve Home Cleaning">
         </div>
