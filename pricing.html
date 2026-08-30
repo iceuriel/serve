@@ -18,7 +18,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>House Cleaning Prices in Boston — Serve</title>
-    <meta name="description" content="What house cleaning actually costs in Boston: first cleans from $117 to $347, recurring visits from $85. All-in pricing — supplies and card fees included, no hourly rates, no surprises at the door.">
+    <!-- The figures here are FLOORS, deliberately, and they are checked against
+         the engine by pricing-and-services.test.js. This line previously read
+         "$117 to $347, recurring from $85" — every one of those was wrong after
+         the pricing rework, and the ceiling was out by 2.5x, because a meta tag
+         is plain text that no test was reading. Quoting an upper bound is what
+         made it rot: the floor moves rarely, the ceiling moves whenever the
+         largest home in the table changes. -->
+    <meta name="description" content="What house cleaning actually costs in Boston: first cleans from $127, recurring visits from $79. All-in — supplies and card fees included, no hourly rates.">
     <link rel="canonical" href="https://servecleaning.com/pricing">
     <link rel="icon" type="image/x-icon" href="images/favicon.ico">
     <link rel="icon" type="image/svg+xml" href="images/favicon.svg">

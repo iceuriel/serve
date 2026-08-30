@@ -268,6 +268,22 @@ staged.forEach(f => {
   }
 });
 
+/* Every staged page needs a description too, and index.html shipped without
+   one for months. A missing description is not a blank result — Google writes
+   its own from whatever text it finds first, which on these pages is the nav.
+   Over ~160 characters it gets truncated mid-sentence, which reads worse than
+   a short one. */
+staged.forEach(f => {
+  const doc  = fs.readFileSync(path.join(ROOT, f), 'utf8');
+  const desc = (doc.match(/<meta name="description" content="([^"]*)"/) || [])[1];
+  if (!desc)                  fail(f + ' has no <meta name="description">');
+  else if (desc.length > 160) fail(f + ' description is ' + desc.length +
+                                   ' chars — truncates around 160');
+  else if (desc.length < 50)  fail(f + ' description is only ' + desc.length +
+                                   ' chars — too thin to be useful');
+  else ok(f + ' description: ' + desc.length + ' chars');
+});
+
 /* A www canonical would fight the Cloudflare www -> apex rule: the redirect
    sends crawlers to apex while the tag tells them the www copy is the real
    one. Both are individually defensible and together they are a loop. */

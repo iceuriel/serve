@@ -513,5 +513,44 @@ t('introduces no class outside the serve-* namespace', introduced.length === 0, 
 const bareState = (newCss.match(/(^|[\s,>+~])\.is-[a-z-]+/gm) || []).map(s => s.trim());
 t('state modifiers are never standalone selectors', bareState.length === 0, bareState);
 
+/* ---------- meta descriptions quote real prices ----------
+   The rule everywhere else on this site is that a published price is computed,
+   never written down. A <meta name="description"> is the one place that rule
+   could not reach: it is plain text in the <head>, invisible to the renderer
+   and, until now, to every test.
+
+   It rotted exactly as you would expect. /pricing advertised "first cleans from
+   $117 to $347, recurring visits from $85" while the engine quoted $127, $865
+   and $79 — the ceiling out by two and a half times, live, on the page whose
+   entire job is telling people what things cost. Nobody would have noticed,
+   because nothing renders that string on screen.
+
+   Only FLOORS are asserted. Quoting a ceiling is what made the old line rot:
+   the floor moves when base pricing changes, the ceiling moves whenever the
+   largest home in SERVE_SIZES changes, which is a far lighter trigger. */
+console.log('\n=== meta descriptions quote prices the engine agrees with ===');
+const metaBox = runModule().box;
+const rangeOf = (b, ba, svc) => metaBox.serveRange(b, ba, svc);
+
+/* The cheapest home in the published table sets both floors. */
+const sizes    = metaBox.__serve.SERVE_SIZES;
+const smallest = sizes[0];
+const deepFloor = rangeOf(smallest.beds, smallest.baths, 'deep')[0];
+const recFloor  = rangeOf(smallest.beds, smallest.baths, 'recurring')[0];
+
+const pricingDesc =
+  (read('pricing.html').match(/<meta name="description" content="([^"]*)"/) || [])[1] || '';
+const quoted = (pricingDesc.match(/\$\d+/g) || []).map(s => +s.slice(1));
+
+t('/pricing description quotes exactly two figures', quoted.length === 2, quoted);
+t('first-clean floor matches the engine',
+  quoted[0] === deepFloor, { inDescription: quoted[0], fromEngine: deepFloor });
+t('recurring floor matches the engine',
+  quoted[1] === recFloor, { inDescription: quoted[1], fromEngine: recFloor });
+
+/* "from $127" must not become "$127 to $865" again. */
+t('description quotes floors, not a range',
+  !/\bto \$|\$\d+\s*[–-]\s*\$/.test(pricingDesc), pricingDesc);
+
 console.log('\n' + (bad ? 'FAILURES: ' + bad : 'ALL CHECKS PASSED'));
 process.exit(bad ? 1 : 0);
