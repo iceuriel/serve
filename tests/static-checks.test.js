@@ -218,5 +218,63 @@ workImgs.length > 0 && workImgs.length === lazyImgs.length
   : fail((workImgs.length - lazyImgs.length) + ' of ' + workImgs.length +
          ' photos are not lazy — those load even while collapsed');
 
+/* 13. Every published page declares one canonical URL, and it agrees with the
+   sitemap.
+   ---------------------------------------------------------------
+   The homepage is the reason this matters now: every campaign slug creates
+   another crawlable copy of it — /?src=qr-card-founder-01 and one more per
+   card printed — plus a www duplicate of each. Identical content on every one.
+   Without a canonical, Google picks a winner itself and splits ranking signals
+   across the rest, and the problem grows with each QR code rather than staying
+   put.
+
+   Tested against sitemap.xml rather than a list written here, so the two
+   cannot drift into disagreeing about a page's real address — which would be
+   worse than either being wrong alone. */
+head('Canonical URLs');
+const sitemap = fs.readFileSync(path.join(ROOT, 'sitemap.xml'), 'utf8');
+const locs = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map(m => m[1]);
+
+/* Derived from the build allow-list: a page staged for publication but not
+   listed here would otherwise ship unguarded. */
+const staged = (fs.readFileSync(path.join(ROOT, 'scripts', 'build-site.sh'), 'utf8')
+  .match(/^cp ([^\n]*\.html[^\n]*?) "\$OUT"/m) || [, ''])[1]
+  .split(/\s+/).filter(f => f.endsWith('.html'));
+
+staged.length >= 5
+  ? ok(staged.length + ' pages staged: ' + staged.join(', '))
+  : fail('could not read the staged page list from build-site.sh — got ' +
+         JSON.stringify(staged));
+
+/* index.html is served at "/", the rest drop their .html — the asset server
+   answers both forms, and the canonical names which one is real. */
+const canonicalFor = f => 'https://servecleaning.com/' +
+  (f === 'index.html' ? '' : f.replace(/\.html$/, ''));
+
+staged.forEach(f => {
+  const doc  = fs.readFileSync(path.join(ROOT, f), 'utf8');
+  const tags = [...doc.matchAll(/<link[^>]+rel="canonical"[^>]*>/g)];
+  const href = (doc.match(/<link[^>]+rel="canonical"[^>]+href="([^"]+)"/) || [])[1];
+  const want = canonicalFor(f);
+
+  if (tags.length !== 1) {
+    fail(f + ' has ' + tags.length + ' canonical tags — it needs exactly 1');
+  } else if (href !== want) {
+    fail(f + ' canonical is ' + href + ' — expected ' + want);
+  } else if (!locs.includes(want)) {
+    fail(f + ' canonical ' + want + ' is not in sitemap.xml');
+  } else {
+    ok(f + ' -> ' + want);
+  }
+});
+
+/* A www canonical would fight the Cloudflare www -> apex rule: the redirect
+   sends crawlers to apex while the tag tells them the www copy is the real
+   one. Both are individually defensible and together they are a loop. */
+staged.some(f => /rel="canonical"[^>]*href="https:\/\/www\./.test(
+  fs.readFileSync(path.join(ROOT, f), 'utf8')))
+  ? fail('a canonical points at www — it must be apex, matching the redirect rule')
+  : ok('no canonical points at www');
+
 console.log('\n' + (fails ? 'FAILURES: ' + fails : 'ALL CHECKS PASSED'));
 process.exit(fails ? 1 : 0);

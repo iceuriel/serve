@@ -11,6 +11,19 @@
 #
 # 302, not 301: these are marketing URLs and a permanently cached redirect is
 # painful to undo once browsers have it.
+#
+# ONE DASHBOARD REDIRECT RULE EXISTS BY DESIGN: www -> apex, 301.
+#
+# It is hostname-scoped, not path-scoped, so it never competes with this file
+# for authority over a path and cannot shadow anything here. It has to live in
+# Cloudflare because a request to www.servecleaning.com is answered before this
+# file is ever consulted. 301 there is correct and deliberately unlike the 302s
+# below: a marketing slug should stay re-pointable, but www will never resolve
+# anywhere other than apex.
+#
+# The standing rule is NOT "never touch the dashboard". It is: nothing routes a
+# PATH where these tests cannot see it. That is how /q first shipped untagged.
+# Any other rule you find in the console is a bug until proven otherwise.
 
 /movein   /?src=deed-movein   302
 /clean    /?src=dh-clean      302
