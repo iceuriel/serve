@@ -310,6 +310,19 @@ a {
     50%      { transform: translateY(-2.5px); }
 }
 
+/* Sails catch a little light; everything else stays on currentColor (black).
+   At 0.3 container x 0.42 group opacity the sails were rendering 5 points of
+   luminance BELOW the hero — a dark shape on a dark ground, which is why they
+   read as barely there. A light fill puts them ~12 above it instead: still
+   quiet, but on the correct side of the background to be seen. White sails
+   over dark water is also the right way round physically.
+
+   Set on the drift group rather than the sail group so the waterline below
+   keeps the darker tone — water should not catch light the way canvas does.
+   Inheritance does the rest: these <g> elements sit between the <svg> that
+   carries fill="currentColor" and the polygons, so the nearer value wins. */
+.skyline__drift { fill: #78859a; }
+
 .skyline__drift--a { animation: serve-sail-drift  96s linear infinite; }
 .skyline__drift--b { animation: serve-sail-drift 132s linear infinite; }
 .skyline__drift--c { animation: serve-sail-drift  78s linear infinite; }
