@@ -45,6 +45,19 @@ cp index.html pricing.html services.html privacy.html sms-terms.html serve-geo-d
 cp sitemap.xml "$OUT"/
 cp -r images "$OUT"/
 
+# Favicon at the ROOT as well as in images/.
+#
+# Crawlers and browsers request /favicon.ico by convention, regardless of the
+# <link rel="icon"> tags in the markup. Google's search-result icon is one of
+# them: servecleaning.com/favicon.ico returned 404 while
+# /images/favicon.ico returned 200, and the result showed a generic globe
+# instead of the Serve house.
+#
+# Copied, not moved. The <link> tags point at /images/, so the file has to
+# exist in both places, and images/favicon.ico stays the one source of truth —
+# editing it updates both on the next build.
+cp images/favicon.ico "$OUT"/favicon.ico
+
 # Response headers and vanity redirects. Both Cloudflare and Netlify read
 # _headers and _redirects from the publish directory, so behaviour is identical
 # across hosts.

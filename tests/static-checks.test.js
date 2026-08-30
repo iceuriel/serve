@@ -284,6 +284,27 @@ staged.forEach(f => {
   else ok(f + ' description: ' + desc.length + ' chars');
 });
 
+/* The root favicon. Crawlers and browsers request /favicon.ico by convention
+   whatever the <link rel="icon"> tags say, and Google's search-result icon is
+   one of them: with the file only at /images/favicon.ico, the live root 404'd
+   and the result rendered a generic globe instead of the Serve house. The
+   build has to place a copy at the root, so the build script is what gets
+   asserted — the markup alone cannot fix this. */
+head('Root favicon');
+const buildSh = fs.readFileSync(path.join(ROOT, 'scripts', 'build-site.sh'), 'utf8');
+/cp images\/favicon\.ico "\$OUT"\/favicon\.ico/.test(buildSh)
+  ? ok('build-site.sh stages /favicon.ico at the site root')
+  : fail('nothing copies images/favicon.ico to the root — /favicon.ico will 404');
+
+/* Google picks a favicon that is a multiple of 48px square; a lone 32x32 is
+   below every one of those. favicon-192.png was in the repo unreferenced. */
+staged.forEach(f => {
+  const doc = fs.readFileSync(path.join(ROOT, f), 'utf8');
+  /favicon-192\.png/.test(doc)
+    ? ok(f + ' offers a 192x192 icon')
+    : fail(f + ' declares no icon at a multiple of 48px — Google may skip it');
+});
+
 /* A www canonical would fight the Cloudflare www -> apex rule: the redirect
    sends crawlers to apex while the tag tells them the www copy is the real
    one. Both are individually defensible and together they are a loop. */
