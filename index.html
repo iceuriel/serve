@@ -555,7 +555,18 @@
 
                     <div class="field-block">
                         <label class="field-label" for="r-address">Street address</label>
-                        <input class="flow-input" type="text" id="r-address" name="address" autocomplete="street-address" placeholder="123 Beacon St, Boston, MA" required>
+                        <!-- STREET ONLY. The placeholder used to read "123 Beacon St, Boston, MA"
+                             and people copied the shape they were shown: one booking arrived as
+                             "19 Glenbrook Ln,Arlington ma" and the city and state were baked into
+                             its property_key forever, while another arrived clean as
+                             "500 Broadway". The label always said "Street address"; the example
+                             said otherwise, and the example is what people follow.
+
+                             City and state are redundant here — the ZIP above is required and is
+                             what actually drives tier, geo factor and the PROPERTIES key. Every
+                             test fixture in the suite already uses "123 Beacon St". -->
+                        <input class="flow-input" type="text" id="r-address" name="address" autocomplete="street-address" placeholder="123 Beacon St" required>
+                        <p class="field-hint">Just the street &mdash; your ZIP already tells us the city.</p>
                     </div>
                     <div class="field-block">
                         <label class="field-label" for="r-unit">Unit / Apt <span class="opt">(optional)</span></label>

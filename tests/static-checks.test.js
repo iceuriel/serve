@@ -284,6 +284,39 @@ staged.forEach(f => {
   else ok(f + ' description: ' + desc.length + ' chars');
 });
 
+/* 14. The address field asks for a street and nothing else.
+   ---------------------------------------------------------------
+   A placeholder is an instruction, whatever the label says. This one read
+   "123 Beacon St, Boston, MA" and produced "19 Glenbrook Ln,Arlington ma" from
+   a real customer, against "500 Broadway" from another — the city and state
+   then live in that property_key permanently, because the key is built from
+   what was typed.
+
+   City and state are redundant: the ZIP is required, collected earlier, and is
+   what actually drives zip tier, geo factor and the PROPERTIES key. Every
+   fixture in this suite already uses a bare street. */
+head('Address field asks for a street only');
+const addrTag = (html.match(/<input[^>]*id="r-address"[^>]*>/) || [''])[0];
+const addrPh  = (addrTag.match(/placeholder="([^"]*)"/) || [])[1];
+
+addrPh ? ok('placeholder present: "' + addrPh + '"')
+       : fail('#r-address has no placeholder');
+
+!/,/.test(addrPh || '')
+  ? ok('no comma — nothing suggesting extra address parts')
+  : fail('placeholder "' + addrPh + '" contains a comma, which reads as ' +
+         '"add more here" and is how city/state got into a property_key');
+
+!/\b(MA|Mass|Massachusetts|Boston)\b/i.test(addrPh || '')
+  ? ok('names no city or state')
+  : fail('placeholder "' + addrPh + '" names a city or state — the ZIP already has both');
+
+/* The reassurance matters as much as the example: someone who assumes the city
+   is needed will type it regardless of what the placeholder shows. */
+/your ZIP already tells us the city/i.test(html)
+  ? ok('hint explains why the city is not needed')
+  : fail('no hint under the address field explaining that the ZIP covers the city');
+
 /* The root favicon. Crawlers and browsers request /favicon.ico by convention
    whatever the <link rel="icon"> tags say, and Google's search-result icon is
    one of them: with the file only at /images/favicon.ico, the live root 404'd
