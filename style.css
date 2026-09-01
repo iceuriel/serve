@@ -825,13 +825,10 @@ a {
     box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
 }
 
-/* Free-text notes box (pets, parking, access) */
-.flow-textarea {
-    display: block;
-    resize: vertical;
-    min-height: 5.25rem;
-    line-height: 1.55;
-}
+/* .flow-textarea removed 2026-09-01 with the "anything we should know?" box.
+   Nothing on the site uses a textarea now, and a rule with no element is the
+   orphan that static-checks §5 exists to catch. Re-add it if the post-booking
+   capture ends up on-page rather than over SMS. */
 
 .field-hint {
     font-family: var(--flow-sans);

@@ -761,7 +761,14 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
     }
 
     /* Notes → pets flag. Word-boundaried on purpose: "carpet" must not read as
-       "pet", and "category" must not read as "cat". */
+       "pet", and "category" must not read as "cat".
+
+       CURRENTLY UNCALLED, and kept on purpose. The reserve-step textarea that
+       fed it was removed on 2026-09-01; the same question is being moved to
+       after reservation, and this is the parser that reply will need. The word
+       list and its false-positive traps are the expensive part, not the two
+       lines below — deleting it means rebuilding it, and the trap cases are
+       exactly what a rewrite would miss. Covered by attribution.test.js. */
     const PET_WORDS = /\b(pets?|dogs?|puppy|puppies|cats?|kitten|kittens|kitty|feline|canine|animals?|birds?|parrot|hamster|rabbits?|bunny|guinea pig|ferret|reptile|snake|lizard|litter ?box|crate|kennel|leash|paws?|fur|shedding)\b/i;
 
     function detectPets(text) {
@@ -1423,7 +1430,6 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
     const reserveForm   = $('reserve-form');
     const reserveError  = $('reserve-error');
     const reserveSubmit = $('reserve-submit');
-    const reserveNotes  = $('r-notes');
     let reserveSubmitting = false;   // blocks the Enter-key + click double-fire
 
     reserveForm.querySelectorAll('input[name="time_preference"]').forEach(r => {
@@ -1481,9 +1487,16 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
         p.phone   = $('r-phone').value.trim();
         p.address = $('r-address').value.trim();
         p.unit    = $('r-unit').value.trim();
-        // free-text notes + the pets signal derived from them
-        p.customer_notes = reserveNotes ? reserveNotes.value.trim() : '';
-        p.pets_flag      = detectPets(p.customer_notes);
+        /* customer_notes and pets_flag are deliberately NOT SENT.
+           The textarea that fed them was removed from the reserve step; both are
+           collected after reservation instead.
+
+           Omitted rather than sent empty, and that distinction matters. The
+           webhook writes header-driven, so an absent key leaves the cell blank —
+           whereas pets_flag: false would write FALSE, which reads as "we asked
+           and they have no pets" when the truth is that nobody was asked. Same
+           trap as a blank levels field: a definite-looking negative standing in
+           for an unknown. */
         /* A2P 10DLC consent. Sent as "yes" or "" — NEVER "no".
            The LEADS upsert fills blank cells only, so a "no" written today would
            permanently block a real opt-in on a later booking. Blank already means

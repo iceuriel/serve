@@ -67,7 +67,8 @@ notLazy.length ? fail('below-the-fold images not lazy: ' + notLazy.join(', '))
 head('New classes are styled');
 const NEW_CLASSES = ['svmA-section','svmA-wrap','svmA-lede','svmA-grid','svmA-bubble','svmA-step',
   // svmA-shots* removed 2026-08-03 with the "What done looks like" gallery.
-  'svmA-foot','step__link','reserve-aftercare','flow-textarea','field-hint'];
+  // flow-textarea removed 2026-09-01 with the "anything we should know?" box.
+  'svmA-foot','step__link','reserve-aftercare','field-hint'];
 NEW_CLASSES.forEach(c => {
   if (!html.includes('class="' + c) && !html.includes(' ' + c + '"') && !html.includes(c + ' '))
     fail(c + ' not used in index.html');
@@ -104,9 +105,25 @@ const all = [...new Set([...baseKeys, ...reserveKeys])];
 console.log('  base (' + baseKeys.length + '): ' + baseKeys.join(', '));
 console.log('  reserve (+' + [...new Set(reserveKeys)].length + '): ' + [...new Set(reserveKeys)].join(', '));
 console.log('  TOTAL UNIQUE: ' + all.length);
-['submission_id','segment','src_first','src_chain','addon_total','customer_notes','pets_flag']
+['submission_id','segment','src_first','src_chain','addon_total']
   .forEach(k => { if (!all.includes(k)) fail('payload is missing ' + k); });
-ok('all 7 new payload fields present');
+ok('all 5 required payload fields present');
+
+/* customer_notes and pets_flag are ABSENT on purpose since 2026-09-01, when the
+   reserve-step textarea was removed and the question moved to after booking.
+
+   Asserted as absent rather than simply dropped from the list above, because
+   the tempting repair is to keep sending them as '' and false. That is worse
+   than sending nothing: the webhook writes header-driven, so an omitted key
+   leaves the cell blank, while pets_flag: false writes FALSE — which reads as
+   "asked, and they have no pets" when nobody was asked at all. Blank is the
+   only honest value for a question the form no longer poses. */
+['customer_notes', 'pets_flag'].forEach(k => {
+  all.includes(k)
+    ? fail(k + ' is being sent again — if the question came back, say so here; ' +
+           'if it is being sent empty, omit the key instead so the cell stays blank')
+    : ok(k + ' correctly omitted from the payload');
+});
 
 /* 8. Tag balance on the block we inserted. */
 head('Markup balance');

@@ -573,13 +573,17 @@
                         <input class="flow-input" type="text" id="r-unit" name="unit" autocomplete="address-line2" placeholder="Apt 4B">
                     </div>
 
-                    <div class="field-block">
-                        <label class="field-label" for="r-notes">Anything we should know? <span class="opt">(optional)</span></label>
-                        <textarea class="flow-input flow-textarea" id="r-notes" name="customer_notes" rows="3" maxlength="600"
-                                  placeholder="Pets, parking, how to get in, rooms to skip, anything fragile&hellip;"></textarea>
-                        <p class="field-hint">If you have pets, tell us here &mdash; we plan the visit around them.</p>
-                    </div>
+                    <!-- The "anything we should know?" textarea was removed here on 2026-09-01.
+                         Pets, parking, access and rooms to skip are all worth knowing, but asking
+                         for them at the moment of commitment costs a booking, and a free-text box
+                         is the worst shape to ask in — it arrives as prose that has to be read and
+                         re-typed into PROPERTY_MEMORY by hand. It is collected AFTER reservation
+                         instead, where friction costs nothing and the answers can be structured.
 
+                         WHAT THIS TURNED OFF, until that replacement ships: JOBS.customer_notes
+                         and JOBS.pets_flag now arrive blank, and the booking email's "WHAT THEY
+                         TOLD US" block is empty on every job. detectPets() in script.js is kept
+                         deliberately — it is the parser the replacement needs. -->
                     <div class="form-error" id="reserve-error" aria-live="polite"></div>
                     <div class="step-actions">
                         <button type="button" class="btn btn--ghost" id="back-to-2">&larr; Back</button>
