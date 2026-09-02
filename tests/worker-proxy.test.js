@@ -36,9 +36,41 @@ const SRC = fs.readFileSync(path.join(REPO_ROOT, 'src', 'worker.js'), 'utf8');
 const GEO    = fs.readFileSync(path.join(REPO_ROOT, 'serve-geo-data.js'), 'utf8');
 const ENGINE = fs.readFileSync(path.join(REPO_ROOT, 'pricing-engine.js'), 'utf8');
 
+/* THE IMPORTS ARE MODELLED, NOT ERASED.
+   ---------------------------------------------------------------
+   An earlier version of this harness simply concatenated the two files ahead
+   of the worker and deleted its import lines. That created GLOBALS — which a
+   real bundle does not have — and it is why a broken import shipped to
+   production on 2026-09-02 with a green suite behind it. The worker's
+   `import { lookupGeo }` compiled to undefined, every mapped ZIP priced at the
+   neutral factor, and real bookings were rejected.
+
+   So each dependency is evaluated in ITS OWN scope and handed back only
+   through its module.exports, exactly as a bundler resolves it. Nothing leaks
+   into the worker's scope by accident, and a name the worker fails to import
+   is undefined here too. */
+function loadModule(source) {
+  const modBox = { module: { exports: {} }, console: { log() {}, warn() {}, error() {} } };
+  modBox.exports = modBox.module.exports;
+  vm.createContext(modBox);
+  vm.runInContext(source, modBox);
+  return modBox.module.exports;
+}
+
+const geoExports    = loadModule(GEO);
+/* GEO first, ENGINE second, and the order is load-bearing: each file ends by
+   ASSIGNING module.exports, so whichever runs last wins. Reversed, geo's
+   exports silently replaced the engine's and every engine symbol came back
+   undefined. */
+const engineExports = loadModule(GEO + '\n' + ENGINE);
+
+/* Default imports become the module.exports object; named ones would be
+   undefined, which is the bug this now reproduces faithfully. */
 const runnable =
-  GEO + '\n' + ENGINE + '\n' +
-  SRC.replace(/^import[^\n]*\n/gm, '')
+  'const geoData = globalThis.__geo; const engine = globalThis.__engine;\n' +
+  SRC.replace(/^import\s+geoData[^\n]*\n/gm, '')
+     .replace(/^import\s+engine[^\n]*\n/gm, '')
+     .replace(/^import[^\n]*\n/gm, '')
      .replace(/export\s+default\s*\{/, 'globalThis.__worker = {');
 
 function loadWorker(fetchImpl) {
@@ -51,6 +83,8 @@ function loadWorker(fetchImpl) {
       return fetchImpl(target, init);
     },
     globalThis: undefined,
+    __geo: geoExports,
+    __engine: engineExports,
   };
   box.globalThis = box;
   vm.createContext(box);
@@ -247,14 +281,23 @@ console.log('\n=== 7. the failure UI exists and is reachable ===');
 {
   console.log('\n=== price verification ===');
   const { box } = loadWorker(async () => new Response('{}'));
-  const verifyPrice   = box.verifyPrice;
-  const computeQuote  = box.computeQuote;
-  const serveGeo      = box.serveGeo;
-  const lookupGeo     = box.lookupGeo;
-  /* `function` declarations land on the vm global; `const` ones stay in the
-     script's lexical scope, which is why computeQuote is reachable off box and
-     PRICING_VERSION is not. Evaluate it inside the context instead. */
-  const VERSION       = vm.runInContext('PRICING_VERSION', box);
+  /* verifyPrice is a `function` declaration inside the worker, so it lands on
+     the vm global. The engine is NOT — it arrives through module.exports now,
+     exactly as it does in a bundle, so read it from there rather than hoping
+     for a global that would not exist in production either. */
+  const verifyPrice  = box.verifyPrice;
+  const computeQuote = engineExports.computeQuote;
+  const serveGeo     = engineExports.serveGeo;
+  const lookupGeo    = geoExports.lookupGeo;
+  const VERSION      = engineExports.PRICING_VERSION;
+
+  /* The bug of 2026-09-02: the worker imported names a bundler could not see
+     inside a conditional export block, got undefined, and rejected real
+     bookings. Assert the wiring rather than the symptom. */
+  t('geo exports survive as a module', typeof lookupGeo === 'function');
+  t('engine exports survive as a module', typeof computeQuote === 'function');
+  t('the worker knows it can price', vm.runInContext('CAN_PRICE', box) === true,
+    vm.runInContext('CAN_PRICE', box));
 
   t('verifyPrice is reachable in the bundle', typeof verifyPrice === 'function');
   t('the engine came with it', typeof computeQuote === 'function');
@@ -316,7 +359,14 @@ console.log('\n=== 7. the failure UI exists and is reachable ===');
   t('and passes it into computeQuote as `geo`',
     /geo:\s*serveGeo\(/.test(SRC));
   t('worker.js imports the engine rather than reimplementing it',
-    /import\s*\{[^}]*computeQuote[^}]*\}\s*from\s*"\.\.\/pricing-engine\.js"/.test(SRC));
+    /import\s+engine\s+from\s+"\.\.\/pricing-engine\.js"/.test(SRC));
+  /* Named imports are what broke. Both files export from inside a conditional
+     block a bundler cannot see into, so a named import compiles to undefined
+     while looking entirely correct in the source. */
+  t('no NAMED imports from the conditionally-exported files',
+    !/import\s*\{[^}]*\}\s*from\s*"\.\.\/(pricing-engine|serve-geo-data)\.js"/.test(SRC));
+  t('verification is gated on being able to price at all',
+    /if \(!CAN_PRICE\) return \{ skipped:/.test(SRC));
   t('no second copy of the price formula in the worker',
     !/PER_BEDROOM|PER_BATHROOM|WORK_RATE\s*=/.test(SRC));
 }

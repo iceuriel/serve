@@ -49,8 +49,46 @@
    cannot drift from what the customer was shown. A second implementation here
    would be the whole problem: it would disagree the first time prices move,
    and it would disagree silently. */
-import { lookupGeo } from "../serve-geo-data.js";
-import { computeQuote, serveGeo, PRICING_VERSION } from "../pricing-engine.js";
+/* DEFAULT imports, not named ones. Both files export through a conditional
+   `if (typeof module !== "undefined")` block so they can still load as classic
+   <script> tags in the browser. A bundler cannot statically see inside that
+   `if`, so `import { lookupGeo }` compiled to undefined — silently. The default
+   import is the whole module.exports object, resolved at runtime, which is
+   what actually survives.
+
+   This is not hypothetical. It shipped on 2026-09-02 and rejected every
+   booking from a mapped ZIP until it was caught. */
+import geoData from "../serve-geo-data.js";
+import engine from "../pricing-engine.js";
+
+const lookupGeo      = geoData && geoData.lookupGeo;
+const computeQuote   = engine  && engine.computeQuote;
+const serveGeo       = engine  && engine.serveGeo;
+const PRICING_VERSION = engine && engine.PRICING_VERSION;
+
+/**
+ * Can this Worker price a home the same way the browser just did?
+ *
+ * If the geo table did not survive bundling, every mapped ZIP prices at the
+ * neutral factor — 02116 comes out $360 instead of $373 — and the verifier
+ * rejects real customers while looking perfectly healthy. That is precisely
+ * what happened, and the lesson is that a guard must not reject when it cannot
+ * price correctly in the first place.
+ *
+ * Checked once at startup against a ZIP known to be in the map. If this is
+ * false, verification is skipped entirely and every booking relays. A guard
+ * that has lost its inputs must fail OPEN.
+ */
+const CAN_PRICE = (() => {
+  try {
+    if (typeof computeQuote !== "function" || typeof serveGeo !== "function") return false;
+    if (typeof lookupGeo !== "function") return false;
+    const probe = serveGeo("02116", lookupGeo);
+    return probe && probe.mapped === true && probe.factor !== 1;
+  } catch (_) {
+    return false;
+  }
+})();
 
 /* Apps Script /exec 302s to googleusercontent.com; fetch follows that by
    default. These caps stop a hung upstream holding a customer's browser. */
@@ -195,6 +233,10 @@ async function handleSlots(request, env) {
 function verifyPrice(rawBody) {
   try {
     const d = JSON.parse(rawBody);
+
+    /* First gate, before anything else. If this Worker cannot reproduce the
+       browser's arithmetic, it has no standing to call a price wrong. */
+    if (!CAN_PRICE) return { skipped: "engine or geo unavailable in this build" };
 
     const isReservation = d.event_type === "reservation" || d.event === "quote_reserved";
     if (!isReservation) return { skipped: "not a reservation" };
