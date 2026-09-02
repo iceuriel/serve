@@ -173,3 +173,12 @@ function lookupGeo(zip) {
     mapped:   Boolean(hit),
   };
 }
+
+
+/* Classic script in the browser, module everywhere else — same pattern as
+   pricing-engine.js. index/pricing/services load this with a plain <script>
+   tag, so everything above is a global there and `typeof module` is undefined,
+   leaving this block inert. The Worker and the tests import it instead. */
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { lookupGeo, ZIP_GEO, PARK_ADDER, DEFAULT_GEO };
+}

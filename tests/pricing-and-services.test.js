@@ -26,6 +26,7 @@ const vm   = require('vm');
 const read = f => fs.readFileSync(path.join(REPO_ROOT, f), 'utf8').replace(/\r\n/g, '\n');
 
 const SITE     = read('script.js');
+const ENGINE   = read('pricing-engine.js');   // the engine moved out of script.js on 2026-09-01
 const GEO      = read('serve-geo-data.js');
 const INDEX    = read('index.html');
 const PRICING  = read('pricing.html');
@@ -105,16 +106,15 @@ function runModule(opts) {
   }
   vm.createContext(box);
 
-  /* Slice 1 — the pricing engine. Slice 2 — the shared module. The attribution
-     code and the booking IIFE between them need a far larger DOM and are
-     already covered by segment-and-skins and static-checks. */
-  const engineFrom = SITE.indexOf('const WORK_RATE =');
-  const engineTo   = SITE.indexOf('/* ============================================================', engineFrom);
+  /* The engine is a whole file now — no slicing, and nothing to go stale when
+     a banner moves. Only the shared page module still has to be cut out of
+     script.js: the attribution code and the booking IIFE around it need a far
+     larger DOM, and are covered by segment-and-skins and static-checks. */
   const moduleFrom = SITE.indexOf('   SERVE — SHARED PAGE MODULE');
-  if (engineFrom === -1 || engineTo === -1 || moduleFrom === -1) {
-    throw new Error('could not slice script.js — the banners moved');
-  }
-  const engine = SITE.slice(engineFrom, engineTo);
+  if (moduleFrom === -1) throw new Error('could not slice script.js — the module banner moved');
+  if (!/const WORK_RATE =/.test(ENGINE)) throw new Error('pricing-engine.js has no WORK_RATE — wrong file?');
+
+  const engine = ENGINE;
   const shared = SITE.slice(SITE.lastIndexOf('/*', moduleFrom));
 
   /* `function` declarations land on the vm global by themselves; `const` ones

@@ -22,8 +22,24 @@ const t = (label, cond, extra) => {
 const SRC = fs.readFileSync(path.join(REPO_ROOT, 'src', 'worker.js'), 'utf8');
 
 /* Node's vm has no module loader here, so turn `export default {…}` into an
-   assignment. Everything else about the file executes verbatim. */
-const runnable = SRC.replace(/export\s+default\s*\{/, 'globalThis.__worker = {');
+   assignment. Everything else about the file executes verbatim.
+
+   The two imports get the same treatment for the same reason, and are replaced
+   by concatenating the very files they name. That is precisely what wrangler
+   does when it bundles, so verifyPrice() below runs against the real pricing
+   engine rather than a stub — the whole point of the exercise is that there is
+   one engine, and a test that mocked it would be testing the wrong thing.
+
+   Both concatenated files end with an `if (typeof module …)` export tail. There
+   is no `module` in this sandbox, so those blocks are inert here exactly as
+   they are in a browser. */
+const GEO    = fs.readFileSync(path.join(REPO_ROOT, 'serve-geo-data.js'), 'utf8');
+const ENGINE = fs.readFileSync(path.join(REPO_ROOT, 'pricing-engine.js'), 'utf8');
+
+const runnable =
+  GEO + '\n' + ENGINE + '\n' +
+  SRC.replace(/^import[^\n]*\n/gm, '')
+     .replace(/export\s+default\s*\{/, 'globalThis.__worker = {');
 
 function loadWorker(fetchImpl) {
   const calls = [];
@@ -39,7 +55,10 @@ function loadWorker(fetchImpl) {
   box.globalThis = box;
   vm.createContext(box);
   vm.runInContext(runnable, box);
-  return { worker: box.__worker, calls };
+  /* box as well as the worker: the price-verification section below reaches in
+     for verifyPrice and the bundled engine, which are module-private in the
+     real thing and only inspectable from here. */
+  return { worker: box.__worker, calls, box };
 }
 
 const ASSETS = { fetch: async () => new Response('<html>site</html>', {
@@ -211,6 +230,95 @@ console.log('\n=== 7. the failure UI exists and is reachable ===');
     /if \(result\.confirmed\) \{[\s\S]{0,80}setView\('confirmed'\)/.test(site));
   t('an unconfirmed booking routes to the failure view',
     /showReserveFailure\(p, result\.error\)/.test(site));
+}
+
+/* ============================================================
+   The server re-derives every price.
+   ------------------------------------------------------------
+   quote_price is computed on the customer's machine. This is what stops it
+   from being taken on trust, and the whole thing turns on one distinction:
+   a price that differs under the SAME engine was edited by hand, and a price
+   that differs under a DIFFERENT engine is a deploy that landed while a tab
+   was open. Reject the first, honour the second.
+
+   Getting that backwards is expensive in both directions. Reject drift and you
+   fail real bookings every time prices move; honour tampering and the guard
+   does nothing at all. */
+{
+  console.log('\n=== price verification ===');
+  const { box } = loadWorker(async () => new Response('{}'));
+  const verifyPrice   = box.verifyPrice;
+  const computeQuote  = box.computeQuote;
+  const serveGeo      = box.serveGeo;
+  const lookupGeo     = box.lookupGeo;
+  /* `function` declarations land on the vm global; `const` ones stay in the
+     script's lexical scope, which is why computeQuote is reachable off box and
+     PRICING_VERSION is not. Evaluate it inside the context instead. */
+  const VERSION       = vm.runInContext('PRICING_VERSION', box);
+
+  t('verifyPrice is reachable in the bundle', typeof verifyPrice === 'function');
+  t('the engine came with it', typeof computeQuote === 'function');
+  t('a version is stamped', typeof VERSION === 'string' && VERSION.length > 0, VERSION);
+
+  const cfg = { bedrooms: 2, bathrooms: 1.5, service: 'first_clean', condition: 'heavy',
+                addonFridge: false, addonOven: false, frequency: 'monthly', levels: 2 };
+  const honest = computeQuote(Object.assign({}, cfg,
+    { zip: '02116', geo: serveGeo('02116', lookupGeo) })).displayPrice;
+
+  const body = o => JSON.stringify(Object.assign({
+    event_type: 'reservation', bedrooms: 2, bathrooms: 1.5, service: 'first_clean',
+    condition: 'heavy', addon_fridge: false, addon_oven: false, zip: '02116',
+    frequency_selected: 'monthly', levels: 2, pricing_version: VERSION,
+    quote_price: honest, submission_id: 'verify-1' }, o));
+
+  t('an honest booking passes', verifyPrice(body({})).ok === true, verifyPrice(body({})));
+
+  const cheap = verifyPrice(body({ quote_price: 1 }));
+  t('a payload edited down to $1 is REFUSED', cheap.reject === true, cheap);
+  const dear  = verifyPrice(body({ quote_price: 9999 }));
+  t('a payload edited up is refused too', dear.reject === true, dear);
+
+  const drift = verifyPrice(body({ pricing_version: '2026-07-20', quote_price: 199 }));
+  t('an older engine is honoured, not refused', !drift.reject && !!drift.note, drift);
+  const noVer = verifyPrice(body({ pricing_version: undefined, quote_price: 199 }));
+  t('a payload with no version is honoured', !noVer.reject, noVer);
+
+  /* A guard on the booking path must never eat a booking through its own bug. */
+  t('a non-reservation is skipped',  !!verifyPrice(body({ event_type: 'quote_emailed' })).skipped);
+  t('unparseable JSON is skipped',   !!verifyPrice('{not json').skipped);
+  t('a missing zip is skipped',      !!verifyPrice(body({ zip: undefined })).skipped);
+  t('a missing price is skipped',    !!verifyPrice(body({ quote_price: undefined })).skipped);
+
+  /* THE GEO WIRE. serveGeo reads a global in the browser and there is no global
+     in a bundle, so the Worker has to pass its own lookup in. If that ever
+     breaks, every ZIP silently prices as unmapped — a 02199 booking moves $84
+     — and the verifier starts rejecting real customers. Assert the wire is live
+     rather than trusting that an import stayed put. */
+  const mapped   = serveGeo('02199', lookupGeo);
+  t('the worker can resolve a mapped ZIP', mapped.mapped === true, mapped);
+  t('and it is not the neutral fallback', mapped.factor !== 1, mapped.factor);
+
+  /* The difference geo makes, so a silent loss of it is visibly expensive. */
+  const neutralPrice = computeQuote(Object.assign({}, cfg,
+    { zip: '02199', geo: { parkTier: 'P0', factor: 1, park: 0, mapped: false } })).displayPrice;
+  const mappedPrice  = computeQuote(Object.assign({}, cfg, { zip: '02199', geo: mapped })).displayPrice;
+  t('losing geo would move a Back Bay price', mappedPrice !== neutralPrice,
+    { mapped: mappedPrice, neutral: neutralPrice, gap: mappedPrice - neutralPrice });
+
+  /* This one cannot be simulated in the sandbox: lookupGeo IS a global here,
+     because the harness concatenates serve-geo-data.js the way wrangler bundles
+     it, so computeQuote's internal serveGeo() would find it either way. In a
+     real bundle it would not. So assert the SOURCE does the safe thing —
+     resolves geo with an explicit lookup and hands it to computeQuote — rather
+     than relying on a global that only exists in a browser. */
+  t('worker.js resolves geo with an explicit lookup',
+    /serveGeo\(\s*String\(d\.zip\)\s*,\s*lookupGeo\s*\)/.test(SRC));
+  t('and passes it into computeQuote as `geo`',
+    /geo:\s*serveGeo\(/.test(SRC));
+  t('worker.js imports the engine rather than reimplementing it',
+    /import\s*\{[^}]*computeQuote[^}]*\}\s*from\s*"\.\.\/pricing-engine\.js"/.test(SRC));
+  t('no second copy of the price formula in the worker',
+    !/PER_BEDROOM|PER_BATHROOM|WORK_RATE\s*=/.test(SRC));
 }
 
 console.log('\n' + (bad ? 'FAILURES: ' + bad : 'ALL CHECKS PASSED'));

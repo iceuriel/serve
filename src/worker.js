@@ -42,6 +42,16 @@
  * must never do is fail in a way that looks like success.
  */
 
+/* The pricing engine, imported rather than reimplemented.
+   ---------------------------------------------------------------
+   The same file the browser loads with a <script> tag. Wrangler bundles it, so
+   there is exactly one copy of the pricing logic in the system and the server
+   cannot drift from what the customer was shown. A second implementation here
+   would be the whole problem: it would disagree the first time prices move,
+   and it would disagree silently. */
+import { lookupGeo } from "../serve-geo-data.js";
+import { computeQuote, serveGeo, PRICING_VERSION } from "../pricing-engine.js";
+
 /* Apps Script /exec 302s to googleusercontent.com; fetch follows that by
    default. These caps stop a hung upstream holding a customer's browser. */
 /* Deliberately shorter than the browser's own 15s budget, so the customer gets
@@ -82,6 +92,14 @@ async function handleSubmit(request, env) {
   if (!body || body.length > 100_000) {
     return json({ status: "error", error: "bad_body" }, 400);
   }
+
+  /* Re-derive the price before relaying it. See verifyPrice(). */
+  const audit = verifyPrice(body);
+  if (audit.reject) {
+    console.error("PRICE REJECTED " + JSON.stringify(audit));
+    return json({ status: "error", error: "price_mismatch" }, 409);
+  }
+  if (audit.note) console.warn("price audit: " + JSON.stringify(audit));
 
   const upstream = await relay(env.WEBHOOK_URL, {
     method: "POST",
@@ -144,6 +162,86 @@ async function handleSlots(request, env) {
       "Cache-Control": "public, max-age=60",
     },
   });
+}
+
+
+/* ============================================================
+   PRICE VERIFICATION
+   ============================================================
+
+   quote_price is computed on the customer's machine. Until this existed it was
+   taken entirely on trust — harmless while nothing charged money, and a live
+   vulnerability the moment anything did: edit one number in devtools and the
+   system would produce a real payment link for a dollar.
+
+   So the server re-derives it from the raw inputs and treats the browser's
+   figure as a CLAIM TO VERIFY rather than a fact.
+
+   TWO PRICES CAN DISAGREE FOR TWO REASONS, and they need opposite responses:
+
+     same version, different price   someone edited the payload      -> refuse
+     different version               a deploy landed mid-session     -> honour
+
+   The second is real and will happen the day prices move: a tab opened before
+   the deploy still holds the old engine. Charging that customer the new price
+   would be the single most damaging thing this system could do — a quote that
+   changes after the fact is the largest source of one-star reviews in this
+   category. So the version stamp is what makes rejection safe: without it,
+   every repricing would look like an attack.
+
+   Never fails open on its own bugs. A malformed payload, a missing field, a
+   thrown exception — all pass through. This is a guard on a booking path, and
+   a guard that eats bookings is worse than the thing it guards against. */
+function verifyPrice(rawBody) {
+  try {
+    const d = JSON.parse(rawBody);
+
+    const isReservation = d.event_type === "reservation" || d.event === "quote_reserved";
+    if (!isReservation) return { skipped: "not a reservation" };
+
+    const claimed = Number(d.quote_price);
+    if (!isFinite(claimed) || claimed <= 0) return { skipped: "no price claimed" };
+    if (!d.zip) return { skipped: "no zip to price from" };
+
+    /* geo passed explicitly: computeQuote's internal lookup reads a global that
+       does not exist in a bundle. See serveGeo() in pricing-engine.js. */
+    const q = computeQuote({
+      bedrooms:    Number(d.bedrooms),
+      bathrooms:   Number(d.bathrooms),
+      service:     d.service || d.service_type,
+      condition:   d.condition,
+      addonFridge: d.addon_fridge === true,
+      addonOven:   d.addon_oven === true,
+      zip:         String(d.zip),
+      frequency:   d.frequency_selected || "once",
+      levels:      Number(d.levels) || 1,
+      geo:         serveGeo(String(d.zip), lookupGeo),
+    });
+
+    const derived = q.displayPrice;
+    if (derived === claimed) return { ok: true };
+
+    const sameEngine = d.pricing_version === PRICING_VERSION;
+    const base = {
+      claimed: claimed, derived: derived,
+      claimedVersion: d.pricing_version || null, serverVersion: PRICING_VERSION,
+      submission_id: d.submission_id || null,
+    };
+
+    /* Engines differ — the page was loaded before the last deploy. Let it
+       through at the price they were actually shown, and log it so a flood of
+       these is visible as what it is. */
+    if (!sameEngine) return Object.assign(base, { note: "version drift — honoured" });
+
+    /* Same engine, different number. There is no innocent explanation. */
+    return Object.assign(base, { reject: true, note: "same engine, different price" });
+
+  } catch (err) {
+    /* Includes JSON.parse failing, which handleSubmit does not itself do — the
+       body is relayed as text. A booking must not die because this could not
+       read it. */
+    return { skipped: "verifier error: " + String(err) };
+  }
 }
 
 

@@ -44,6 +44,18 @@
   Content-Type: text/javascript; charset=utf-8
   Cache-Control: public, max-age=0, must-revalidate
 
+# The pricing engine itself, split out of script.js on 2026-09-01 so the Worker
+# can re-derive a booking's price instead of trusting the browser's.
+#
+# Revalidated for the same reason as the other two, and one more: the server
+# now compares its own price against the one the page sent, and a stale copy
+# here would disagree with a fresh Worker on every single booking. That is
+# indistinguishable from tampering unless the version stamp catches it, so the
+# cheapest fix is not letting the copies diverge in the first place.
+/pricing-engine.js
+  Content-Type: text/javascript; charset=utf-8
+  Cache-Control: public, max-age=0, must-revalidate
+
 /style.css
   Content-Type: text/css; charset=utf-8
   Cache-Control: public, max-age=0, must-revalidate

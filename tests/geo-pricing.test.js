@@ -19,6 +19,7 @@ const vm   = require('vm');
 const read = f => fs.readFileSync(path.join(REPO_ROOT, f), 'utf8');
 
 const SITE     = read('script.js');
+const ENGINE   = read('pricing-engine.js');   // the engine moved out of script.js on 2026-09-01
 const GEO      = read('serve-geo-data.js');
 const INDEX    = read('index.html');
 const PRICING_HTML = read('pricing.html');
@@ -33,14 +34,13 @@ const t = (label, cond, extra) => {
 };
 
 /* ---------- load the engine exactly as a page does ---------- */
-const engineFrom = SITE.indexOf('const WORK_RATE =');
-const engineTo   = SITE.indexOf('/* ============================================================', engineFrom);
-if (engineFrom === -1 || engineTo === -1) throw new Error('could not slice script.js — the banners moved');
+/* No slicing any more: pricing-engine.js IS the engine, start to finish. */
+if (!/const WORK_RATE =/.test(ENGINE)) throw new Error('pricing-engine.js has no WORK_RATE — wrong file?');
 
 const box = { console: { log() {}, warn() {}, error() {} } };
 vm.createContext(box);
 vm.runInContext(
-  GEO + '\n' + SITE.slice(engineFrom, engineTo) +
+  GEO + '\n' + ENGINE +
   '\n;globalThis.__x = { PRICING, ZIP_TIERS, ZIP_GEO, PARK_ADDER, DEFAULT_GEO };',
   box
 );
@@ -285,7 +285,7 @@ t('2.5 baths sits strictly between 2 and 3',
 console.log('\n=== 4. a missing geo file prices neutrally, never throws ===');
 const bare = { console: { log() {}, warn() {}, error() {} } };
 vm.createContext(bare);
-vm.runInContext(SITE.slice(engineFrom, engineTo), bare);   /* engine ALONE, no geo */
+vm.runInContext(ENGINE, bare);   /* engine ALONE, no geo */
 let bareThrew = false, barePrice = null;
 try { barePrice = bare.computeQuote({ bedrooms: 2, bathrooms: 1, levels: 1, service: 'first_clean',
       condition: 'standard', zip: '02210', frequency: 'once' }); } catch (_) { bareThrew = true; }

@@ -14,7 +14,8 @@ const fs   = require('fs');
 const path = require('path');
 const vm   = require('vm');
 
-const SITE = fs.readFileSync(path.join(REPO_ROOT, 'script.js'), 'utf8');
+const SITE   = fs.readFileSync(path.join(REPO_ROOT, 'script.js'), 'utf8');
+const ENGINE = fs.readFileSync(path.join(REPO_ROOT, 'pricing-engine.js'), 'utf8');
 
 let bad = 0;
 const t = (label, cond, extra) => {
@@ -22,15 +23,12 @@ const t = (label, cond, extra) => {
   if (!cond) bad++;
 };
 
-/* Slice the pricing/coverage block, stopping before the attribution section. */
-const from   = SITE.indexOf('const WORK_RATE =');
-const attrib = SITE.indexOf('ATTRIBUTION — src / segment / UTM');
-const to     = SITE.lastIndexOf('/*', attrib);
-if (from === -1 || attrib === -1) throw new Error('could not slice pricing/coverage code from script.js');
+/* The pricing/coverage block is now a whole file of its own. */
+if (!/const ZIP_TIERS/.test(ENGINE)) throw new Error('pricing-engine.js has no ZIP_TIERS — wrong file?');
 
 const box = { console };
 vm.createContext(box);
-vm.runInContext(SITE.slice(from, to), box);
+vm.runInContext(ENGINE, box);
 
 const zipTier      = box.zipTier;
 const computeQuote = box.computeQuote;
