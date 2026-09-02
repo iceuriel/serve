@@ -24,6 +24,28 @@
   // is how /api/* reaches it. See src/worker.js for why the proxy exists.
   "main": "src/worker.js",
 
+  // The two shared files are CLASSIC SCRIPTS, not modules.
+  //
+  // serve-geo-data.js and pricing-engine.js are loaded by plain <script> tags
+  // in the browser, so they cannot contain `export` syntax — they publish
+  // through `if (typeof module !== "undefined") module.exports = …` instead.
+  //
+  // Wrangler treats **/*.js as ESModule by default. Under ESM there is no
+  // `module` object at all, so that block never ran, the files exported
+  // nothing, and the Worker's import resolved to undefined — silently. Every
+  // geo-mapped ZIP then priced at the neutral factor and real bookings were
+  // rejected on 2026-09-02.
+  //
+  // This tells the bundler what those two files actually are. Nothing else in
+  // the Worker is CommonJS.
+  "rules": [
+    {
+      "type": "CommonJS",
+      "globs": ["serve-geo-data.js", "pricing-engine.js"],
+      "fallthrough": true
+    }
+  ],
+
   "assets": {
     "directory": "./_site",
     // Lets the Worker hand non-API requests back to the static asset server.
