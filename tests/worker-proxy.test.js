@@ -30,46 +30,39 @@ const SRC = fs.readFileSync(path.join(REPO_ROOT, 'src', 'worker.js'), 'utf8');
    engine rather than a stub — the whole point of the exercise is that there is
    one engine, and a test that mocked it would be testing the wrong thing.
 
-   Both concatenated files end with an `if (typeof module …)` export tail. There
-   is no `module` in this sandbox, so those blocks are inert here exactly as
-   they are in a browser. */
-const GEO    = fs.readFileSync(path.join(REPO_ROOT, 'serve-geo-data.js'), 'utf8');
-const ENGINE = fs.readFileSync(path.join(REPO_ROOT, 'pricing-engine.js'), 'utf8');
+   The Worker imports exactly ONE thing — src/engine.generated.mjs — so that is
+   what gets loaded here, in its own scope, handed back only through its
+   exports. Nothing leaks into the worker's scope by accident.
 
-/* THE IMPORTS ARE MODELLED, NOT ERASED.
-   ---------------------------------------------------------------
-   An earlier version of this harness simply concatenated the two files ahead
-   of the worker and deleted its import lines. That created GLOBALS — which a
-   real bundle does not have — and it is why a broken import shipped to
-   production on 2026-09-02 with a green suite behind it. The worker's
-   `import { lookupGeo }` compiled to undefined, every mapped ZIP priced at the
-   neutral factor, and real bookings were rejected.
+   The version of this harness that concatenated the two source files into the
+   worker's scope is why a broken import shipped green on 2026-09-02: it
+   manufactured globals that no bundle has, so an import resolving to undefined
+   could not fail here. */
+const ENGINE_MJS = fs.readFileSync(path.join(REPO_ROOT, 'src', 'engine.generated.mjs'), 'utf8');
 
-   So each dependency is evaluated in ITS OWN scope and handed back only
-   through its module.exports, exactly as a bundler resolves it. Nothing leaks
-   into the worker's scope by accident, and a name the worker fails to import
-   is undefined here too. */
+const CJS_TAIL =
+  'module.exports = { lookupGeo, ZIP_GEO, PARK_ADDER, DEFAULT_GEO, computeQuote,' +
+  ' serveGeo, NEUTRAL_GEO, PRICING_VERSION, PRICING, WORK_MODEL, MARGIN,' +
+  ' WORK_RATE, TARGET_WAGE, zipTier, ZIP_TIERS };';
+
+/* Only the closing `export {…}` is rewritten, so every line of engine code
+   under test is the shipped one. */
 function loadModule(source) {
   const modBox = { module: { exports: {} }, console: { log() {}, warn() {}, error() {} } };
   modBox.exports = modBox.module.exports;
   vm.createContext(modBox);
-  vm.runInContext(source, modBox);
+  vm.runInContext(source.replace(/^export \{[\s\S]*?\};\s*$/m, CJS_TAIL), modBox);
   return modBox.module.exports;
 }
 
-const geoExports    = loadModule(GEO);
-/* GEO first, ENGINE second, and the order is load-bearing: each file ends by
-   ASSIGNING module.exports, so whichever runs last wins. Reversed, geo's
-   exports silently replaced the engine's and every engine symbol came back
-   undefined. */
-const engineExports = loadModule(GEO + '\n' + ENGINE);
+const engineExports = loadModule(ENGINE_MJS);
+const geoExports    = engineExports;   // one module now — the geo table is folded in
 
-/* Default imports become the module.exports object; named ones would be
-   undefined, which is the bug this now reproduces faithfully. */
 const runnable =
-  'const geoData = globalThis.__geo; const engine = globalThis.__engine;\n' +
-  SRC.replace(/^import\s+geoData[^\n]*\n/gm, '')
-     .replace(/^import\s+engine[^\n]*\n/gm, '')
+  'const __m = globalThis.__engine;\n' +
+  'const computeQuote = __m.computeQuote, serveGeo = __m.serveGeo,\n' +
+  '      lookupGeo = __m.lookupGeo, PRICING_VERSION = __m.PRICING_VERSION;\n' +
+  SRC.replace(/^import\s*\{[\s\S]*?\}\s*from[^\n]*\n/m, '')
      .replace(/^import[^\n]*\n/gm, '')
      .replace(/export\s+default\s*\{/, 'globalThis.__worker = {');
 
@@ -358,13 +351,21 @@ console.log('\n=== 7. the failure UI exists and is reachable ===');
     /serveGeo\(\s*String\(d\.zip\)\s*,\s*lookupGeo\s*\)/.test(SRC));
   t('and passes it into computeQuote as `geo`',
     /geo:\s*serveGeo\(/.test(SRC));
-  t('worker.js imports the engine rather than reimplementing it',
-    /import\s+engine\s+from\s+"\.\.\/pricing-engine\.js"/.test(SRC));
-  /* Named imports are what broke. Both files export from inside a conditional
-     block a bundler cannot see into, so a named import compiles to undefined
-     while looking entirely correct in the source. */
-  t('no NAMED imports from the conditionally-exported files',
-    !/import\s*\{[^}]*\}\s*from\s*"\.\.\/(pricing-engine|serve-geo-data)\.js"/.test(SRC));
+  t('worker.js imports the generated ES module',
+    /from\s+"\.\/engine\.generated\.mjs"/.test(SRC));
+  /* Importing the classic <script> files directly is what broke: they export
+     from inside `if (typeof module …)`, which never runs under a bundler that
+     treats .js as ESM, so the import resolved to undefined while looking
+     entirely correct in the source. */
+  t('worker.js does NOT import the classic script files',
+    !/from\s+"\.\.\/(pricing-engine|serve-geo-data)\.js"/.test(SRC));
+
+  /* The generated file is committed, so it can go stale. Regenerate in memory
+     and compare — a drifted copy fails here rather than shipping. */
+  const fresh = require(path.join(REPO_ROOT, 'scripts', 'build-engine-module.js')).generate();
+  t('engine.generated.mjs matches its sources',
+    ENGINE_MJS.replace(/\r\n/g, '\n') === fresh,
+    ENGINE_MJS.length + ' vs ' + fresh.length);
   t('verification is gated on being able to price at all',
     /if \(!CAN_PRICE\) return \{ skipped:/.test(SRC));
   t('no second copy of the price formula in the worker',

@@ -21,6 +21,11 @@ set -euo pipefail
 
 OUT="_site"
 
+# Regenerate the Worker's copy of the pricing engine BEFORE anything else, so a
+# deploy can never bundle a stale one. See scripts/build-engine-module.js for
+# why the Worker cannot simply import the two classic <script> files.
+node scripts/build-engine-module.js
+
 rm -rf "$OUT"
 mkdir -p "$OUT"
 

@@ -49,22 +49,21 @@
    cannot drift from what the customer was shown. A second implementation here
    would be the whole problem: it would disagree the first time prices move,
    and it would disagree silently. */
-/* DEFAULT imports, not named ones. Both files export through a conditional
-   `if (typeof module !== "undefined")` block so they can still load as classic
-   <script> tags in the browser. A bundler cannot statically see inside that
-   `if`, so `import { lookupGeo }` compiled to undefined — silently. The default
-   import is the whole module.exports object, resolved at runtime, which is
-   what actually survives.
+/* A GENERATED module, not the source files directly.
+   ---------------------------------------------------------------
+   serve-geo-data.js and pricing-engine.js are classic <script> files with no
+   export syntax — they publish through `if (typeof module !== "undefined")`,
+   which never executes under a bundler that treats .js as ESM. Importing them
+   here resolved to undefined, silently, and rejected real bookings on
+   2026-09-02 until it was caught in production.
 
-   This is not hypothetical. It shipped on 2026-09-02 and rejected every
-   booking from a mapped ZIP until it was caught. */
-import geoData from "../serve-geo-data.js";
-import engine from "../pricing-engine.js";
-
-const lookupGeo      = geoData && geoData.lookupGeo;
-const computeQuote   = engine  && engine.computeQuote;
-const serveGeo       = engine  && engine.serveGeo;
-const PRICING_VERSION = engine && engine.PRICING_VERSION;
+   scripts/build-engine-module.js concatenates those same two files and appends
+   a real `export` statement. Nothing is retyped; the test suite fails if the
+   generated copy has drifted from its sources. An unambiguous ES module cannot
+   half-resolve, which is the property that was missing. */
+import {
+  computeQuote, serveGeo, lookupGeo, PRICING_VERSION,
+} from "./engine.generated.mjs";
 
 /**
  * Can this Worker price a home the same way the browser just did?
