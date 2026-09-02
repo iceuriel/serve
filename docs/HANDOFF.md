@@ -6,10 +6,133 @@ assistant with no access to this repo. Self-contained on purpose.
 **Companion doc:** `/docs/SCHEMA.md` — authoritative for every column's meaning
 and who writes it. This file is the narrative; that file is the contract.
 
-**Latest session: 2026-08-28.** Jump to
-[what changed on 2026-08-28](#session-2026-08-28) for the current state. The
+**Latest session: 2026-09-02.** Jump to
+[what changed on 2026-09-02](#session-2026-09-02) for the current state. The
 sections below it describe earlier builds and remain accurate except where a
 later section supersedes them.
+
+---
+
+## Session 2026-09-02
+
+### The pricing engine moved, and the server now verifies prices
+
+`script.js` lines 28–475 became **`pricing-engine.js`**, loaded by a `<script>`
+tag on index/pricing/services exactly like `serve-geo-data.js`. The Worker
+imports it and **re-derives the price of every booking**, treating the browser's
+`quote_price` as a claim to verify rather than a fact.
+
+The reason: `quote_price` was computed on the customer's machine and taken on
+trust. Harmless while nothing charges money; a live vulnerability the moment
+anything does — edit one number in devtools and the system would issue a real
+payment link for a dollar. **This is the precondition for Stripe, not an
+optimisation.**
+
+Equivalence was proved, not assumed: 86,400 configurations priced before and
+after the move and compared by hash. Identical.
+
+`PRICING_VERSION` is stamped on every quote, and it is what makes rejection
+safe. Two prices can disagree for two reasons needing opposite responses:
+
+| | same version | different version |
+|---|---|---|
+| prices differ | edited payload → **refuse** | deploy landed mid-session → **honour** |
+
+Without the stamp, the first repricing would turn every already-open tab into a
+false tamper alert. Bump it whenever any number in the engine changes.
+
+### THIS CAUSED A LIVE OUTAGE. Read before touching the Worker's imports.
+
+The first deploy rejected **every booking from all 49 geo-mapped ZIPs** —
+most of the core service area — for roughly an hour.
+
+`serve-geo-data.js` and `pricing-engine.js` are classic `<script>` files, so
+they cannot carry `export` syntax and publish through
+`if (typeof module !== "undefined") module.exports = …` instead. **Wrangler
+bundles `.js` as ESM, where there is no `module` object at all**, so that line
+never ran, the files exported nothing, and the Worker's import was `undefined`.
+`serveGeo()` caught the resulting error and returned its neutral fallback, so
+every mapped ZIP priced as unmapped — 02116 came out $360 against the browser's
+$373 — and the verifier rejected real customers while looking healthy.
+
+Three fixes were tried and **all three failed identically**: a named import, a
+default import, and a `rules` entry declaring the files `CommonJS`. Each needed
+a deploy to disprove, because nothing local reproduces a bundler.
+
+**What works, and what must not be undone:** `scripts/build-engine-module.js`
+concatenates the two files verbatim and appends a real `export {…}`, producing
+`src/engine.generated.mjs`. An unambiguous ES module cannot half-resolve. One
+source of truth survives — nothing is retyped, the build regenerates it, and
+`tests/worker-proxy.test.js` regenerates it in memory and fails on drift.
+
+**Never import `pricing-engine.js` or `serve-geo-data.js` into the Worker.**
+Import the generated module. If another shared file needs to reach the Worker,
+add it to the generator.
+
+### Two rules that came out of the outage
+
+**A guard on the booking path must fail OPEN.** The original design note claimed
+it never failed on its own bugs; it failed *closed*, which is worse than not
+having it. `CAN_PRICE` now probes a known-mapped ZIP at startup and verification
+is skipped entirely unless the Worker can reproduce the browser's arithmetic.
+That gate is why the next two attempts were safe to ship — each either worked or
+left verification quietly off, never refusing customers again.
+
+**A deploy is not verified until production is probed.** Static assets going
+live is not evidence the Worker code did; they ship together, but "the new files
+are there" was exactly the inference that let the outage run. Send a real
+request and read the real answer.
+
+### The test suite was the actual defect
+
+`tests/worker-proxy.test.js` concatenated both dependencies into the Worker's
+own scope and deleted its import lines, with a comment claiming that is what
+wrangler does. It is not — concatenation manufactures **globals**, which a
+bundle does not have, so an import resolving to `undefined` could not fail.
+Sixteen green test files stood behind a live outage.
+
+It now loads the same single generated module the Worker does, rewriting only
+the closing export line so Node's `vm` can evaluate it, so every line of engine
+code under test is the shipped one.
+
+Two smaller traps found the same day, both worth remembering:
+
+- An assertion that only checks *for failure* will accept the **wrong** failure.
+  An orphan-id test passed on `TypeError: console.warn is not a function` —
+  four console stubs were missing `warn`.
+- When concatenated files each end by *assigning* `module.exports`, the last one
+  silently wins. Load order is load-bearing.
+
+### Also shipped
+
+- **`job_notes` (webhook r10)** — the reserve step's "anything we should know?"
+  textarea moved to the confirmation screen, where hesitation is free. It
+  updates an existing JOBS row, so it is the one write path that deliberately
+  skips `alreadyWritten()`. **Repo is r10; production is still r9** until it is
+  pasted in.
+- **Attribution moved to `localStorage`, 30-day fixed window**, so a card
+  scanned on Tuesday still credits a booking on Thursday. `privacy.html` was
+  updated in the same commit — it promised session-only storage, and that page
+  is on the A2P surface carriers re-fetch.
+- **Canonical URLs** on all five pages, and `/favicon.ico` at the site root
+  (Google was showing a generic globe because the root path 404'd).
+- **`/q` and `/friend`** moved out of the Cloudflare dashboard into `_redirects`,
+  where the test suite can see them. A dashboard rule is how `/q` shipped
+  pointing at an untagged URL.
+
+### Still open
+
+- **The availability feed is empty.** `/api/slots` returns zero slots, so every
+  visitor reaching step 3 gets the earlier/later radios instead of the day
+  picker, with no LIVE badge. It degrades silently by design, which is why
+  nothing surfaced it. **This is affecting real bookings now.**
+- **~10 test rows in JOBS** from probing the outage, all prefixed `test-`, plus
+  matching `@example.com` rows in LEADS. `cleanupTestRows()` clears them.
+- **webhook r10 is not deployed.**
+- **DASHBOARD `#VALUE!`** across four blocks, from dropping `LEADS.status`.
+- `serve.serve-account.workers.dev` serves the whole site publicly. The canonical
+  tags point at the apex so Google is handled, but `"workers_dev": false` would
+  close it properly.
 
 ---
 
