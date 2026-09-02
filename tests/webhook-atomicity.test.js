@@ -84,7 +84,7 @@ function build(cfg) {
     getSheets: () => Object.values(tabs),
   };
   const sandbox = {
-    console: { log: m => logs.push(String(m)), error: m => logs.push('ERR ' + m) },
+    console: { log: m => logs.push(String(m)), warn: m => logs.push('WARN ' + m), error: m => logs.push('ERR ' + m) },
     SpreadsheetApp: { openById: () => ssObj, getActiveSpreadsheet: () => ssObj },
     ContentService: { MimeType: { JSON: 'json' },
       createTextOutput: s => ({ getContent: () => s, setMimeType() { return this; } }) },
@@ -208,7 +208,7 @@ const roSs = {
   insertSheet: n => { violations.push('ss.insertSheet(' + n + ')'); throw new Error('MUTATION ATTEMPTED: insertSheet'); },
 };
 const roSandbox = {
-  console: { log: m => roLogs.push(String(m)), error: m => roLogs.push('ERR ' + m) },
+  console: { log: m => roLogs.push(String(m)), warn: m => roLogs.push('WARN ' + m), error: m => roLogs.push('ERR ' + m) },
   SpreadsheetApp: { openById: () => roSs, getActiveSpreadsheet: () => roSs },
   ContentService: { MimeType: { JSON: 'json' }, createTextOutput: s => ({ getContent: () => s, setMimeType() { return this; } }) },
   MailApp: { sendEmail: () => { violations.push('MailApp.sendEmail'); } },

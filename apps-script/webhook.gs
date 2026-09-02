@@ -1,7 +1,18 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-08-28  ·  master  ·  r9 — stable property + contact ids
+ * VERSION STAMP:  2026-09-01  ·  master  ·  r10 — late notes from the confirmation screen
+ *
+ * r10 = `job_notes` events UPDATE an existing JOBS row instead of appending.
+ *      The reserve step's "anything we should know?" textarea was removed —
+ *      asking at the moment of commitment costs bookings — and the same
+ *      question now sits on the confirmation screen, after the spot is claimed.
+ *      This is the one write path that deliberately skips alreadyWritten():
+ *      everywhere else a repeated submission_id is a replay to ignore, here it
+ *      is how the booking gets found. Blank-fill only, so a second submission
+ *      cannot erase the first and a hand-edit always survives. It never throws
+ *      — the booking is already confirmed on screen and must stay that way.
+ *      Also extracts PET_WORDS so petsFlag() and petsFromText() cannot drift.
  *
  * r9 = PROPERTIES gains a stable `property_id` (PROP-nnnn) and LEADS a
  *      `contact_id` (CON-nnnn); both are written onto the JOBS row so history
@@ -439,6 +450,12 @@ function doPost(e) {
     const ss = SPREADSHEET_ID ? SpreadsheetApp.openById(SPREADSHEET_ID)
                               : SpreadsheetApp.getActiveSpreadsheet();
 
+    /* Late notes from the confirmation screen. Routed BEFORE handleEvent
+       because these update an existing JOBS row rather than appending an
+       EVENTS one — and EVENTS has no customer_notes column, so falling through
+       would silently drop the whole message. */
+    if (eventType === "job_notes") return handleJobNotes(ss, data);
+
     if (!isReservation) return handleEvent(ss, data, eventType);
 
     const jobs = requireTab(ss, JOBS_TAB);
@@ -517,6 +534,97 @@ function doPost(e) {
   }
 }
 
+/**
+ * Late notes, captured on the confirmation screen once the booking is safe.
+ *
+ * The reserve step used to carry an "anything we should know?" textarea. It was
+ * removed because asking at the moment of commitment costs bookings; the same
+ * question is now asked after the spot is claimed, where hesitation is free.
+ *
+ * THIS UPDATES AN EXISTING ROW, which makes it the one write path that
+ * deliberately skips alreadyWritten(). Everywhere else a repeated
+ * submission_id means a replay to be ignored; here it is the whole point — the
+ * id is how we find the booking these notes belong to.
+ *
+ * Blank-fill only, matching every other upsert in this workbook. Someone who
+ * sends notes twice cannot erase the first message, and an operator's
+ * hand-edit always survives.
+ *
+ * Never throws. The booking is already recorded and confirmed on screen; a
+ * failure here must not turn a completed booking into an error the customer
+ * sees.
+ */
+function handleJobNotes(ss, data) {
+  const id    = String(data.submission_id || "").trim();
+  const notes = String(data.customer_notes || "").trim();
+
+  if (!id)    return json({ status: "error", message: "job_notes requires a submission_id" });
+  if (!notes) return json({ status: "ok", skipped: "empty notes" });
+
+  try {
+    const jobs    = requireTab(ss, JOBS_TAB);
+    const headers = sheetHeaders(jobs);
+    const idCol   = headers.indexOf("submission_id");
+    const noteCol = headers.indexOf("customer_notes");
+    const petCol  = headers.indexOf("pets_flag");
+
+    if (idCol === -1)   return json({ status: "error", message: "JOBS has no submission_id column" });
+    if (noteCol === -1) return json({ status: "error", message: "JOBS has no customer_notes column" });
+
+    const lastRow = jobs.getLastRow();
+    if (lastRow < 2) return json({ status: "error", message: "no rows to match" });
+
+    const ids = jobs.getRange(2, idCol + 1, lastRow - 1, 1).getValues();
+    let row = -1;
+    for (let i = 0; i < ids.length; i++) {
+      if (String(ids[i][0]).trim() === id) { row = i + 2; break; }
+    }
+    if (row === -1) {
+      console.warn("job_notes for an unknown submission_id: " + id);
+      return json({ status: "error", message: "no job matches that submission_id" });
+    }
+
+    const existing = String(jobs.getRange(row, noteCol + 1).getValue()).trim();
+    if (existing) {
+      console.log("job_notes ignored — row " + row + " already has notes.");
+      return json({ status: "ok", duplicate: true, row: row });
+    }
+
+    jobs.getRange(row, noteCol + 1).setValue(notes);
+
+    /* Derived here rather than trusted from the browser, for the same reason
+       the price will be: it is the one field a client could set to anything. */
+    if (petCol !== -1) jobs.getRange(row, petCol + 1).setValue(petsFromText(notes));
+
+    console.log("job_notes written to JOBS row " + row + " for " + id);
+    try { sendJobNotesEmail(data, notes, row); }
+    catch (mailErr) { console.error("job_notes email failed: " + mailErr); }
+
+    return json({ status: "ok", row: row, submission_id: id });
+
+  } catch (err) {
+    console.error("handleJobNotes failed: " + (err && err.stack ? err.stack : err));
+    return json({ status: "error", message: String(err) });
+  }
+}
+
+/** The crew needs this before they arrive, so it goes out on its own. */
+function sendJobNotesEmail(data, notes, row) {
+  MailApp.sendEmail(
+    notifyEmail(),
+    "Serve — notes added after booking · " + (data.name || "Unknown") +
+      (petsFromText(notes) ? " · PETS" : ""),
+    "A customer added notes on the confirmation screen, after their booking " +
+    "was already recorded.\n\n" +
+    "— WHAT THEY TOLD US —\n" + notes + "\n\n" +
+    "Pets:       " + (petsFromText(notes) ? "YES — plan around them" : "none mentioned") + "\n" +
+    "JOBS row:   " + row + "\n" +
+    "Submission: " + (data.submission_id || "(none)") + "\n\n" +
+    "Worth copying anything durable into PROPERTY_MEMORY — this is about the\n" +
+    "home, not just this one visit."
+  );
+}
+
 /** Non-reservation events. Never LEADS (identity-less rows), never RAW INTAKE. */
 function handleEvent(ss, data, eventType) {
   const sheet = eventsTab(ss);
@@ -542,7 +650,7 @@ function handleEvent(ss, data, eventType) {
 
 /** Health check — open the /exec URL in a browser. */
 function doGet() {
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-08-28 r9" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-01 r10" });
 }
 
 
@@ -1605,18 +1713,31 @@ function addonsLabel(data) {
   return list.join(", ");
 }
 
+/* One word list, two callers — petsFlag() on a booking and petsFromText() on
+   late notes. It was inline in petsFlag until job_notes needed the same test;
+   a second copy is how "guinea pig" ends up recognised on one path and not the
+   other. Word-boundaried on purpose: "carpet" must not read as "pet", and
+   "category" must not read as "cat". */
+const PET_WORDS = /\b(pets?|dogs?|puppy|puppies|cats?|kitten|kittens|kitty|feline|canine|animals?|birds?|parrot|hamster|rabbits?|bunny|guinea pig|ferret|reptile|snake|lizard|litter ?box|crate|kennel|leash|paws?|fur|shedding)\b/i;
+
+function petsFromText(text) {
+  return PET_WORDS.test(String(text || ""));
+}
+
 /**
  * Trust the site's flag when it sends one; re-derive from the notes otherwise,
- * so a stale cached script.js cannot lose the signal. Word-boundaried —
- * "carpet" must not read as "pet".
+ * so a stale cached script.js cannot lose the signal.
+ *
+ * As of 2026-09-01 the site sends no flag at all on a booking — the textarea
+ * that fed it moved to the confirmation screen — so this now returns false on
+ * a fresh reservation and the real answer arrives later via job_notes.
  */
 function petsFlag(data) {
   if (data.pets_flag === true)  return true;
   if (data.pets_flag === false) return false;
   if (String(data.pets_flag).toUpperCase() === "TRUE")  return true;
   if (String(data.pets_flag).toUpperCase() === "FALSE") return false;
-  const re = /\b(pets?|dogs?|puppy|puppies|cats?|kitten|kittens|kitty|feline|canine|animals?|birds?|parrot|hamster|rabbits?|bunny|guinea pig|ferret|reptile|snake|lizard|litter ?box|crate|kennel|leash|paws?|fur|shedding)\b/i;
-  return re.test(String(data.customer_notes || ""));
+  return petsFromText(data.customer_notes);
 }
 
 

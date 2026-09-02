@@ -1114,7 +1114,7 @@ not depend on a project setting nobody remembers to check.
 | Spreadsheet | Leads MASTER | Ops |
 | Constant | `SHEETS_URL`, `script.js` ~155 | `AVAILABILITY_SOURCE_URL`, `script.js` ~174 |
 | Deployment id starts | `AKfycbxVWfrn2Mos…` | `AKfycbzumNZZ9KI5…` |
-| Version | `2026-08-28 r9` (deployed 08-29) | `2026-07-27 avail r2` |
+| Version | `2026-08-28 r9` deployed — **repo is at r10, NOT deployed** | `2026-07-27 avail r2` |
 | Dry-run in editor | `reportLeadsSchema()` → `testPayload()` | `testAvailability()` |
 
 Both deployed **Execute as: Me**, **Access: Anyone**. Anything else and the

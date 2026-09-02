@@ -70,7 +70,7 @@ function build(tabNames) {
                   insertSheet: n => (tabs[n] = makeSheet(n, null, audit)),
                   getSheets: () => Object.values(tabs) };
   const sandbox = {
-    console: { log: m => logs.push(String(m)), error: m => logs.push('ERR ' + m) },
+    console: { log: m => logs.push(String(m)), warn: m => logs.push('WARN ' + m), error: m => logs.push('ERR ' + m) },
     SpreadsheetApp: { openById: () => ssObj, getActiveSpreadsheet: () => ssObj },
     ContentService: { MimeType: { JSON: 'json' }, createTextOutput: s => ({ getContent: () => s, setMimeType() { return this; } }) },
     MailApp: { sendEmail: (to, subject, body) => mails.push({ to, subject, body }) },

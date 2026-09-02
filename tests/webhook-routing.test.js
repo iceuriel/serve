@@ -27,6 +27,9 @@ function makeSheet(name, headers) {
     setFrozenRows: () => {},
     getRange: (r, c, nr, nc) => ({
       getValues: () => { const o = []; for (let i = 0; i < nr; i++) { const row = rows[r-1+i] || []; o.push(row.slice(c-1, c-1+nc)); } return o; },
+      /* Real Apps Script has both. handleJobNotes reads a single cell before
+         overwriting it, and without this the blank-fill guard is untestable. */
+      getValue: () => { const row = rows[r-1] || []; return row[c-1] === undefined ? '' : row[c-1]; },
       setValue: (v) => { while (rows[r-1].length < c) rows[r-1].push(''); rows[r-1][c-1] = v; },
     }) };
 }
@@ -69,7 +72,7 @@ function build(leadsHeaders) {
     getSheets: () => Object.values(tabs),
   };
   const sandbox = {
-    console: { log: m => logs.push(String(m)), error: m => logs.push('ERR ' + m) },
+    console: { log: m => logs.push(String(m)), warn: m => logs.push('WARN ' + m), error: m => logs.push('ERR ' + m) },
     SpreadsheetApp: { openById: () => ssObj, getActiveSpreadsheet: () => ssObj },
     ContentService: { MimeType: { JSON: 'json' },
       createTextOutput: s => ({ getContent: () => s, setMimeType() { return this; } }) },
@@ -294,6 +297,70 @@ t('absent levels never prints NaN', !/NaN|undefined/.test(lm.body));
 
 /* Every booking email carries the line, whatever the payload. */
 t('Levels line is never missing', EM.mails.every(m => /^Levels:/m.test(m.body)));
+
+/* ============ SCENARIO 6: late notes from the confirmation screen ============
+   r10. The reserve step's textarea moved to the confirmation screen, so notes
+   now arrive AFTER the JOBS row exists and have to update it in place. That
+   makes this the one write path that deliberately skips the replay guard: the
+   submission_id is expected to already be in the sheet, because it is how the
+   booking gets found. */
+console.log('\n\n=== SCENARIO 6 — job_notes updates the booking it belongs to ===');
+const N = build(LEADS_FULL);
+const jn = N.tabs.JOBS;
+const noteCol = JOBS_HEADERS.indexOf('customer_notes');
+const petCol  = JOBS_HEADERS.indexOf('pets_flag');
+
+const booking = Object.assign({}, BASE, { submission_id: 'uuid-notes-1',
+  slot_date: '2026-09-10', slot_time: '9-11 AM' });
+delete booking.customer_notes;
+delete booking.pets_flag;
+N.post(booking);
+
+t('booking lands with notes blank', !jn._rows[1][noteCol], jn._rows[1][noteCol]);
+const rowsAfterBooking = jn._rows.length;
+
+const notes = m => N.post({ event: 'job_notes', event_type: 'job_notes',
+  submission_id: 'uuid-notes-1', customer_notes: m });
+
+const r1 = notes('We have a friendly dog — please keep the back door shut.');
+t('job_notes reports ok', r1.status === 'ok', r1);
+t('notes land on the booking row',
+  /friendly dog/.test(jn._rows[1][noteCol]), jn._rows[1][noteCol]);
+t('pets_flag derived server-side', jn._rows[1][petCol] === true, jn._rows[1][petCol]);
+t('NO new row was appended', jn._rows.length === rowsAfterBooking, jn._rows.length);
+
+/* Blank-fill only, like every other upsert here — a second send must not be
+   able to erase what someone said the first time. */
+notes('Actually ignore all that.');
+t('a second send cannot overwrite the first',
+  /friendly dog/.test(jn._rows[1][noteCol]), jn._rows[1][noteCol]);
+
+/* The word list must not fire on "carpet" or "category". */
+const N2 = build(LEADS_FULL);
+N2.post(Object.assign({}, BASE, { submission_id: 'uuid-notes-2' }));
+N2.post({ event_type: 'job_notes', submission_id: 'uuid-notes-2',
+  customer_notes: 'New carpet in the den, and the category of clean is standard.' });
+t('carpet/category do not read as pets',
+  N2.tabs.JOBS._rows[1][petCol] === false, N2.tabs.JOBS._rows[1][petCol]);
+
+/* Failure modes. None may throw, and none may write. */
+const N3 = build(LEADS_FULL);
+N3.post(Object.assign({}, BASE, { submission_id: 'uuid-notes-3' }));
+const jobsBefore = JSON.stringify(N3.tabs.JOBS._rows);
+
+const orphan = N3.post({ event_type: 'job_notes', submission_id: 'never-existed',
+  customer_notes: 'notes for a job that is not there' });
+t('unknown submission_id is refused', orphan.status === 'error', orphan);
+
+const empty = N3.post({ event_type: 'job_notes', submission_id: 'uuid-notes-3',
+  customer_notes: '   ' });
+t('whitespace-only notes are skipped, not written', empty.status === 'ok' && !!empty.skipped, empty);
+
+const noId = N3.post({ event_type: 'job_notes', customer_notes: 'no id at all' });
+t('missing submission_id is refused', noId.status === 'error', noId);
+
+t('none of the failure paths touched JOBS',
+  JSON.stringify(N3.tabs.JOBS._rows) === jobsBefore);
 
 console.log('\n' + (bad ? 'FAILURES: ' + bad : 'ALL ASSERTIONS PASSED'));
 process.exit(bad ? 1 : 0);

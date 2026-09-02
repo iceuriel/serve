@@ -1551,12 +1551,82 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
             clearTimeout(slowNotice);
             if (result.confirmed) {
                 setView('confirmed');
+                armPostBookingNotes(p.submission_id);
                 return;
             }
             console.error('Reservation NOT confirmed.', p.submission_id, result.error);
             showReserveFailure(p, result.error);
         });
     });
+
+    /**
+     * "Anything we should know?" — asked on the confirmation screen.
+     *
+     * The same question used to sit in the reserve step. Before the spot is
+     * claimed a textarea is a reason to hesitate; after it is claimed,
+     * hesitating is free. So it moved rather than disappeared.
+     *
+     * Armed ONLY on a confirmed booking, because it needs the submission_id of
+     * a row that actually exists — that id is how the webhook finds the job
+     * these notes belong to. Arming it on a failed booking would post notes
+     * against nothing.
+     *
+     * Nothing here can hurt the booking. The row is written, the screen already
+     * says so, and a failure at this point is answered with "text us instead"
+     * rather than an error — the customer has already got what they came for.
+     */
+    function armPostBookingNotes(submissionId) {
+        const box    = $('pb-notes');
+        const send   = $('pb-send');
+        const status = $('pb-status');
+        if (!box || !send || !status || !submissionId) return;
+
+        let sending = false;
+
+        send.addEventListener('click', function () {
+            const notes = box.value.trim();
+            if (sending) return;
+            if (!notes) { box.focus(); return; }
+
+            sending = true;
+            send.disabled = true;
+            send.textContent = 'Sending…';
+            status.textContent = '';
+
+            /* Deliberately NOT postReservation(): that retries, and a retry here
+               would be pointless. The webhook fills a blank cell only, so a
+               second arrival is ignored anyway. */
+            fetch(SHEETS_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    event:          'job_notes',
+                    event_type:     'job_notes',
+                    submission_id:  submissionId,   // the booking these belong to
+                    customer_notes: notes,
+                    submitted_at:   new Date().toISOString(),
+                }),
+            })
+                .then(res => res.json().catch(() => { throw new Error('HTTP ' + res.status); }))
+                .then(body => {
+                    if (!body || body.status !== 'ok') throw new Error('not saved');
+                    box.disabled = true;
+                    send.hidden = true;
+                    status.textContent = 'Got it — your cleaner will see this before they arrive.';
+                })
+                .catch(err => {
+                    console.warn('Post-booking notes failed to send.', err);
+                    sending = false;
+                    send.disabled = false;
+                    send.textContent = 'Try again';
+                    /* Their booking is safe and they know it. Give them a route
+                       that does not depend on this working. */
+                    status.textContent =
+                        'That didn’t send. Your booking is still confirmed — ' +
+                        'email management@servecos.com and we’ll add it.';
+                });
+        });
+    }
 
     /**
      * The booking could not be confirmed. Say so, and make it recoverable in one

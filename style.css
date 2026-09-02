@@ -825,10 +825,72 @@ a {
     box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
 }
 
-/* .flow-textarea removed 2026-09-01 with the "anything we should know?" box.
-   Nothing on the site uses a textarea now, and a rule with no element is the
-   orphan that static-checks §5 exists to catch. Re-add it if the post-booking
-   capture ends up on-page rather than over SMS. */
+/* The "anything we should know?" box, on the confirmation screen.
+   ---------------------------------------------------------------
+   It sat in the reserve step until 2026-09-01. Same question, moved past the
+   commitment: a textarea before the spot is claimed is a reason to hesitate,
+   and after it is claimed hesitating costs nothing.
+
+   Separated by a rule and set quieter than the confirmation above it, so it
+   reads as a bonus rather than as one more thing standing between them and
+   being finished. They are already done. */
+.postbook {
+    margin-top: 1.75rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--color-border);
+    text-align: left;
+    max-width: 460px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.postbook__title {
+    font-family: var(--flow-serif);
+    font-size: 1.08rem;
+    font-weight: 700;
+    color: var(--color-dark);
+    margin: 0 0 0.3rem;
+}
+
+.postbook__sub {
+    font-family: var(--flow-sans);
+    font-size: 0.88rem;
+    color: var(--color-text-muted);
+    line-height: 1.5;
+    margin: 0 0 0.8rem;
+}
+
+.postbook__box {
+    display: block;
+    resize: vertical;
+    min-height: 5.25rem;
+    line-height: 1.55;
+    margin-bottom: 0.7rem;
+}
+
+.postbook__status {
+    font-family: var(--flow-sans);
+    font-size: 0.85rem;
+    color: var(--color-text-muted);
+    line-height: 1.5;
+    margin: 0.7rem 0 0;
+    min-height: 1.2em;   /* holds its space so the panel does not jump on send */
+}
+
+/* Visually hidden, still announced. The textarea's placeholder is an example,
+   not a label, and a placeholder alone leaves a screen reader with an unnamed
+   field. */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
 
 .field-hint {
     font-family: var(--flow-sans);
