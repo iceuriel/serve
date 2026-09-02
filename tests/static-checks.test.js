@@ -334,6 +334,52 @@ addrPh ? ok('placeholder present: "' + addrPh + '"')
   ? ok('hint explains why the city is not needed')
   : fail('no hint under the address field explaining that the ZIP covers the city');
 
+/* 15. The job ticket is deliberately NOT an indexable page.
+   ---------------------------------------------------------------
+   /j renders one booking from an id in the query string, so the URL carries a
+   customer's home address, when the house will be empty, and how the cleaner
+   gets in. It is excluded from the staged-page list above only because it is
+   copied on a separate line in build-site.sh, which is accidental — so the
+   exclusion is asserted here on purpose.
+
+   The X-Robots-Tag is the control, not the meta tag: a meta directive only
+   applies if a crawler renders the page. */
+head('Job ticket is not indexable');
+const ticketHtml = fs.readFileSync(path.join(ROOT, 'j.html'), 'utf8');
+const headersTxt = fs.readFileSync(path.join(ROOT, '_headers'), 'utf8').replace(/\r\n/g, '\n');
+
+/noindex/.test(ticketHtml)
+  ? ok('j.html carries a noindex meta tag')
+  : fail('j.html has no noindex meta tag');
+
+/^\/j\n(?:\s{2}[^\n]*\n)*\s{2}X-Robots-Tag:[^\n]*noindex/m.test(headersTxt)
+  ? ok('/j sends X-Robots-Tag: noindex')
+  : fail('/j has no X-Robots-Tag — the meta tag alone will not stop indexing');
+
+/^\/j\n(?:\s{2}[^\n]*\n)*\s{2}Cache-Control:[^\n]*no-store/m.test(headersTxt)
+  ? ok('/j is never cached by an intermediary')
+  : fail('/j must be no-store — the URL contains a home address');
+
+!/rel="canonical"/.test(ticketHtml)
+  ? ok('no canonical tag — every ticket is a different job')
+  : fail('j.html declares a canonical, which would point every ticket at one URL');
+
+!/j\.html|<loc>[^<]*\/j<\/loc>/.test(sitemap)
+  ? ok('absent from sitemap.xml')
+  : fail('the ticket page is in the sitemap — it must never be submitted for indexing');
+
+/* The page must not decide who sees what. If it ever filters, both views' data
+   is being shipped to the browser and the split is one bug away from leaking. */
+/* Comments stripped first: the file's own header explains that it contains no
+   innerHTML, and matching that sentence reports the documentation instead of
+   the code. */
+const ticketJs = fs.readFileSync(path.join(ROOT, 'ticket.js'), 'utf8')
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/^\s*\/\/.*$/gm, '');
+!/innerHTML/.test(ticketJs)
+  ? ok('ticket.js never uses innerHTML — sheet values stay inert')
+  : fail('ticket.js uses innerHTML; values typed into a sheet would render as markup');
+
 /* The root favicon. Crawlers and browsers request /favicon.ico by convention
    whatever the <link rel="icon"> tags say, and Google's search-result icon is
    one of them: with the file only at /images/favicon.ico, the live root 404'd

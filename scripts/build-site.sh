@@ -47,6 +47,12 @@ mkdir -p "$OUT"
 # so the failure would be silent: correct-looking prices with the entire
 # geographic adjustment quietly switched off in production only.
 cp index.html pricing.html services.html privacy.html sms-terms.html serve-geo-data.js pricing-engine.js script.js style.css "$OUT"/
+
+# j.html is served at /j and renders ONE job from an id in the query string.
+# It is not in the sitemap and carries noindex both in the markup and as an
+# X-Robots-Tag in _headers, because the URL exposes a home address and when the
+# house is empty. ticket.js is its only script.
+cp j.html ticket.js "$OUT"/
 cp sitemap.xml "$OUT"/
 cp -r images "$OUT"/
 

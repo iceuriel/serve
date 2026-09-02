@@ -79,8 +79,29 @@ function build(leadsHeaders) {
     MailApp: { sendEmail: (to, subject, body) => mails.push({ to, subject, body }) },
     LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
     Session: { getScriptTimeZone: () => 'America/New_York', getEffectiveUser: () => ({ getEmail: () => 'ops@example.com' }) },
-    PropertiesService: { getScriptProperties: () => ({ getProperty: () => null }) },
-    Utilities: { formatDate },
+    /* A real store, not a stub returning null: ticketSecret() mints a secret on
+       first use and every later token depends on reading back the same one.
+       A getProperty that always answered null would hand out a fresh secret per
+       call, and every token would be single-use without anything failing. */
+    PropertiesService: (() => {
+      const store = {};
+      return { getScriptProperties: () => ({
+        getProperty: k => (k in store ? store[k] : null),
+        setProperty: (k, v) => { store[k] = String(v); },
+      }) };
+    })(),
+    Utilities: {
+      formatDate,
+      getUuid: () => require('crypto').randomUUID(),
+      /* Apps Script returns a signed byte array. Node gives unsigned bytes, so
+         convert — the webhook's hex conversion handles negatives, and feeding
+         it unsigned values would test a different function than the one that
+         ships. */
+      computeHmacSha256Signature: (value, key) =>
+        [...require('crypto').createHmac('sha256', String(key))
+          .update(String(value)).digest()]
+          .map(b => (b > 127 ? b - 256 : b)),
+    },
   };
   vm.createContext(sandbox);
   vm.runInContext(SRC, sandbox);
@@ -361,6 +382,78 @@ t('missing submission_id is refused', noId.status === 'error', noId);
 
 t('none of the failure paths touched JOBS',
   JSON.stringify(N3.tabs.JOBS._rows) === jobsBefore);
+
+/* ============ SCENARIO 7: job tickets ============
+   r11. One JOBS row served to two audiences, and the split is decided on the
+   server precisely so a view cannot render what it was never sent.
+
+   The token carries the whole security model. job_id is NOT a secret — it is a
+   known date plus six characters and it appears in every notification email —
+   while the URL exposes a home address and when the house will be empty. */
+console.log('\n\n=== SCENARIO 7 — job tickets ===');
+const T = build(LEADS_FULL);
+/* The shared JOBS_HEADERS above models the 32-column sheet on purpose, to
+   exercise the narrow-tab degradation path. The live tab has these too, and the
+   partner view is built from them, so they are added for this scenario only —
+   widening the shared constant would shift the index-based assertions in
+   SCENARIO 4. */
+['address', 'unit', 'zip', 'levels', 'property_id'].forEach(h => {
+  if (!T.tabs.JOBS._rows[0].includes(h)) T.tabs.JOBS._rows[0].push(h);
+});
+const tJob = Object.assign({}, BASE, { submission_id: 'uuid-ticket-1',
+  slot_date: '2026-09-10', slot_time: '9-11 AM',
+  customer_notes: 'Friendly dog, please skip the office.' });
+T.post(tJob);
+
+const tRow   = T.tabs.JOBS._rows[1];
+const jobId  = tRow[JOBS_HEADERS.indexOf('job_id')];
+const tokenOf = T.sandbox.ticketToken;
+const good   = tokenOf(jobId);
+const get    = (q) => JSON.parse(T.sandbox.doGet({ parameter: q }).getContent());
+
+t('a ticket token is produced', typeof good === 'string' && good.length === 20, good);
+t('it is stable across calls', tokenOf(jobId) === good);
+t('a different job gets a different token', tokenOf('SRV-20260101-AAAAAA') !== good);
+
+/* Without this the id alone is the key, and ids are guessable by date. */
+t('the id alone opens nothing', get({ job: jobId }).ok === false);
+t('a wrong token opens nothing', get({ job: jobId, t: 'f'.repeat(20) }).ok === false);
+t('a wrong token and a real one look the same to the caller',
+  get({ job: jobId, t: 'f'.repeat(20) }).error === get({ job: 'SRV-19990101-ZZZZZZ', t: good }).error);
+
+const client  = get({ job: jobId, t: good, view: 'client' });
+const partner = get({ job: jobId, t: good, view: 'partner' });
+
+t('the client view opens', client.ok === true, client.error);
+t('the partner view opens', partner.ok === true, partner.error);
+
+/* THE PRIVACY SPLIT. Asserted as absence, because a leak here is a field that
+   was sent and simply not displayed. */
+t('client is told the price', Number(client.price) > 0, client.price);
+t('client is NOT given the street address', !('address' in client), Object.keys(client));
+t('client is NOT given the access notes', !('access_notes' in client));
+
+t('partner is given the address', !!partner.address, partner.address);
+t('partner is NOT given the customer email', !('email' in partner), Object.keys(partner));
+t('partner is NOT given the customer phone', !('phone' in partner));
+t('partner is NOT given the price', !('price' in partner));
+
+/* Door codes live in a separate workbook and must never reach either view. */
+t('no view carries anything named like a code',
+  !/access_secret|door_code|lockbox/i.test(JSON.stringify(client) + JSON.stringify(partner)));
+
+/* The partner link is for doing the job; the client link is their record. */
+const done = T.tabs.JOBS._rows[1];
+done[JOBS_HEADERS.indexOf('completed_date')] = '2026-09-11';
+t('partner link closes once the job is complete',
+  get({ job: jobId, t: good, view: 'partner' }).error === 'expired');
+t('client link still opens after completion',
+  get({ job: jobId, t: good, view: 'client' }).ok === true);
+
+/* The health check must survive gaining a second job. */
+const health = JSON.parse(T.sandbox.doGet({}).getContent());
+t('doGet with no params is still the health check', health.ok === true && /r11/.test(health.version),
+  health.version);
 
 console.log('\n' + (bad ? 'FAILURES: ' + bad : 'ALL ASSERTIONS PASSED'));
 process.exit(bad ? 1 : 0);

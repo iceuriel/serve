@@ -101,6 +101,7 @@ export default {
 
     if (url.pathname === "/api/submit") return handleSubmit(request, env);
     if (url.pathname === "/api/slots")  return handleSlots(request, env);
+    if (url.pathname === "/api/job")    return handleJob(request, env);
 
     /* Not an API route — hand back to the static asset server. */
     return env.ASSETS.fetch(request);
@@ -197,6 +198,53 @@ async function handleSlots(request, env) {
       /* The feed is already cached 5 minutes upstream. A short edge cache
          absorbs bursts without making slots any staler than they already are. */
       "Cache-Control": "public, max-age=60",
+    },
+  });
+}
+
+
+/* ============================================================
+   GET /api/job  ->  one job ticket
+   ============================================================
+
+   Relays id + token + view to Apps Script, which decides what each view may
+   see. This layer deliberately knows nothing: it does not validate the token,
+   does not choose fields, and does not cache. Putting any of that here would
+   mean two places could disagree about who sees an address.
+
+   NEVER CACHED. A ticket carries a home address and when the house is empty;
+   an intermediary holding a copy is exactly what must not happen. */
+async function handleJob(request, env) {
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return json({ ok: false, error: "method_not_allowed" }, 405);
+  }
+  if (!env.WEBHOOK_URL) return json({ ok: false, error: "not_configured" }, 500);
+
+  const url = new URL(request.url);
+  const id  = url.searchParams.get("id")   || "";
+  const tok = url.searchParams.get("t")    || "";
+  const vw  = url.searchParams.get("view") === "partner" ? "partner" : "client";
+
+  /* Cheap rejection before spending an upstream round trip on an obviously
+     malformed link. Anything that gets past this is still validated upstream. */
+  if (!id || !tok || tok.length < 16) return json({ ok: false, error: "not_found" }, 404);
+
+  const target = env.WEBHOOK_URL +
+    "?job="  + encodeURIComponent(id) +
+    "&t="    + encodeURIComponent(tok) +
+    "&view=" + vw;
+
+  const upstream = await relay(target, { method: "GET" }, UPSTREAM_TIMEOUT_MS.slots);
+  if (!upstream.ok) {
+    console.error("job relay failed: " + upstream.error);
+    return json({ ok: false, error: "upstream_unreachable" }, 502);
+  }
+
+  return new Response(upstream.text, {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store, private",
     },
   });
 }

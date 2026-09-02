@@ -1,7 +1,21 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-01  ·  master  ·  r10 — late notes from the confirmation screen
+ * VERSION STAMP:  2026-09-02  ·  master  ·  r11 — job tickets
+ *
+ * r11 = doGet serves a JOB TICKET when given `?job=&t=&view=`. One JOBS row,
+ *      two audiences: the client sees price, cleaner and their own notes read
+ *      back; the partner sees the address and the crew notes and never the
+ *      customer's email or phone. The split is decided HERE, not in the page,
+ *      so a view can only render what it was sent.
+ *      The token is an HMAC of job_id under a self-provisioning script secret —
+ *      job_id itself is not secret (it is a known date plus six characters and
+ *      it appears in every notification email), and the URL carries a home
+ *      address and when the house is empty. No new column, no setup step.
+ *      Partner links expire on completion; client links persist, because the
+ *      photos and the price are the customer's record.
+ *      DOOR CODES STAY OUT. They are in Access MASTER and reach the cleaner by
+ *      direct message; a URL token is not the place for them.
  *
  * r10 = `job_notes` events UPDATE an existing JOBS row instead of appending.
  *      The reserve step's "anything we should know?" textarea was removed —
@@ -649,8 +663,198 @@ function handleEvent(ss, data, eventType) {
 }
 
 /** Health check — open the /exec URL in a browser. */
-function doGet() {
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-01 r10" });
+function doGet(e) {
+  /* One job ticket, rendered by /j on the site. Everything else is the health
+     check that has always been here. */
+  var p = (e && e.parameter) || {};
+  if (p.job) return handleTicket(p);
+
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-02 r11" });
+}
+
+
+/* ============================================================
+   JOB TICKET — one row, two audiences
+   ============================================================
+
+   servecleaning.com/j?id=SRV-…&t=…&view=client|partner
+
+   THE TOKEN IS THE WHOLE SECURITY MODEL, because the URL carries a home
+   address, when the house is empty, and how to get in. job_id is not a secret:
+   it is `SRV-` + a fully known date + six characters, it appears in every
+   notification email, and one leaked id exposes the pattern.
+
+   So the token is an HMAC of the job_id under a secret that never leaves this
+   script. It cannot be derived from the id, it is stable for a given job, and
+   it needs no new column — nothing to add by hand, nothing to keep in sync.
+
+   WHAT EACH VIEW MAY SEE is decided here, on the server, not by the page.
+   A partner never receives the customer's email or phone. A client never
+   receives the crew's access notes. Filtering in the browser would mean
+   shipping both and trusting the page not to render one.
+
+   DOOR CODES ARE NOT HERE AND MUST NOT BE ADDED. They live in a separate
+   Access MASTER file, owner-only, and reach the cleaner by direct message at
+   dispatch. Putting one behind a URL token undoes the entire point of that
+   separation. */
+
+const TICKET_SECRET_KEY = "TICKET_SECRET";
+
+/**
+ * Self-provisioning so there is no setup step to forget. First call mints a
+ * secret and stores it; every later call reads the same one, which is what
+ * makes a token stable for the life of a job.
+ */
+function ticketSecret() {
+  var props = PropertiesService.getScriptProperties();
+  var s = props.getProperty(TICKET_SECRET_KEY);
+  if (!s) {
+    s = Utilities.getUuid() + "-" + Utilities.getUuid();
+    props.setProperty(TICKET_SECRET_KEY, s);
+    console.log("Minted a ticket secret. Existing ticket links are unaffected " +
+                "because there were none.");
+  }
+  return s;
+}
+
+/** Stable per job, underivable from the id. 20 hex chars ~ 80 bits. */
+function ticketToken(jobId) {
+  var raw = Utilities.computeHmacSha256Signature(String(jobId), ticketSecret());
+  var hex = raw.map(function (b) {
+    return ("0" + (b < 0 ? b + 256 : b).toString(16)).slice(-2);
+  }).join("");
+  return hex.slice(0, 20);
+}
+
+/** The link to hand a customer or a cleaner. */
+function ticketUrl(jobId, view) {
+  return "https://servecleaning.com/j?id=" + encodeURIComponent(jobId) +
+         "&t=" + ticketToken(jobId) +
+         "&view=" + (view === "partner" ? "partner" : "client");
+}
+
+function handleTicket(p) {
+  var jobId = String(p.job || "").trim();
+  var view  = p.view === "partner" ? "partner" : "client";
+
+  /* Compared as whole strings. A wrong token is refused before any lookup, so
+     a guessed id cannot even confirm a job exists. */
+  if (ticketToken(jobId) !== String(p.t || "").trim()) {
+    return json({ ok: false, error: "not_found" });
+  }
+
+  try {
+    var ss   = SPREADSHEET_ID ? SpreadsheetApp.openById(SPREADSHEET_ID)
+                              : SpreadsheetApp.getActiveSpreadsheet();
+    var jobs = requireTab(ss, JOBS_TAB);
+    var h    = sheetHeaders(jobs);
+    var col  = function (n) { return h.indexOf(n); };
+
+    var idCol = col("job_id");
+    if (idCol === -1) return json({ ok: false, error: "no job_id column" });
+
+    var last = jobs.getLastRow();
+    if (last < 2) return json({ ok: false, error: "not_found" });
+
+    var ids = jobs.getRange(2, idCol + 1, last - 1, 1).getValues();
+    var row = -1;
+    for (var i = 0; i < ids.length; i++) {
+      if (String(ids[i][0]).trim() === jobId) { row = i + 2; break; }
+    }
+    if (row === -1) return json({ ok: false, error: "not_found" });
+
+    var values = jobs.getRange(row, 1, 1, h.length).getValues()[0];
+    var f = function (name) {
+      var c = col(name);
+      return c === -1 ? "" : values[c];
+    };
+
+    /* The partner view is for doing the job, so it stops being useful once the
+       job is done. The client view is their record — the photos and the price
+       live there — so it persists. */
+    var completed = String(f("completed_date") || "").trim();
+    if (view === "partner" && completed) {
+      return json({ ok: false, error: "expired", note: "this job is complete" });
+    }
+
+    var beds  = f("beds"), baths = f("baths");
+    var home  = (Number(beds) === 0 ? "Studio" : beds + " BR") + " / " + baths + " BA";
+    var lv    = Number(f("levels"));
+    if (lv > 1) home += " / " + lv + " floors";
+
+    var base = {
+      ok:        true,
+      view:      view,
+      job_id:    jobId,
+      service:   f("service_type"),
+      condition: f("condition"),
+      home:      home,
+      date:      String(f("scheduled_date") || ""),
+      time:      f("start_time"),
+      when:      f("notes"),                 // the human schedule summary
+      status:    f("job_status"),
+      completed: completed,
+    };
+
+    if (view === "client") {
+      return json(Object.assign(base, {
+        first_name: String(f("name") || "").split(" ")[0],
+        price:      f("final_price") || f("quoted_price"),
+        add_ons:    f("add_ons"),
+        frequency:  f("frequency"),
+        /* Their own words, read back — proof they were heard. */
+        notes:      f("customer_notes"),
+        cleaner:    String(f("cleaner") || ""),
+        paid:       String(f("payment_status") || "").toLowerCase() === "paid",
+      }));
+    }
+
+    /* PARTNER. Address and the crew notes, no customer contact details. */
+    var mem = {};
+    try {
+      var pid = f("property_id");
+      if (pid) {
+        var mt = ss.getSheetByName(PROPERTY_MEMORY_TAB);
+        if (mt) {
+          var mh = sheetHeaders(mt);
+          var mi = mh.indexOf("property_id");
+          var ml = mt.getLastRow();
+          if (mi !== -1 && ml > 1) {
+            var mrows = mt.getRange(2, 1, ml - 1, mh.length).getValues();
+            for (var k = 0; k < mrows.length; k++) {
+              if (String(mrows[k][mi]).trim() === String(pid).trim()) {
+                mh.forEach(function (name, idx) { mem[name] = mrows[k][idx]; });
+                break;
+              }
+            }
+          }
+        }
+      }
+    } catch (memErr) {
+      console.warn("PROPERTY_MEMORY lookup failed for the ticket: " + memErr);
+    }
+
+    return json(Object.assign(base, {
+      address:  f("address"),
+      unit:     f("unit"),
+      zip:      f("zip"),
+      cleaner:  String(f("cleaner") || ""),
+      pets:     f("pets_flag") === true || String(f("pets_flag")).toUpperCase() === "TRUE",
+      customer_notes: f("customer_notes"),
+      access_method:  mem.access_method  || "",
+      access_notes:   mem.access_notes   || "",
+      parking_notes:  mem.parking_notes  || "",
+      memory_pets:    mem.pets           || "",
+      priority_rooms: mem.priority_rooms || "",
+      skip_areas:     mem.skip_areas     || "",
+      product_notes:  mem.product_notes  || "",
+      timing_notes:   mem.timing_notes   || "",
+    }));
+
+  } catch (err) {
+    console.error("handleTicket failed: " + (err && err.stack ? err.stack : err));
+    return json({ ok: false, error: "lookup_failed" });
+  }
 }
 
 
@@ -1576,6 +1780,11 @@ function sendReservationEmail(data, sched, leadId, leadResult, propertyResult, s
       ? "Recurring/visit:   " + money(data.steady_state_price) +
         " (" + (data.frequency_selected || "") + ")\n" : "") +
     attributionBlock(data) +
+    /* The two links to hand out. Generated rather than stored: the token is an
+       HMAC of the job_id, so it is the same every time and needs no column.
+       Wrapped because a ticket must never be the reason a booking email fails
+       to send. */
+    ticketBlock(makeJobId(data, sched)) +
     "\nSubmission: " + (data.submission_id || "(none)") +
     "\nSubmitted:  " + firstSet(data.submitted_at, data.timestamp, "");
 
@@ -1683,6 +1892,19 @@ function serviceLabel(data) {
  * the reader unable to tell a one-floor condo from a field that never
  * arrived — which is the exact doubt this line exists to remove.
  */
+/** Never throws — a ticket link is not worth failing a booking notification. */
+function ticketBlock(jobId) {
+  try {
+    return "\n— TICKETS —\n" +
+           "Send to the customer:\n" + ticketUrl(jobId, "client") + "\n\n" +
+           "Send to the cleaner:\n"  + ticketUrl(jobId, "partner") + "\n" +
+           "(the cleaner's link stops working once completed_date is filled)\n";
+  } catch (err) {
+    console.error("ticket links unavailable: " + err);
+    return "";
+  }
+}
+
 function homeSummary(data) {
   const bd = (Number(data.bedrooms) === 0) ? "Studio" : (valOrBlank(data.bedrooms) + " BR");
   const base = bd + " / " + valOrBlank(data.bathrooms) + " BA";

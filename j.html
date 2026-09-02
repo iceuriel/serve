@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<!--
+    JOB TICKET — one page, two audiences.
+
+        /j?id=SRV-yyyyMMdd-XXXXXX&t=<token>&view=client|partner
+
+    NOT ONE PAGE PER JOB. This file takes an id, asks /api/job for that row, and
+    renders it. Ten jobs or ten thousand, it is this file and nothing else — the
+    sheet is the database and this is a viewer pointed at a row.
+
+    THE SERVER DECIDES WHAT EACH VIEW MAY SEE, not this page. A partner response
+    never contains the customer's email or phone; a client response never
+    contains the crew's access notes. If filtering happened here, both would
+    have to be sent and the page trusted not to render one.
+
+    Door codes are not in either response and must not be added. They live in a
+    separate Access MASTER file and reach the cleaner by direct message.
+
+    NOINDEX is set in the markup AND as X-Robots-Tag on /j in _headers. The
+    header is the one that counts — a meta tag only helps if a crawler renders
+    the page, and this URL carries a home address.
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow, noarchive">
+    <title>Your Serve clean</title>
+    <link rel="icon" type="image/x-icon" href="images/favicon.ico">
+    <link rel="icon" type="image/svg+xml" href="images/favicon.svg">
+    <link rel="apple-touch-icon" href="images/apple-touch-icon.png">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="ticket-body">
+
+    <main class="ticket" id="ticket">
+        <header class="ticket__bar">
+            <a href="/" class="ticket__brand">Serve</a>
+            <span class="ticket__role" id="t-role"></span>
+        </header>
+
+        <p class="ticket__state" id="t-state">Loading&hellip;</p>
+
+        <div id="t-body" hidden></div>
+
+        <footer class="ticket__foot" id="t-foot" hidden>
+            <a href="tel:+16178047201">(617) 804-7201</a>
+            &middot;
+            <a href="mailto:management@servecos.com">management@servecos.com</a>
+        </footer>
+    </main>
+
+    <script src="ticket.js"></script>
+</body>
+</html>

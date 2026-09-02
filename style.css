@@ -2039,6 +2039,137 @@ a {
 
 
 /* ============================================================
+   JOB TICKET  (/j)
+   ------------------------------------------------------------
+   The only surface a contractor ever touches, and the customer's record of
+   what they bought. Mobile-first and deliberately plain: it is read standing
+   on a doorstep, one-handed, often on a bad connection.
+   ============================================================ */
+.ticket-body {
+    background: var(--color-bg-light);
+    min-height: 100vh;
+}
+
+.ticket {
+    max-width: 460px;
+    margin: 0 auto;
+    padding: 1rem 1.15rem 3rem;
+}
+
+.ticket__bar {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.9rem 0;
+    border-bottom: 1px solid var(--color-border);
+    margin-bottom: 1.15rem;
+}
+
+.ticket__brand {
+    font-family: 'Times New Roman', Times, serif;
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--color-dark);
+    text-decoration: none;
+}
+
+.ticket__role {
+    margin-left: auto;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+}
+
+.ticket__state {
+    color: var(--color-text-muted);
+    font-size: 0.95rem;
+    line-height: 1.6;
+    padding: 1.5rem 0;
+}
+
+.tk-when { margin-bottom: 1.25rem; }
+.tk-day {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--color-accent);
+    margin-bottom: 0.2rem;
+}
+.tk-time {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: var(--color-dark);
+    line-height: 1.15;
+}
+.tk-sub {
+    font-size: 0.88rem;
+    color: var(--color-text-muted);
+    margin-top: 0.2rem;
+}
+
+.tk-blk {
+    border-top: 1px solid var(--color-border);
+    padding-top: 0.85rem;
+    margin-top: 0.85rem;
+}
+.tk-blk--flag { border-top-color: #d97706; }
+
+.tk-lbl {
+    font-size: 0.63rem;
+    font-weight: 700;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    margin-bottom: 0.3rem;
+}
+.tk-val {
+    font-size: 0.95rem;
+    color: var(--color-text);
+    line-height: 1.55;
+    /* Values arrive from a hand-typed sheet and may carry real line breaks. */
+    white-space: pre-line;
+}
+.tk-note {
+    font-size: 0.8rem;
+    color: var(--color-text-muted);
+    line-height: 1.5;
+    margin-top: 0.35rem;
+}
+.tk-money {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--color-dark);
+    line-height: 1.15;
+}
+
+/* Big enough to hit on a doorstep in the cold. */
+.tk-tap {
+    display: block;
+    margin-top: 0.6rem;
+    padding: 0.75rem 0.9rem;
+    min-height: 46px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    background: #fff;
+    color: var(--color-dark);
+    font-size: 0.92rem;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.ticket__foot {
+    margin-top: 2rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--color-border);
+    font-size: 0.85rem;
+    color: var(--color-text-muted);
+}
+.ticket__foot a { color: var(--color-accent); }
+
+/* ============================================================
    SERVE — PRICING & SERVICES
    Added with the published-pricing build.
 
