@@ -109,21 +109,33 @@ console.log('  TOTAL UNIQUE: ' + all.length);
   .forEach(k => { if (!all.includes(k)) fail('payload is missing ' + k); });
 ok('all 5 required payload fields present');
 
-/* customer_notes and pets_flag are ABSENT on purpose since 2026-09-01, when the
-   reserve-step textarea was removed and the question moved to after booking.
+/* pets_flag came BACK on 2026-09-05, and the reasoning inverted with it.
+   It was absent while nothing asked about pets — FALSE would have read as
+   "asked, no pets" when nobody was asked. The build step now poses the question
+   directly, so a false is a real answer from the person who would know. */
+all.includes('pets_flag')
+  ? ok('pets_flag sent — the build step now asks directly')
+  : fail('pets_flag is missing; the pets question exists, so its answer should ship');
+all.includes('last_clean')
+  ? ok('last_clean sent alongside the condition it derives')
+  : fail('last_clean is missing — without it a heavy grade is unexplainable later');
 
-   Asserted as absent rather than simply dropped from the list above, because
-   the tempting repair is to keep sending them as '' and false. That is worse
-   than sending nothing: the webhook writes header-driven, so an omitted key
-   leaves the cell blank, while pets_flag: false writes FALSE — which reads as
-   "asked, and they have no pets" when nobody was asked at all. Blank is the
-   only honest value for a question the form no longer poses. */
-['customer_notes', 'pets_flag'].forEach(k => {
-  all.includes(k)
-    ? fail(k + ' is being sent again — if the question came back, say so here; ' +
-           'if it is being sent empty, omit the key instead so the cell stays blank')
-    : ok(k + ' correctly omitted from the payload');
-});
+/* customer_notes stays absent: still collected after reservation, and sending
+   it empty would make "not yet asked" indistinguishable from "nothing to say". */
+all.includes('customer_notes')
+  ? fail('customer_notes is being sent again — it is collected after booking; ' +
+         'sending it empty makes "not asked" look like "nothing to say"')
+  : ok('customer_notes correctly omitted — collected after booking');
+
+/* CONDITION IS DERIVED. If a form ever sets it directly, the customer is being
+   asked to grade their own home again, which is the thing this replaced. */
+!/input\[name="condition"\]/.test(js)
+  ? ok('no form binds condition directly — it is derived')
+  : fail('something binds an input[name="condition"]; condition must be derived ' +
+         'from last_clean and has_pets, not asked');
+/deriveCondition/.test(js)
+  ? ok('deriveCondition() does the translation')
+  : fail('deriveCondition() is gone — who is grading the home?');
 
 /* 8. Tag balance on the block we inserted. */
 head('Markup balance');
@@ -333,6 +345,28 @@ addrPh ? ok('placeholder present: "' + addrPh + '"')
 /your ZIP already tells us the city/i.test(html)
   ? ok('hint explains why the city is not needed')
   : fail('no hint under the address field explaining that the ZIP covers the city');
+
+/* 0. Does the JavaScript we ship even parse?
+   ---------------------------------------------------------------
+   The cheapest possible test, added 2026-09-05 after a stray object-literal line
+   in buildPayload() left script.js unparseable — a completely dead booking flow
+   — and ALL SIXTEEN test files passed anyway. Every harness slices a region and
+   evaluates it; not one of them ever asked whether the whole file was valid.
+
+   A suite that cannot notice a syntax error is not protecting the site, however
+   many assertions it contains. This runs first for that reason. */
+head('Shipped JavaScript parses');
+const { execFileSync } = require('child_process');
+['script.js', 'pricing-engine.js', 'serve-geo-data.js', 'ticket.js', 'src/worker.js']
+  .forEach(f => {
+    try {
+      execFileSync(process.execPath, ['--check', path.join(ROOT, f)], { stdio: 'pipe' });
+      ok(f + ' parses');
+    } catch (e) {
+      const msg = String(e.stderr || e.message).split('\n').slice(0, 3).join(' ').trim();
+      fail(f + ' DOES NOT PARSE — ' + msg);
+    }
+  });
 
 /* 15. The job ticket is deliberately NOT an indexable page.
    ---------------------------------------------------------------

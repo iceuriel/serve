@@ -351,6 +351,10 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
         bathrooms: 1,
         levels: 1,
         service: 'first_clean',
+        /* What the customer is actually asked. `condition` below is derived from
+           these two by deriveCondition() and is never set directly by a form. */
+        lastClean: 'months',
+        hasPets: false,
         condition: 'standard',
         addonFridge: false,
         addonOven: false,
@@ -609,8 +613,48 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
             syncAddonsToService();   // Move Out hides the toggles — don't leave them armed
         });
     });
-    buildForm.querySelectorAll('input[name="condition"]').forEach(r => {
-        r.addEventListener('change', () => { if (r.checked) state.condition = r.value; });
+    /* CONDITION IS DERIVED, NOT ASKED.
+       ---------------------------------------------------------------
+       The customer answers two things they actually know — when it was last
+       cleaned professionally, and whether there are pets — and Serve translates
+       that into the light/standard/heavy the engine prices on.
+
+       The old form asked for the grade directly. That handed a professional
+       assessment to the person least able to make it, and priced the answer:
+       under-reporting was rewarded, so honest customers paid more than
+       optimistic ones for the same home.
+
+       The mapping is deliberately conservative. Where the two inputs disagree,
+       it rounds UP — a light home with pets prices as standard rather than
+       light. Under-quoting is the expensive error: it is absorbed on the job,
+       shows up as a rushed clean, and the customer's memory of it is a bad
+       clean rather than a cheap one. */
+    const CONDITION_FROM = {
+        recent: { no: 'light',    yes: 'standard' },
+        months: { no: 'standard', yes: 'standard' },
+        long:   { no: 'heavy',    yes: 'heavy'    },
+    };
+
+    function deriveCondition() {
+        const last = state.lastClean || 'months';
+        const pets = state.hasPets ? 'yes' : 'no';
+        const row  = CONDITION_FROM[last] || CONDITION_FROM.months;
+        state.condition = row[pets] || 'standard';
+    }
+
+    buildForm.querySelectorAll('input[name="last_clean"]').forEach(r => {
+        r.addEventListener('change', () => {
+            if (!r.checked) return;
+            state.lastClean = r.value;
+            deriveCondition();
+        });
+    });
+    buildForm.querySelectorAll('input[name="has_pets"]').forEach(r => {
+        r.addEventListener('change', () => {
+            if (!r.checked) return;
+            state.hasPets = r.value === 'yes';
+            deriveCondition();
+        });
     });
 
     /* ZIP validation — coverage confirmation / waitlist swap (R10) */
@@ -1061,16 +1105,19 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
         p.phone   = $('r-phone').value.trim();
         p.address = $('r-address').value.trim();
         p.unit    = $('r-unit').value.trim();
-        /* customer_notes and pets_flag are deliberately NOT SENT.
-           The textarea that fed them was removed from the reserve step; both are
-           collected after reservation instead.
+        /* pets_flag is sent again as of 2026-09-05, and this time it means
+           something. It was omitted while nothing asked about pets — FALSE would
+           have read as "asked, no pets" when nobody was asked. The build step now
+           puts the question directly, so `false` is a real answer from the person
+           who would know, rather than a keyword search over prose that may never
+           mention the cat.
 
-           Omitted rather than sent empty, and that distinction matters. The
-           webhook writes header-driven, so an absent key leaves the cell blank —
-           whereas pets_flag: false would write FALSE, which reads as "we asked
-           and they have no pets" when the truth is that nobody was asked. Same
-           trap as a blank levels field: a definite-looking negative standing in
-           for an unknown. */
+           customer_notes stays absent: still collected after reservation. */
+        p.pets_flag  = state.hasPets;
+        /* The answerable input recorded alongside the grade it produced. Without
+           it a heavy job is unexplainable after the fact — and it is what a
+           future model would learn the mapping from. */
+        p.last_clean = state.lastClean;
         /* A2P 10DLC consent. Sent as "yes" or "" — NEVER "no".
            The LEADS upsert fills blank cells only, so a "no" written today would
            permanently block a real opt-in on a later booking. Blank already means

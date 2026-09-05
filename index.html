@@ -367,23 +367,53 @@
                         </div>
                     </div>
 
-                    <!-- Condition -->
+                    <!-- Condition, asked as two things a customer actually knows.
+                         ---------------------------------------------------------
+                         This used to read "How's the home right now? Lightly
+                         lived-in / Average / Needs heavy-duty attention" — a
+                         professional assessment handed to the customer, and then
+                         priced. Three problems stacked: it is not a judgement they
+                         are equipped to make, it is mildly shaming so people
+                         under-report, and under-reporting was REWARDED with a lower
+                         price. The most honest customers subsidised the most
+                         optimistic ones.
+
+                         Time-since-last-clean and pets carry the same pricing
+                         signal and are answerable truthfully by anyone. Serve does
+                         the translation to light/standard/heavy in script.js —
+                         and that translation is the expertise being sold. Asking
+                         the customer to do it was giving the job away. -->
                     <div class="field-block">
-                        <span class="field-label">How's the home right now?</span>
-                        <div class="choice-cards choice-cards--condition">
+                        <span class="field-label" id="lastclean-label">When was it last cleaned professionally?</span>
+                        <div class="choice-cards choice-cards--condition" role="radiogroup" aria-labelledby="lastclean-label">
                             <label class="choice-card choice-card--sm">
-                                <input type="radio" name="condition" value="light">
-                                <span class="choice-card__body"><span class="choice-card__title">Lightly lived-in</span></span>
+                                <input type="radio" name="last_clean" value="recent">
+                                <span class="choice-card__body"><span class="choice-card__title">Within a month</span></span>
                             </label>
                             <label class="choice-card choice-card--sm">
-                                <input type="radio" name="condition" value="standard" checked>
-                                <span class="choice-card__body"><span class="choice-card__title">Average</span></span>
+                                <input type="radio" name="last_clean" value="months" checked>
+                                <span class="choice-card__body"><span class="choice-card__title">A few months ago</span></span>
                             </label>
                             <label class="choice-card choice-card--sm">
-                                <input type="radio" name="condition" value="heavy">
-                                <span class="choice-card__body"><span class="choice-card__title">Needs heavy-duty attention</span></span>
+                                <input type="radio" name="last_clean" value="long">
+                                <span class="choice-card__body"><span class="choice-card__title">Over a year, or never</span></span>
                             </label>
                         </div>
+                    </div>
+
+                    <div class="field-block">
+                        <span class="field-label" id="pets-label">Any pets at home?</span>
+                        <div class="choice-cards choice-cards--condition" role="radiogroup" aria-labelledby="pets-label">
+                            <label class="choice-card choice-card--sm">
+                                <input type="radio" name="has_pets" value="no" checked>
+                                <span class="choice-card__body"><span class="choice-card__title">No pets</span></span>
+                            </label>
+                            <label class="choice-card choice-card--sm">
+                                <input type="radio" name="has_pets" value="yes">
+                                <span class="choice-card__body"><span class="choice-card__title">Yes</span></span>
+                            </label>
+                        </div>
+                        <p class="field-hint">Pet hair takes longer, and we plan the visit around them.</p>
                     </div>
 
                     <div class="form-error" id="build-error" aria-live="polite"></div>
