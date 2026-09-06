@@ -668,6 +668,7 @@ function doGet(e) {
      check that has always been here. */
   var p = (e && e.parameter) || {};
   if (p.job) return handleTicket(p);
+  if (p.property) return handleKnownProperty(p.property);
 
   return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-02 r11" });
 }
@@ -697,6 +698,70 @@ function doGet(e) {
    Access MASTER file, owner-only, and reach the cleaner by direct message at
    dispatch. Putting one behind a URL token undoes the entire point of that
    separation. */
+
+/**
+ * "Do we already know this home?" — asked by the Worker before it spends
+ * anything on a property-data provider.
+ *
+ * This is the cheap half of /api/property, and it gets better as the business
+ * grows: a repeat customer, or any address quoted before, answers from our own
+ * record for free. The provider is only ever the fallback.
+ *
+ * RETURNS NOTHING IDENTIFYING. Beds, baths, levels — the specs needed to fill a
+ * quote form. No name, no contact, no access notes. The key is guessable by
+ * anyone who knows an address, so this must stay a specs lookup and must never
+ * become a way to ask "who lives at this address."
+ *
+ * `key` is ZIP-ADDRESS-UNIT, normalised identically on both sides. If the two
+ * normalisations ever drift, every repeat address silently starts billing
+ * again — which is the kind of failure that shows up on an invoice rather than
+ * in a log.
+ */
+function handleKnownProperty(key) {
+  try {
+    var want = String(key || "").trim().toUpperCase();
+    if (!want) return json({ found: false });
+
+    var ss = SPREADSHEET_ID ? SpreadsheetApp.openById(SPREADSHEET_ID)
+                            : SpreadsheetApp.getActiveSpreadsheet();
+    var tab = ss.getSheetByName(PROPERTIES_TAB);
+    if (!tab) return json({ found: false });
+
+    var h = sheetHeaders(tab);
+    var iKey = h.indexOf("property_key");
+    var last = tab.getLastRow();
+    if (iKey === -1 || last < 2) return json({ found: false });
+
+    var rows = tab.getRange(2, 1, last - 1, h.length).getValues();
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i][iKey]).trim().toUpperCase() !== want) continue;
+
+      var get = function (name) {
+        var c = h.indexOf(name);
+        return c === -1 ? null : rows[i][c];
+      };
+      var num = function (v) {
+        var n = Number(v);
+        return isFinite(n) && n > 0 ? n : null;
+      };
+      return json({
+        found:  true,
+        beds:   num(get("beds")),
+        baths:  num(get("baths")),
+        levels: num(get("levels")),
+        sqft:   num(get("sqft")),
+        type:   get("property_type") || null,
+      });
+    }
+    return json({ found: false });
+
+  } catch (err) {
+    /* A miss and a failure are the same thing to the caller: fall through to
+       the provider. Never let this break a quote. */
+    console.error("handleKnownProperty failed: " + err);
+    return json({ found: false });
+  }
+}
 
 const TICKET_SECRET_KEY = "TICKET_SECRET";
 

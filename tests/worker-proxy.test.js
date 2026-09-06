@@ -58,10 +58,17 @@ function loadModule(source) {
 const engineExports = loadModule(ENGINE_MJS);
 const geoExports    = engineExports;   // one module now — the geo table is folded in
 
+/* The binding list is READ FROM THE WORKER'S OWN IMPORT, not repeated here.
+   It was hardcoded until adding one name to the worker broke this harness with
+   a ReferenceError — the same drift that let a broken import ship, in a smaller
+   costume. Parsing it means the harness cannot fall behind the file it tests. */
+const importedNames = (SRC.match(/^import\s*\{([\s\S]*?)\}\s*from[^\n]*$/m) || [, ''])[1]
+  .split(',').map(s => s.trim()).filter(Boolean);
+if (!importedNames.length) throw new Error('could not read the worker import list');
+
 const runnable =
   'const __m = globalThis.__engine;\n' +
-  'const computeQuote = __m.computeQuote, serveGeo = __m.serveGeo,\n' +
-  '      lookupGeo = __m.lookupGeo, PRICING_VERSION = __m.PRICING_VERSION;\n' +
+  importedNames.map(n => 'const ' + n + ' = __m.' + n + ';').join('\n') + '\n' +
   SRC.replace(/^import\s*\{[\s\S]*?\}\s*from[^\n]*\n/m, '')
      .replace(/^import[^\n]*\n/gm, '')
      .replace(/export\s+default\s*\{/, 'globalThis.__worker = {');
@@ -71,6 +78,9 @@ function loadWorker(fetchImpl) {
   const box = {
     console: { log() {}, warn() {}, error(m) { calls.push({ log: String(m) }); } },
     AbortController, setTimeout, clearTimeout, URL, Response, Request, Headers, JSON,
+    /* Present globally in Workers, absent in a bare vm. Modelled rather than
+       stubbed so the hashing under test is the hashing that ships. */
+    crypto: require('crypto').webcrypto, TextEncoder, TextDecoder,
     fetch: async (target, init) => {
       calls.push({ target, init });
       return fetchImpl(target, init);
@@ -370,6 +380,90 @@ console.log('\n=== 7. the failure UI exists and is reachable ===');
     /if \(!CAN_PRICE\) return \{ skipped:/.test(SRC));
   t('no second copy of the price formula in the worker',
     !/PER_BEDROOM|PER_BATHROOM|WORK_RATE\s*=/.test(SRC));
+}
+
+/* ============================================================
+   /api/property — the guards protect real money.
+   ------------------------------------------------------------
+   Every provider call is billable, this endpoint is public, and RentCast holds
+   us liable for charges from a leaked key "whether such calls are authorized or
+   unauthorized," with no refunds. Their §2(iii) also requires commercially
+   reasonable measures against scraping through our own infrastructure — so
+   these are contractual obligations, not optimisations, and a guard that
+   silently stopped working would show up on an invoice rather than in a log. */
+{
+  console.log('\n=== /api/property guards ===');
+
+  const call = async (qs, env) => {
+    const { worker } = loadWorker(async () => new Response('{}'));
+    const res = await worker.fetch(
+      new Request('https://servecleaning.com/api/property?' + qs),
+      Object.assign({ WEBHOOK_URL: '' }, env || {}), {});
+    return { status: res.status, body: JSON.parse(await res.text()) };
+  };
+
+  /* The coverage gate is the cheapest guard and turns away the most traffic:
+     we do not clean outside the area, so we have no reason to buy data on it. */
+  const away = await call('address=1+Main+St&zip=90210');
+  t('an out-of-area ZIP never reaches a provider',
+    away.body.found === false && away.body.reason === 'out_of_area', away.body);
+
+  const partial = await call('zip=02474');
+  t('a missing address is refused before spending',
+    partial.body.found === false && partial.body.reason === 'incomplete', partial.body);
+
+  /* Without a key the endpoint still answers — that is the stub, shipped ahead
+     of the vendor so real traffic measures demand before a plan is bought. */
+  const stub = await call('address=2+Glenbrook+Ln&zip=02474&unit=19');
+  t('in-area with no provider configured returns a clean miss',
+    stub.body.found === false && stub.body.reason === 'no_provider', stub.body);
+  t('the stub never 500s — a quote must survive it', stub.status === 200, stub.status);
+
+  /* POST would be a way to bypass a cache keyed on the query string. */
+  const posted = await (async () => {
+    const { worker } = loadWorker(async () => new Response('{}'));
+    const res = await worker.fetch(
+      new Request('https://servecleaning.com/api/property?address=x&zip=02474',
+                  { method: 'POST' }), { WEBHOOK_URL: '' }, {});
+    return res.status;
+  })();
+  t('only GET is accepted', posted === 405, posted);
+
+  /* Source-level, because the cost of getting these wrong is money rather than
+     a wrong answer, and none of them can be exercised without a live key. */
+  t('a monthly cap exists', /PROPERTY_MONTHLY_CAP\s*=\s*\d+/.test(SRC));
+  t('a per-IP hourly limit exists', /PROPERTY_IP_PER_HOUR\s*=\s*\d+/.test(SRC));
+  t('misses are cached too, so retries do not re-bill',
+    /PROPERTY_MISS_TTL_S/.test(SRC) && /expirationTtl: found\.found \? PROPERTY_TTL_S/.test(SRC));
+  /* `before` must assert PRESENCE as well as order. indexOf returns -1 for a
+     string that is gone, and -1 is less than everything — so deleting the guard
+     entirely would have satisfied a bare `<` comparison. Caught by mutating the
+     coverage gate away and watching this pass. */
+  const before = (a, b) => {
+    const i = SRC.indexOf(a), j = SRC.indexOf(b);
+    return i !== -1 && j !== -1 && i < j;
+  };
+  t('our own record is consulted before the provider',
+    before('lookupKnownProperty', 'fetchProvider(env'));
+  t('the coverage gate runs before any billable path',
+    before('out_of_area', 'RENTCAST_KEY'));
+
+  /* The key bills us for other people's traffic if it leaks. It belongs in a
+     secret, never in wrangler.jsonc vars, and never in anything served. */
+  const wr = fs.readFileSync(path.join(REPO_ROOT, 'wrangler.jsonc'), 'utf8');
+  t('the provider key is NOT in wrangler vars', !/RENTCAST/.test(wr), 'found in wrangler.jsonc');
+  const shipped = ['script.js', 'ticket.js', 'pricing-engine.js']
+    .map(f => fs.readFileSync(path.join(REPO_ROOT, f), 'utf8')).join('');
+  t('the provider key is in nothing the browser downloads', !/RENTCAST/.test(shipped));
+
+  /* Addresses in logs are addresses in someone else's retention policy. */
+  t('no address is written to a log line',
+    !/console\.(log|warn|error)\([^)]*rawAddress|console\.(log|warn|error)\([^)]*\baddr\b/.test(SRC));
+
+  /* The site must quote without this. It is an accelerator, and they reserve
+     the right to throttle or discontinue it at will (§13.1). */
+  t('every failure path returns found:false rather than throwing',
+    (SRC.match(/found: false/g) || []).length >= 6);
 }
 
 console.log('\n' + (bad ? 'FAILURES: ' + bad : 'ALL CHECKS PASSED'));

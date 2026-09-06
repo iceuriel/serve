@@ -62,7 +62,7 @@
    generated copy has drifted from its sources. An unambiguous ES module cannot
    half-resolve, which is the property that was missing. */
 import {
-  computeQuote, serveGeo, lookupGeo, PRICING_VERSION,
+  computeQuote, serveGeo, lookupGeo, PRICING_VERSION, zipTier,
 } from "./engine.generated.mjs";
 
 /**
@@ -102,6 +102,7 @@ export default {
     if (url.pathname === "/api/submit") return handleSubmit(request, env);
     if (url.pathname === "/api/slots")  return handleSlots(request, env);
     if (url.pathname === "/api/job")    return handleJob(request, env);
+    if (url.pathname === "/api/property") return handleProperty(request, env);
 
     /* Not an API route — hand back to the static asset server. */
     return env.ASSETS.fetch(request);
@@ -248,6 +249,198 @@ async function handleJob(request, env) {
     },
   });
 }
+
+
+/* ============================================================
+   GET /api/property  ->  what we already know about a home
+   ============================================================
+
+   Address in, {beds, baths, levels, sqft, type} out, so the customer CONFIRMS
+   their home instead of specifying it. Confirming is a preference; specifying
+   is homework, and the homework is what produced a booking quoted at one level
+   for a three-storey townhouse — $279 against $466.
+
+   THE PROVIDER IS THE FALLBACK, NOT THE FRONT DOOR. Order is cache, then our
+   own PROPERTIES record, then a paid lookup. A repeat customer or an address
+   we have quoted before costs nothing and answers instantly, and that gets
+   better as the business grows rather than worse.
+
+   WHY THE GUARDS ARE NOT OPTIONAL. Every provider call is billable, this
+   endpoint is reachable by anyone, and RentCast's terms make us liable for
+   charges from a leaked key "whether such calls are authorized or
+   unauthorized," with no refunds and overage billed in $500 increments. Their
+   §2(iii) also requires "commercially reasonable measures" against scraping
+   through our own infrastructure — so rate limiting here is contractual, not
+   merely prudent.
+
+   NEVER A DEPENDENCY. They may throttle, reprice or discontinue at will
+   (§13.1). Every failure path returns found:false and the booking form falls
+   back to asking. A quote must never require this to work.
+
+   ADDRESSES DO NOT GO IN LOGS. Cloudflare log retention is not the right home
+   for a customer's home address; the ZIP and a short hash are enough to debug
+   with and enough to measure demand. */
+
+const PROPERTY_TTL_S      = 60 * 60 * 24 * 90;   // a home's bed count is not news
+const PROPERTY_MISS_TTL_S = 60 * 60 * 24 * 7;    // an unknown address, retried, must not re-bill
+const PROPERTY_MONTHLY_CAP = 400;                // hard stop well under any painful bill
+const PROPERTY_IP_PER_HOUR = 12;
+
+/* Same normalisation as webhook.gs zipN/addrN/unitN, deliberately. The cache
+   key has to be the same shape as the PROPERTIES key or the two caches miss
+   each other and every repeat address bills again. */
+function zipN(z)  { const d = String(z ?? "").replace(/[^0-9]/g, ""); return d ? ("00000" + d).slice(-5) : ""; }
+function addrN(a) { return String(a ?? "").toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, ""); }
+function unitN(u) {
+  return String(u ?? "").toUpperCase()
+    .replace(/\b(UNIT|APT|APARTMENT|NO|NUM)\b\.?/g, " ")
+    .replace(/[^A-Z0-9]+/g, "").replace(/^0+(?=\d)/, "");
+}
+
+/** Short, non-reversible, enough to correlate two log lines. Never the address. */
+async function shortHash(s) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(buf)].slice(0, 5)
+    .map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function handleProperty(request, env) {
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return json({ found: false, error: "method_not_allowed" }, 405);
+  }
+
+  const url  = new URL(request.url);
+  const zip  = zipN(url.searchParams.get("zip"));
+  const addr = addrN(url.searchParams.get("address"));
+  const unit = unitN(url.searchParams.get("unit"));
+
+  if (!zip || !addr) return json({ found: false, reason: "incomplete" });
+
+  /* Coverage gate FIRST, before anything billable. We do not clean outside the
+     service area, so we have no reason to buy data about it — and this alone
+     turns away most traffic that is not a real customer. */
+  if (zipTier(zip) === "unknown") {
+    return json({ found: false, reason: "out_of_area" });
+  }
+
+  const key  = zip + "-" + addr + (unit ? "-" + unit : "");
+  const tag  = await shortHash(key);
+  const kv   = env.PROPERTY_CACHE || null;      // optional: works before the binding exists
+
+  /* 1. Cache. */
+  if (kv) {
+    const hit = await kv.get("addr:" + key, "json").catch(() => null);
+    if (hit) return json({ ...hit, source: hit.found ? "cache" : "cache_miss" });
+  }
+
+  /* 2. Our own record. Free, and the answer we most trust — a customer already
+        confirmed it once. */
+  const known = await lookupKnownProperty(env, key);
+  if (known) {
+    if (kv) await kv.put("addr:" + key, JSON.stringify(known), { expirationTtl: PROPERTY_TTL_S });
+    return json({ ...known, source: "serve" });
+  }
+
+  /* 3. Paid lookup. Everything below here can cost money. */
+  if (!env.RENTCAST_KEY) {
+    /* THE STUB. Ships before the key so demand can be measured with real
+       traffic — observability is on, so these lines are the count that decides
+       which plan to buy. Costs nothing and needs no vendor. */
+    console.log("property_lookup stub zip=" + zip + " tag=" + tag);
+    return json({ found: false, reason: "no_provider" });
+  }
+
+  if (kv) {
+    const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+    const ipKey = "ip:" + (await shortHash(ip)) + ":" + new Date().toISOString().slice(0, 13);
+    const seen = Number(await kv.get(ipKey)) || 0;
+    if (seen >= PROPERTY_IP_PER_HOUR) {
+      console.warn("property_lookup rate_limited zip=" + zip);
+      return json({ found: false, reason: "rate_limited" });
+    }
+    await kv.put(ipKey, String(seen + 1), { expirationTtl: 3600 });
+
+    /* KV counters are eventually consistent, so this can overshoot slightly
+       under concurrency. The cap is set far enough below a painful bill that
+       being approximate is fine — an exact cap would need a Durable Object,
+       which is not worth it to protect a number this small. */
+    const monthKey = "spend:" + new Date().toISOString().slice(0, 7);
+    const used = Number(await kv.get(monthKey)) || 0;
+    if (used >= PROPERTY_MONTHLY_CAP) {
+      console.warn("property_lookup monthly_cap_reached used=" + used);
+      return json({ found: false, reason: "cap_reached" });
+    }
+    await kv.put(monthKey, String(used + 1), { expirationTtl: 60 * 60 * 24 * 40 });
+  }
+
+  const found = await fetchProvider(env, url.searchParams.get("address"), zip, unit);
+  console.log("property_lookup provider zip=" + zip + " tag=" + tag + " found=" + found.found);
+
+  if (kv) {
+    await kv.put("addr:" + key, JSON.stringify(found), {
+      expirationTtl: found.found ? PROPERTY_TTL_S : PROPERTY_MISS_TTL_S,
+    });
+  }
+  return json({ ...found, source: "provider" });
+}
+
+/**
+ * Ask Apps Script whether PROPERTIES already has this home. Never fatal — a
+ * miss here just means we fall through to the provider, and an outage here must
+ * not take the booking form with it.
+ */
+async function lookupKnownProperty(env, key) {
+  if (!env.WEBHOOK_URL) return null;
+  const res = await relay(env.WEBHOOK_URL + "?property=" + encodeURIComponent(key),
+                          { method: "GET" }, UPSTREAM_TIMEOUT_MS.slots);
+  if (!res.ok) return null;
+  try {
+    const d = JSON.parse(res.text);
+    return d && d.found ? d : null;
+  } catch (_) { return null; }
+}
+
+/**
+ * The provider call, isolated so swapping vendors touches one function. The
+ * front end only ever sees /api/property — it does not know or care who
+ * answered, which is what makes changing supplier a Worker edit rather than a
+ * site change.
+ */
+async function fetchProvider(env, rawAddress, zip, unit) {
+  try {
+    const q = new URL("https://api.rentcast.io/v1/properties");
+    q.searchParams.set("address", String(rawAddress || "") + ", " + zip);
+    const res = await fetch(q.toString(), {
+      headers: { "X-Api-Key": env.RENTCAST_KEY, "Accept": "application/json" },
+    });
+    if (!res.ok) return { found: false, reason: "provider_" + res.status };
+
+    const body = await res.json();
+    const p = Array.isArray(body) ? body[0] : body;
+    if (!p) return { found: false, reason: "no_match" };
+
+    const f = p.features || {};
+    return {
+      found: true,
+      beds:  numOrNull(p.bedrooms),
+      baths: numOrNull(p.bathrooms),
+      /* Floors is the field this whole feature exists for — and the one their
+         own §8.2 warns is often stale, because assessor records "do not always
+         include recent additions and/or modifications." Which is exactly how a
+         finished loft goes missing. Never rendered as fact; always confirmed. */
+      levels:   numOrNull(f.floorCount),
+      sqft:     numOrNull(p.squareFootage),
+      type:     p.propertyType || null,
+      year:     numOrNull(p.yearBuilt),
+      unitHint: unit || null,
+    };
+  } catch (err) {
+    console.error("property provider failed: " + String(err));
+    return { found: false, reason: "provider_unreachable" };
+  }
+}
+
+function numOrNull(v) { const n = Number(v); return isFinite(n) && n > 0 ? n : null; }
 
 
 /* ============================================================
