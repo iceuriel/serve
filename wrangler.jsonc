@@ -34,6 +34,24 @@
     "binding": "ASSETS"
   },
 
+  // SECRETS ARE NOT LISTED HERE, AND MUST NOT BE.
+  //
+  // The Worker also expects RENTCAST_KEY, set as a Cloudflare SECRET rather
+  // than as a var:
+  //
+  //     npx wrangler secret put RENTCAST_KEY
+  //
+  // The distinction is load-bearing on this project because deploys come from
+  // git. A deploy replaces the dashboard's `vars` with the list below, so a key
+  // added through the dashboard as a plaintext variable is wiped by the next
+  // push — silently, since the endpoint just starts answering "no_provider"
+  // again. Secrets live outside this file and survive deploys.
+  //
+  // It is also a key we are billed for. RentCast holds us liable for charges
+  // from a compromised key with no refunds, and a var is readable in the
+  // dashboard forever while a secret is write-only.
+  //
+  // Named here as documentation only. The value must never appear in this file.
   "vars": {
     // Booking webhook — writes JOBS / LEADS / PROPERTIES and flips the slot.
     "WEBHOOK_URL": "https://script.google.com/macros/s/AKfycbxVWfrn2Mos2-yO1AhDe20tpnFcAdc-nZ_6zb0qK02msdyJZVETgLQ77TvUnxHf5jWMBQ/exec",

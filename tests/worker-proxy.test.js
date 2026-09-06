@@ -450,8 +450,17 @@ console.log('\n=== 7. the failure UI exists and is reachable ===');
 
   /* The key bills us for other people's traffic if it leaks. It belongs in a
      secret, never in wrangler.jsonc vars, and never in anything served. */
-  const wr = fs.readFileSync(path.join(REPO_ROOT, 'wrangler.jsonc'), 'utf8');
-  t('the provider key is NOT in wrangler vars', !/RENTCAST/.test(wr), 'found in wrangler.jsonc');
+  /* Comments stripped first. The config DOCUMENTS that RENTCAST_KEY is expected
+     as a secret — that is the point, so the requirement is discoverable — and a
+     bare string match would read that documentation as a leak. What must never
+     appear is an ASSIGNMENT: a key with a value. */
+  const wr = fs.readFileSync(path.join(REPO_ROOT, 'wrangler.jsonc'), 'utf8')
+    .replace(/^\s*\/\/.*$/gm, '');
+  t('the provider key has no value assigned in wrangler.jsonc',
+    !/"RENTCAST[A-Z_]*"\s*:/.test(wr), 'an assignment exists in wrangler.jsonc');
+  t('and the config still documents that it is expected as a secret',
+    /wrangler secret put RENTCAST_KEY/.test(
+      fs.readFileSync(path.join(REPO_ROOT, 'wrangler.jsonc'), 'utf8')));
   const shipped = ['script.js', 'ticket.js', 'pricing-engine.js']
     .map(f => fs.readFileSync(path.join(REPO_ROOT, f), 'utf8')).join('');
   t('the provider key is in nothing the browser downloads', !/RENTCAST/.test(shipped));
