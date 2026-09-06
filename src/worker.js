@@ -103,6 +103,7 @@ export default {
     if (url.pathname === "/api/slots")  return handleSlots(request, env);
     if (url.pathname === "/api/job")    return handleJob(request, env);
     if (url.pathname === "/api/property") return handleProperty(request, env);
+    if (url.pathname === "/api/health")   return handleHealth(env);
 
     /* Not an API route — hand back to the static asset server. */
     return env.ASSETS.fetch(request);
@@ -247,6 +248,43 @@ async function handleJob(request, env) {
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store, private",
     },
+  });
+}
+
+
+/* ============================================================
+   GET /api/health  ->  what this Worker can actually see
+   ============================================================
+
+   NAMES ONLY. NEVER VALUES. NOT EVEN TRUNCATED ONES.
+
+   Added 2026-09-06 after several rounds of guessing why RENTCAST_KEY was not
+   reaching the Worker — a secret added in the dashboard is invisible from
+   outside, so "no_provider" could mean a missing secret, a misspelt one, a
+   build-time variable that never reaches runtime, or one attached to a
+   different Worker. Those need different fixes and looked identical.
+
+   Listing binding names distinguishes all four in one request, and it stays
+   useful: the same question arrives again with Stripe and Twilio keys.
+
+   A binding name is not a secret. A binding VALUE always is. If anyone is ever
+   tempted to add "just the first four characters" to help debug, that is the
+   moment this endpoint becomes a leak — four characters of a key plus the
+   provider name is a real head start. There is a test asserting no value is
+   returned. */
+function handleHealth(env) {
+  const names = Object.keys(env || {})
+    .filter(k => typeof env[k] !== "function")
+    .sort();
+
+  return json({
+    ok: true,
+    service: "serve-edge-worker",
+    pricing_version: PRICING_VERSION,
+    /* Whether the engine survived bundling. False here means every geo-mapped
+       ZIP is pricing as unmapped — the 2026-09-02 outage, made visible. */
+    can_price: CAN_PRICE,
+    bindings: names,
   });
 }
 

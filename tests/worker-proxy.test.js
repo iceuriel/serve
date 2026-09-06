@@ -435,12 +435,19 @@ console.log('\n=== 7. the failure UI exists and is reachable ===');
   t('a per-IP hourly limit exists', /PROPERTY_IP_PER_HOUR\s*=\s*\d+/.test(SRC));
   t('misses are cached too, so retries do not re-bill',
     /PROPERTY_MISS_TTL_S/.test(SRC) && /expirationTtl: found\.found \? PROPERTY_TTL_S/.test(SRC));
-  /* `before` must assert PRESENCE as well as order. indexOf returns -1 for a
-     string that is gone, and -1 is less than everything — so deleting the guard
-     entirely would have satisfied a bare `<` comparison. Caught by mutating the
-     coverage gate away and watching this pass. */
+  /* Ordering is checked against CODE, not comments. worker.js explains these
+     guards in prose that names the same identifiers, and matching the
+     explanation instead of the implementation has now broken three separate
+     assertions in this suite — a comment saying "there is no innerHTML here"
+     read as innerHTML, a comment saying <details> read as a tag, and a comment
+     naming RENTCAST_KEY read as the code that uses it.
+
+     `before` must also assert PRESENCE. indexOf returns -1 for a string that is
+     gone and -1 is less than everything, so deleting a guard outright would
+     satisfy a bare `<`. Caught by mutating the coverage gate away. */
+  const CODE = SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   const before = (a, b) => {
-    const i = SRC.indexOf(a), j = SRC.indexOf(b);
+    const i = CODE.indexOf(a), j = CODE.indexOf(b);
     return i !== -1 && j !== -1 && i < j;
   };
   t('our own record is consulted before the provider',
@@ -473,6 +480,26 @@ console.log('\n=== 7. the failure UI exists and is reachable ===');
      the right to throttle or discontinue it at will (§13.1). */
   t('every failure path returns found:false rather than throwing',
     (SRC.match(/found: false/g) || []).length >= 6);
+
+  /* /api/health reports binding NAMES so a missing or misspelt secret is
+     diagnosable from outside. It must never report a value — not truncated,
+     not hashed, not "the first four characters to help debug". */
+  const health = await (async () => {
+    const { worker } = loadWorker(async () => new Response('{}'));
+    const res = await worker.fetch(
+      new Request('https://servecleaning.com/api/health'),
+      { WEBHOOK_URL: 'https://example.test/exec', RENTCAST_KEY: 'super-secret-value' }, {});
+    return JSON.parse(await res.text());
+  })();
+
+  t('health lists binding names', Array.isArray(health.bindings) &&
+    health.bindings.includes('RENTCAST_KEY'), health.bindings);
+  t('health NEVER returns a binding value',
+    !JSON.stringify(health).includes('super-secret-value'), 'a value leaked');
+  t('health does not leak even a fragment of a value',
+    !JSON.stringify(health).includes('super'), 'a value fragment leaked');
+  t('health reports whether the engine survived bundling',
+    typeof health.can_price === 'boolean', health.can_price);
 }
 
 console.log('\n' + (bad ? 'FAILURES: ' + bad : 'ALL CHECKS PASSED'));
