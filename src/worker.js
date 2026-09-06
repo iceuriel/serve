@@ -454,12 +454,42 @@ async function fetchProvider(env, rawAddress, zip, unit) {
     if (!res.ok) return { found: false, reason: "provider_" + res.status };
 
     const body = await res.json();
-    const p = Array.isArray(body) ? body[0] : body;
-    if (!p) return { found: false, reason: "no_match" };
+    const list = Array.isArray(body) ? body : (body ? [body] : []);
+    if (!list.length) return { found: false, reason: "no_match" };
+
+    /* A STREET ADDRESS IS NOT A HOME IN A MULTI-UNIT BUILDING.
+       ---------------------------------------------------------------
+       "2 Glenbrook Ln" returns every unit in the building, and taking [0] means
+       quoting a customer against whichever record happened to sort first. Two
+       identical calls for that address came back Condo and then Single Family,
+       which is the same bug wearing different data.
+
+       So: match the unit when we were given one, and report how many records
+       the address matched so the page can ask "which unit?" instead of guessing
+       — asked at confirm time, where it is obviously relevant, rather than as a
+       field on a search box most people would leave blank. */
+    const want = unitN(unit);
+    const unitOf = (r) => unitN(
+      r.addressLine2 || r.unit || r.unitNumber ||
+      ((String(r.formattedAddress || "").split(",")[0].match(/\b(?:UNIT|APT|#)\s*([A-Z0-9-]+)/i) || [])[1] || "")
+    );
+
+    let p = list[0];
+    let unitMatched = false;
+    if (want) {
+      const hit = list.find(r => unitOf(r) === want);
+      if (hit) { p = hit; unitMatched = true; }
+    }
 
     const f = p.features || {};
     return {
       found: true,
+      /* How many records this street address matched. 1 is a house; more is a
+         building, and the page must ask which unit before trusting any of it. */
+      matches: list.length,
+      unitMatched: unitMatched,
+      /* True when we are quoting a record we are NOT sure belongs to them. */
+      ambiguous: list.length > 1 && !unitMatched,
       beds:  numOrNull(p.bedrooms),
       baths: numOrNull(p.bathrooms),
       /* Floors is the field this whole feature exists for — and the one their
