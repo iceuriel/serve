@@ -1,7 +1,16 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-02  ·  master  ·  r11 — job tickets
+ * VERSION STAMP:  2026-09-06  ·  master  ·  r12 — custom-quote scope
+ *
+ * r12 = the custom-quote email carries the customer's NAME and their SCOPE.
+ *      The request form now asks what they actually need done, because that
+ *      lane stopped being "5+ bedrooms only" — the booking page has a link into
+ *      it for jobs a calculator has no business pricing (only the downstairs, an
+ *      empty move-out, one room that needs three hours).
+ *      EVENTS has no customer_notes column, so for these requests THE EMAIL IS
+ *      THE ONLY RECORD OF THE SCOPE. Nothing else changes; no new tab, no new
+ *      column, no schema change of any kind.
  *
  * r11 = doGet serves a JOB TICKET when given `?job=&t=&view=`. One JOBS row,
  *      two audiences: the client sees price, cleaner and their own notes read
@@ -670,7 +679,7 @@ function doGet(e) {
   if (p.job) return handleTicket(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-02 r11" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-06 r12" });
 }
 
 
@@ -1866,20 +1875,37 @@ function sendEventEmail(eventType, data) {
     lead = "Someone outside the service area joined the waitlist.";
   } else if (eventType === "custom_quote_request") {
     subject = "Serve Custom Quote Request — " + homeSummary(data);
-    lead = "A larger home (5+ BR) requested a personal quote. Send an hourly scope today ($130/hr).";
+    /* Two doors reach this now (r12). A 5+ BR home trips it on its own because
+       the flat-rate table stops there; the link under the Build step is chosen
+       deliberately by someone whose SCOPE doesn't fit — half the home, an empty
+       move-out, one room that needs three hours. The scope box below is what
+       tells them apart, so lead with it. */
+    lead = isSet(data.customer_notes)
+      ? "Someone asked for a quote we price by hand. Their scope is below — reply today with a firm number and a date."
+      : "A larger home (5+ BR) requested a personal quote. Send an hourly scope today ($130/hr).";
   } else {
     subject = "Serve Event — " + eventType;
     lead = "A non-reservation event was recorded.";
   }
 
+  /* The customer's own words, verbatim and never merged into anything else.
+     EVENTS has no customer_notes column, so for these requests THIS EMAIL IS
+     THE ONLY PLACE THE SCOPE EXISTS. Dropping it here loses it outright, and
+     the reply becomes a question instead of a number. */
+  const scope = isSet(data.customer_notes)
+    ? "\nWHAT THEY NEED DONE\n" + "-".repeat(19) + "\n" + data.customer_notes + "\n"
+    : "";
+
   const body =
     lead + "\n\n" +
+    (isSet(data.name) ? "Name:      " + data.name + "\n" : "") +
     "Email:     " + (data.email || "") + "\n" +
     "Phone:     " + (data.phone || "(not provided)") + "\n" +
     "ZIP:       " + (data.zip || "") + " (" + (data.zip_tier || "") + ")\n" +
     "Service:   " + serviceLabel(data) + "\n" +
     "Home:      " + homeSummary(data) + "\n" +
     "Quoted:    " + money(firstSet(data.quote_price, data.first_visit_total)) + "\n" +
+    scope +
     attributionBlock(data) +
     "\nLogged to the " + EVENTS_TAB + " tab." +
     "\nSubmitted: " + firstSet(data.submitted_at, data.timestamp, "");

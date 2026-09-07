@@ -450,10 +450,20 @@ t('partner link closes once the job is complete',
 t('client link still opens after completion',
   get({ job: jobId, t: good, view: 'client' }).ok === true);
 
-/* The health check must survive gaining a second job. */
+/* The health check must survive gaining a second job.
+   The revision is read from the file's own VERSION STAMP rather than pinned to
+   a literal. Pinning made every routine bump fail this file for no reason, and
+   a test that cries wolf on a version number is a test people learn to edit
+   without reading. What actually matters is that the two agree — the stamp is
+   how a deploy is identified, and a doGet reporting a different one means the
+   deployed copy is not the file. */
+const stampRev = (require('fs')
+  .readFileSync(require('path').join(REPO_ROOT, 'apps-script', 'webhook.gs'), 'utf8')
+  .match(/VERSION STAMP:.*?\br(\d+)\b/) || [])[1];
 const health = JSON.parse(T.sandbox.doGet({}).getContent());
-t('doGet with no params is still the health check', health.ok === true && /r11/.test(health.version),
-  health.version);
+t('doGet with no params is still the health check',
+  health.ok === true && !!stampRev && new RegExp('\\br' + stampRev + '\\b').test(health.version),
+  health.version + ' vs stamp r' + stampRev);
 
 console.log('\n' + (bad ? 'FAILURES: ' + bad : 'ALL ASSERTIONS PASSED'));
 process.exit(bad ? 1 : 0);

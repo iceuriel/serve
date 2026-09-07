@@ -295,7 +295,52 @@
             </ol>
 
             <!-- STEP 1 — Build your clean (no identity collected) -->
-            <div class="quote-step step-active" id="step-1" data-progress="1">
+            <!-- STEP 1a — FIND YOUR HOME
+                 =========================================================
+                 The fast path, and the default. Address in, specs out, so the
+                 customer CONFIRMS their home rather than specifying it.
+
+                 Everything here is an accelerator. A miss, a refusal, or a
+                 "something's different" drops straight into #step-1 below,
+                 which is the flow that has always existed and still prices
+                 every booking. Nothing is gated behind the lookup.
+
+                 The unit is asked on the CONFIRM card, not here — one field
+                 keeps this inviting, and by then the address is on screen and
+                 the question is obviously relevant. We need the unit anyway;
+                 the cleaner has to find the door. -->
+            <div class="quote-step step-active" id="step-find" data-progress="1">
+                <header class="step-head">
+                    <h2 class="flow-title">Find your home</h2>
+                    <p class="flow-sub">We&rsquo;ll pull the details so you don&rsquo;t have to &mdash; no name or email yet.</p>
+                </header>
+
+                <form class="flow-card" id="find-form" novalidate>
+                    <div class="field-block">
+                        <label class="field-label" for="find-address">Your address</label>
+                        <input class="flow-input" type="text" id="find-address" name="find_address"
+                               autocomplete="street-address" placeholder="123 Beacon St" required>
+                        <p class="field-hint">Greater Boston. We&rsquo;ll check your area automatically.</p>
+                    </div>
+                    <div class="field-block">
+                        <label class="field-label" for="find-zip">ZIP code</label>
+                        <input class="flow-input" type="text" id="find-zip" name="find_zip" inputmode="numeric"
+                               autocomplete="postal-code" maxlength="5" placeholder="02116" required>
+                        <p class="zip-status" id="find-zip-status" aria-live="polite"></p>
+                    </div>
+                    <button type="submit" class="btn btn--primary btn--full" id="find-submit">Find my home</button>
+                    <p class="field-hint" id="find-status" role="status" aria-live="polite"></p>
+                </form>
+
+                <!-- Rendered by script.js once a lookup returns. -->
+                <div id="find-result" hidden></div>
+
+                <p class="reserve-aftercare">
+                    <button type="button" class="scheduler-fallback-link" id="find-skip">Or answer a few questions instead &rarr;</button>
+                </p>
+            </div>
+
+            <div class="quote-step step-hidden" id="step-1" data-progress="1">
                 <header class="step-head">
                     <h2 class="flow-title">Build your clean</h2>
                     <p class="flow-sub">Tell us about your home — no name or email yet, just the details we need to price it.</p>
@@ -429,6 +474,15 @@
                         <p class="inline-capture__done" id="waitlist-done" hidden>You're first in line — we'll reach out the moment we're in your area.</p>
                     </div>
                 </form>
+
+                <!-- The deliberate way into the custom-quote lane. Kept small
+                     and below the primary button on purpose: instant booking is
+                     the product, and this is the door for the job that doesn't
+                     fit through it. -->
+                <p class="reserve-aftercare">
+                    Something unusual &mdash; only part of the home, or a big move-out?
+                    <button type="button" class="scheduler-fallback-link" id="build-custom">Get a custom quote &rarr;</button>
+                </p>
             </div>
 
             <!-- STEP 2 — The quote (still no identity) -->
@@ -624,11 +678,34 @@
                 </form>
             </div>
 
-            <!-- Overflow state (5+ bedrooms) -->
+            <!-- Custom quote — the edge-case lane.
+                 =========================================================
+                 THIS IS THE SECOND PRODUCT, NOT THE MAIN ONE. Instant booking
+                 is what Serve sells; the price on screen is the price. This
+                 lane exists for the jobs a calculator has no business pricing:
+                 homes past the flat-rate table, and scopes that aren't "clean
+                 the home" — only the downstairs, a move-out on an empty
+                 four-bedroom, one room that needs three hours of it.
+
+                 Reached two ways: automatically at 5+ bedrooms, and
+                 deliberately from the link under the Build step.
+
+                 The scope box is the reason this works. Without it these
+                 arrive as an email address and no idea what the person wants,
+                 and the reply is a question rather than a number. -->
             <div class="quote-step step-hidden" id="state-overflow" data-progress="1">
                 <div class="flow-card inline-capture">
-                    <h2 class="flow-title">Let's build you a personal quote</h2>
-                    <p class="inline-capture__copy">Homes this size get a personal quote — a detailed hourly scope at $130/hr. Leave your email and we'll send yours today.</p>
+                    <h2 class="flow-title">Let's quote this one by hand</h2>
+                    <p class="inline-capture__copy">Most homes book instantly at the price on screen. Yours has something the calculator shouldn't price on its own &mdash; a size, or a scope worth a real look. Tell us what you need and we'll come back today with a firm number and a date.</p>
+
+                    <div class="field-block">
+                        <label class="field-label" for="overflow-notes">What do you need done?</label>
+                        <textarea class="flow-input" id="overflow-notes" rows="4"
+                                  placeholder="e.g. Just the downstairs and the kitchen &mdash; upstairs is fine.&#10;Or: full move-out, empty 4BR, oven and fridge included."></textarea>
+                        <p class="field-hint">The more specific you are, the closer our first number is.</p>
+                    </div>
+
+                    <input type="text" class="flow-input" id="overflow-name" placeholder="Your name" autocomplete="name">
                     <input type="email" class="flow-input" id="overflow-email" placeholder="you@email.com" autocomplete="email">
                     <input type="tel" class="flow-input" id="overflow-phone" placeholder="Phone (optional)" autocomplete="tel">
                     <button type="button" class="btn btn--primary btn--full" id="overflow-submit">Send my custom quote</button>
