@@ -93,7 +93,24 @@ const specs = (d) => findSpecs(d, MAXL, MAXB);
 
 t('a normal home passes through',
   specs({ beds: 3, baths: 2, levels: 2, sqft: 1850 }),
-  { beds: 3, baths: 2, levels: 2, sqft: 1850 });
+  { beds: 3, baths: 2, levels: 2, sqft: 1850, levelsKnown: true });
+
+/* A DEFAULTED FLOOR COUNT MUST NOT CLAIM TO BE A FINDING.
+   The live provider really does return `levels: null` for served addresses —
+   /api/property on 123 Beacon St, 02116 comes back with no floorCount at all.
+   The fallback is 1, and 1 is what under-quoted a three-storey townhouse by
+   $187 on the first clean. The card reads this flag to decide between "From
+   public records" and "Not in the records — is this right?", so if it ever
+   goes true for an absent value, the site starts vouching for a number nobody
+   reported on the field that most changes the price. */
+t('an absent floor count is flagged as unknown, not reported as 1',
+  specs({ beds: 4, baths: 1, levels: null, sqft: null }),
+  { beds: 4, baths: 1, levels: 1, sqft: null, levelsKnown: false });
+t('a missing levels key is unknown too',   specs({ beds: 2, baths: 1 }).levelsKnown, false);
+t('levels: 0 is unknown, not a ground-floor finding',
+  specs({ beds: 2, baths: 1, levels: 0 }).levelsKnown, false);
+t('a reported single storey IS known',
+  specs({ beds: 2, baths: 1, levels: 1 }).levelsKnown, true);
 
 t('7 bedrooms clamps to the overflow threshold',
   specs({ beds: 7, baths: 2, levels: 1 }).beds, MAXB);
@@ -121,10 +138,10 @@ t('sqft of 0 is null, not a home with no floor area',
 /* Strings: JSON from a third party is not typed. */
 t('numeric strings are coerced, not concatenated',
   specs({ beds: '3', baths: '2.5', levels: '2', sqft: '1400' }),
-  { beds: 3, baths: 2.5, levels: 2, sqft: 1400 });
+  { beds: 3, baths: 2.5, levels: 2, sqft: 1400, levelsKnown: true });
 t('non-numeric junk degrades to the floor rather than NaN',
   specs({ beds: 'many', baths: 'two', levels: 'lots', sqft: 'big' }),
-  { beds: 0, baths: 1, levels: 1, sqft: null });
+  { beds: 0, baths: 1, levels: 1, sqft: null, levelsKnown: false });
 
 /* ------------------------------------------------------------------ */
 head('C1. The find step is the default, and Build is still reachable');

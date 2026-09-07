@@ -610,6 +610,14 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
             baths:  Math.max(1, Math.min(5, Math.round((Number(d.baths) || 1) * 2) / 2)),
             levels: clampInt(d.levels || 1, 1, maxLevels),
             sqft:   Number(d.sqft) > 0 ? Math.round(d.sqft) : null,
+            /* A FLOOR COUNT WE DEFAULTED IS NOT A FINDING.
+               The provider frequently returns no floorCount at all — a real
+               lookup against a served address comes back `levels: null` — and
+               the fallback is 1. Presenting that 1 under "From public records"
+               would put our word behind a number nobody reported, on the one
+               field that most changes the price. So the card has to know the
+               difference and say which it is. */
+            levelsKnown: Number(d.levels) > 0,
         };
     }
 
@@ -744,11 +752,19 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
                but that one cannot hold would be lost on confirm. */
             dec.disabled = findData.levels <= 1;
             inc.disabled = findData.levels >= FIND_MAX_LEVELS;
-            cap.textContent = findData.edited ? 'Your correction' : 'From public records';
-            note.hidden = !findData.edited;
+            cap.textContent = findData.edited      ? 'Your correction'
+                            : findData.levelsKnown ? 'From public records'
+                                                   : 'Not in the records — is this right?';
+            /* Three states, and the middle one is the reason this exists.
+               Confirming a number we made up is worse than asking for it. */
+            const askingBlind = !findData.edited && !findData.levelsKnown;
+            note.hidden = !(findData.edited || askingBlind);
             note.textContent = findData.edited
                 ? 'Thanks — we’ll price it on your number. Public records often miss a finished ' +
                   'attic or basement, so yours is the one we trust.'
+                : askingBlind
+                ? 'The records for your address don’t list a floor count, so we’ve started at one. ' +
+                  'Set it to what your home actually is — it changes the price.'
                 : '';
         }
         dec.addEventListener('click', () => { findData.levels--; findData.edited = true; paintFloors(); });
