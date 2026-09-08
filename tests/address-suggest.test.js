@@ -353,6 +353,83 @@ const KEYED = { GEOAPIFY_KEY: 'test-key' };
                            : fail('the provider call carries no key');
 
   /* ------------------------------------------------------------------ */
+  /* ------------------------------------------------------------------ */
+  head('B3. The unit comes off before searching');
+  /* MEASURED, not guessed. 25 real condo addresses from the prospecting sheet
+     were run against production on 2026-09-08:
+
+         street alone                 100% found, all ranked first
+         street + bare unit            52% found
+         street + "Apt " + unit        80% found
+
+     Geoapify handles a recognised designator and chokes on a naked number:
+
+         "62 Winthrop St Apt 2"  ->  62 Winthrop Street
+         "62 Winthrop St #2"     ->  62 Winthrop Street
+         "62 Winthrop St 2"      ->  nothing at all
+
+     Every one of those was a real customer offered no suggestions for an
+     address that exists, on the shape people type most. Stripping the unit
+     first is what closes the 48-point gap. */
+
+  const sent = async (q, zip) => {
+    const r = await ask('q=' + encodeURIComponent(q) + (zip ? '&zip=' + zip : ''), KEYED, geo([]));
+    const text = decodeURIComponent((r.calls[0].target.match(/text=([^&]*)/) || [, ''])[1].replace(/\+/g, ' '));
+    return { text, unit: r.body.unit };
+  };
+
+  const unitCases = [
+    ['100 SHAWMUT AVE 907',          '100 SHAWMUT AVE',      '907'],
+    ['62 Winthrop St 2',             '62 Winthrop St',       '2'],
+    ['62 Winthrop St Apt 2',         '62 Winthrop St',       'Apt 2'],
+    ['62 Winthrop St #2',            '62 Winthrop St',       '#2'],
+    ['62 Winthrop St Unit 2',        '62 Winthrop St',       'Unit 2'],
+    ['28 SWAN AVE PH',               '28 SWAN AVE',          'PH'],
+    ['25 PIEDMONT ST 4 & PKG SP 7',  '25 PIEDMONT ST',       '4 & PKG SP 7'],
+    ['12-14 PORTER ST 12 & 2',       '12-14 PORTER ST',      '12 & 2'],
+    ['10 ROWES WHARF 802',           '10 ROWES WHARF',       '802'],
+    ['735 HARRISON AVE W501/502',    '735 HARRISON AVE',     'W501/502'],
+  ];
+  for (const [typed, wantAddr, wantUnit] of unitCases) {
+    const r = await sent(typed);
+    t('"' + typed + '"', [r.text, r.unit], [wantAddr, wantUnit]);
+  }
+
+  head('B4. And streets that only LOOK like they carry a unit are left alone');
+  /* The dangerous direction. Stripping a real part of a street name searches
+     for an address that does not exist, and the customer never learns why.
+     All four are real Boston addresses from the same sheet. */
+  const untouched = [
+    '4 CHARLESGATE EAST',
+    '181 W FIFTH ST',
+    '370 Harrison Avenue Extension',
+    '21 FATHER FRANCIS GILDAY ST',
+  ];
+  for (const addr of untouched) {
+    const r = await sent(addr);
+    t('"' + addr + '" is searched whole', [r.text, r.unit], [addr, '']);
+  }
+  /* A query still being typed must never be split. */
+  const partial = await sent('123 Bea');
+  t('a partial word is left alone', [partial.text, partial.unit], ['123 Bea', '']);
+
+  head('B5. The unit survives every path, and shares a cache entry');
+  const noKey = await ask('q=' + encodeURIComponent('100 Shawmut Ave 907'), {});
+  t('the unit comes back even with no provider key', noKey.body.unit, '907');
+
+  /* Keyed on the address, so typing the unit does not cost a second lookup of
+     the same street — and the unit is re-attached on the way out. */
+  const kv = makeKV({});
+  const first = await ask('q=' + encodeURIComponent('100 Shawmut Ave'),
+    Object.assign({ PROPERTY_CACHE: kv }, KEYED),
+    geo([H('100', 'Shawmut Ave', 'Boston', '02118')]));
+  t('a plain address populates the cache', first.body.source, 'provider');
+  const second = await ask('q=' + encodeURIComponent('100 Shawmut Ave 907'),
+    Object.assign({ PROPERTY_CACHE: kv }, KEYED), geo([]));
+  t('the same address WITH a unit hits that cache', second.body.source, 'cache');
+  t('and still reports the unit', second.body.unit, '907');
+  t('and costs no provider call', second.calls.length, 0);
+
   head('C. The type-ahead');
 
   head('C1. Markup — the combobox contract');

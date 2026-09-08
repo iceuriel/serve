@@ -465,6 +465,68 @@ const SUGGEST_LIMIT       = 5;
    silently make the field useless for people we do serve. */
 const SUGGEST_RECT = "-71.40,42.15,-70.85,42.58";
 
+/* Words that end a street name, and words that begin a unit. Used only by
+   splitUnit below. EXTENSION is in the street list because "370 Harrison
+   Avenue Extension" is a real Boston street and its last token must not be
+   mistaken for an apartment. */
+const STREET_TAIL = /^(ST|STREET|AVE|AVENUE|RD|ROAD|DR|DRIVE|LN|LANE|CT|COURT|PL|PLACE|TER|TERR|TERRACE|WAY|BLVD|BOULEVARD|WHARF|SQ|SQUARE|HWY|HIGHWAY|PKWY|PARKWAY|CIR|CIRCLE|ROW|PATH|EXT|EXTENSION)$/i;
+const UNIT_LEAD   = /^(APT|APARTMENT|UNIT|STE|SUITE|PH|PENTHOUSE)$/i;
+
+/**
+ * Split "100 Shawmut Ave 907" into the address to search and the unit to keep.
+ *
+ * WHY THIS EXISTS. Measured against 25 real condo addresses from the
+ * prospecting sheet: the street alone is found 100% of the time, but a bare
+ * trailing unit collapses that to 52%. Geoapify handles a recognised
+ * designator and chokes on a naked number:
+ *
+ *     "62 Winthrop St Apt 2"  ->  62 Winthrop Street
+ *     "62 Winthrop St #2"     ->  62 Winthrop Street
+ *     "62 Winthrop St 2"      ->  nothing at all
+ *
+ * People type the naked form constantly, and every one of those was a
+ * customer offered no suggestions on an address that exists.
+ *
+ * The unit is not discarded once removed — it is returned, so the caller can
+ * carry it into the property lookup (where it disambiguates a building) and
+ * pre-fill the confirmation card. Someone who typed their unit should not be
+ * asked for it again two steps later.
+ *
+ * CONSERVATIVE BY CONSTRUCTION. A trailing token is only treated as a unit
+ * when a street-type word appears BEFORE it, so "4 Charlesgate East" and
+ * "181 W Fifth St" are left alone — there is nothing after the street type to
+ * take. Getting this wrong in the other direction would delete part of a
+ * street name and search for something that does not exist.
+ */
+function splitUnit(q) {
+  const raw = String(q || "").trim();
+  const tokens = raw.split(/\s+/);
+  if (tokens.length < 3) return { addr: raw, unit: "" };
+
+  /* An explicit designator wins wherever it appears — never at token 0, which
+     is the house number. */
+  for (let i = 1; i < tokens.length; i++) {
+    if (UNIT_LEAD.test(tokens[i]) || tokens[i].charAt(0) === "#") {
+      const addr = tokens.slice(0, i).join(" ");
+      return addr.length >= SUGGEST_MIN_CHARS
+        ? { addr, unit: tokens.slice(i).join(" ") }
+        : { addr: raw, unit: "" };
+    }
+  }
+
+  /* Otherwise: anything after the LAST street-type word is the unit. */
+  let last = -1;
+  for (let i = 0; i < tokens.length; i++) if (STREET_TAIL.test(tokens[i])) last = i;
+  if (last >= 0 && last < tokens.length - 1) {
+    const addr = tokens.slice(0, last + 1).join(" ");
+    return addr.length >= SUGGEST_MIN_CHARS
+      ? { addr, unit: tokens.slice(last + 1).join(" ") }
+      : { addr: raw, unit: "" };
+  }
+
+  return { addr: raw, unit: "" };
+}
+
 async function handleAddressSuggest(request, env) {
   if (request.method !== "GET" && request.method !== "HEAD") {
     return json({ suggestions: [], error: "method_not_allowed" }, 405);
@@ -484,13 +546,24 @@ async function handleAddressSuggest(request, env) {
     return json({ suggestions: [], reason: "out_of_area" });
   }
 
-  const key = "sug:" + (zip || "any") + ":" + q.toUpperCase().replace(/\s+/g, " ");
+  /* Take the unit off before searching, and hand it back with the answer. See
+     splitUnit: a bare trailing unit takes the hit rate from 100% to 52%, and
+     the customer typed it, so they should not be asked for it again later. */
+  const split = splitUnit(q);
+  const searchFor = split.addr;
+  const unit = split.unit;
+
+  /* Keyed on the ADDRESS, not the raw query, so "100 Shawmut Ave" and
+     "100 Shawmut Ave 907" share one cache entry. The unit rides on the
+     response rather than inside the cached value, which is why it is
+     re-attached on a hit. */
+  const key = "sug:" + (zip || "any") + ":" + searchFor.toUpperCase().replace(/\s+/g, " ");
   const tag = await shortHash(key);
   const kv  = env.PROPERTY_CACHE || null;
 
   if (kv) {
     const hit = await kv.get(key, "json").catch(() => null);
-    if (hit) return json({ suggestions: hit, source: "cache" });
+    if (hit) return json({ suggestions: hit, unit, source: "cache" });
   }
 
   if (!env.GEOAPIFY_KEY) {
@@ -498,7 +571,7 @@ async function handleAddressSuggest(request, env) {
        without it — it is a text box — so this can go live before the key
        exists and the log line measures whether anyone would have used it. */
     console.log("address_suggest stub zip=" + (zip || "-") + " tag=" + tag);
-    return json({ suggestions: [], reason: "no_provider" });
+    return json({ suggestions: [], unit, reason: "no_provider" });
   }
 
   if (kv) {
@@ -507,7 +580,7 @@ async function handleAddressSuggest(request, env) {
     const seen = Number(await kv.get(ipKey)) || 0;
     if (seen >= SUGGEST_IP_PER_HOUR) {
       console.warn("address_suggest rate_limited zip=" + (zip || "-"));
-      return json({ suggestions: [], reason: "rate_limited" });
+      return json({ suggestions: [], unit, reason: "rate_limited" });
     }
     await kv.put(ipKey, String(seen + 1), { expirationTtl: 3600 });
 
@@ -515,12 +588,12 @@ async function handleAddressSuggest(request, env) {
     const used = Number(await kv.get(monthKey)) || 0;
     if (used >= SUGGEST_MONTHLY_CAP) {
       console.warn("address_suggest monthly_cap_reached used=" + used);
-      return json({ suggestions: [], reason: "cap_reached" });
+      return json({ suggestions: [], unit, reason: "cap_reached" });
     }
     await kv.put(monthKey, String(used + 1), { expirationTtl: 60 * 60 * 24 * 40 });
   }
 
-  const suggestions = await fetchSuggestions(env, q, zip);
+  const suggestions = await fetchSuggestions(env, searchFor, zip);
   console.log("address_suggest provider zip=" + (zip || "-") + " tag=" + tag +
               " n=" + suggestions.length);
 
@@ -529,7 +602,7 @@ async function handleAddressSuggest(request, env) {
       expirationTtl: suggestions.length ? SUGGEST_TTL_S : SUGGEST_EMPTY_TTL_S,
     });
   }
-  return json({ suggestions, source: "provider" });
+  return json({ suggestions, unit, source: "provider" });
 }
 
 /**

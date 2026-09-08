@@ -881,6 +881,12 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
     let acItems = [];
     let acActive = -1;          // index of the highlighted option, -1 for none
     let acPicked = '';          // the last value we filled in, so we don't re-query it
+    /* The unit the typed text implied, as split out by the server. Someone who
+       writes "100 Shawmut Ave 907" has already told us the unit; carrying it
+       through means the property lookup can use it to pin the right home in a
+       building, and the confirmation card arrives with it filled in rather
+       than asking for something they typed thirty seconds ago. */
+    let acUnit = '';
 
     function acClose() {
         if (!acList) return;
@@ -970,6 +976,7 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
             .then(r => r.json())
             .then(d => {
                 if (mine !== acSeq) return;          // a newer keystroke already won
+                acUnit = (d && typeof d.unit === 'string') ? d.unit : '';
                 const list = (d && Array.isArray(d.suggestions)) ? d.suggestions : [];
                 acRender(list.filter(s => s && s.line));
             })
@@ -1114,7 +1121,10 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
                 return;
             }
             if (zipTier(zip) === 'unknown') { toBuildStep(); return; }
-            findLookup(addr, zip, '');
+            /* acUnit only holds a value when the typed text carried one, and
+               the address box now shows the suggestion without it — so this is
+               the unit they gave us, not a guess. */
+            findLookup(addr, zip, acUnit);
         });
     }
     if ($('find-skip')) $('find-skip').addEventListener('click', () => toBuildStep());
