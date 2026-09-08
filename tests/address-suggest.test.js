@@ -210,12 +210,45 @@ const KEYED = { GEOAPIFY_KEY: 'test-key' };
   t('a hit with no house number is dropped',
     streetOnly.body.suggestions, [{ line: '9 Beacon St', city: 'Boston', zip: '02116' }]);
 
+  /* THE TYPED ZIP ORDERS THE LIST, IT DOES NOT CENSOR IT.
+     This asserted the opposite until 2026-09-08, and the opposite was wrong in
+     a way only real data showed: the endpoint asks for N results across the
+     whole rectangle, so filtering to the ZIP afterwards throws away the entire
+     list whenever the best global matches sit in other ZIPs. Measured against
+     production, "100 washington st" + 02135 returned NOTHING — Greater Boston
+     has a Washington Street in a dozen ZIPs and none of the top hits was in
+     Brighton.
+
+     Dropping a mismatch also assumes the ZIP is right and the geocoder wrong,
+     and it is the other way round often enough to matter. Picking a suggestion
+     overwrites the ZIP field, so a mismatch corrects itself; an empty list
+     corrects nothing. */
   const wrongZip = await ask('q=123 beacon&zip=02116', KEYED, geo([
     { housenumber: '123', street: 'Beacon St', city: 'Somerville', postcode: '02143' },
     { housenumber: '123', street: 'Beacon St', city: 'Boston', postcode: '02116' },
   ]));
-  t('a hit outside the typed ZIP is dropped',
-    wrongZip.body.suggestions, [{ line: '123 Beacon St', city: 'Boston', zip: '02116' }]);
+  t('a hit in the typed ZIP is ranked first, even when the provider ranked it second',
+    wrongZip.body.suggestions.map(s => s.zip), ['02116', '02143']);
+  t('and the mismatch is kept, not discarded', wrongZip.body.suggestions.length, 2);
+
+  const noneInZip = await ask('q=100 washington st&zip=02135', KEYED, geo([
+    { housenumber: '100', street: 'Washington St', city: 'Somerville', postcode: '02143' },
+    { housenumber: '100', street: 'Washington St', city: 'Boston', postcode: '02121' },
+  ]));
+  t('when nothing matches the ZIP the list is still offered, never emptied',
+    noneInZip.body.suggestions.length, 2);
+
+  /* And the ZIP is handed to the provider so it can rank properly at source,
+     rather than being applied here after the ranking is already lost. */
+  const texted = await ask('q=100 washington st&zip=02135', KEYED, geo([]));
+  /100\+washington\+st\+02135|100%20washington%20st%2002135/.test(texted.calls[0].target)
+    ? ok('the ZIP is sent as part of the query text, where it can affect ranking')
+    : fail('the ZIP never reaches the provider: ' + texted.calls[0].target);
+
+  const noZip = await ask('q=100 washington st', KEYED, geo([]));
+  /text=100\+washington\+st&/.test(noZip.calls[0].target)
+    ? ok('with no ZIP typed, the text is left alone')
+    : fail('a ZIP was invented: ' + noZip.calls[0].target);
 
   const dupes = await ask('q=5 elm&zip=02116', KEYED, geo([
     { housenumber: '5', street: 'Elm St', city: 'Boston', postcode: '02116' },

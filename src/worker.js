@@ -550,8 +550,21 @@ async function fetchSuggestions(env, q, zip) {
      restrict results to streets, which is precisely the shape with no house
      number on it. Unconstrained, Geoapify returns house-level hits and the
      loop below keeps only those. */
+  /* THE ZIP GOES INTO THE QUERY TEXT, NOT INTO A POST-FILTER.
+     ---------------------------------------------------------------
+     It was a post-filter first, and that was wrong in a way that only shows up
+     against real data: this asks for N results across the whole rectangle and
+     then discards the ones outside the typed ZIP, so whenever the best global
+     matches all sit in other ZIPs, the filter throws away the entire list and
+     the field silently offers nothing.
+
+     Measured against production: "100 washington st" + 02135 returned NOTHING,
+     because Greater Boston has a Washington Street in a dozen ZIPs and none of
+     the top hits was in Brighton. The same query with 02135 appended to the
+     text returns "100 Washington Street, Boston, 02135" first. Geoapify ranks
+     it correctly when told; it cannot rank what it was never asked about. */
   const params = new URLSearchParams({
-    text:   q,
+    text:   zip ? q + " " + zip : q,
     apiKey: env.GEOAPIFY_KEY,
     filter: "rect:" + SUGGEST_RECT,
     limit:  String(SUGGEST_LIMIT * 3),   // room to discard street-only hits
@@ -575,20 +588,29 @@ async function fetchSuggestions(env, q, zip) {
                : Array.isArray(body && body.features) ? body.features.map(f => (f && f.properties) || {})
                : [];
 
-    const out = [];
+    /* The typed ZIP now ORDERS the list rather than censoring it. Dropping a
+       mismatch outright assumes the ZIP is right and the geocoder is wrong,
+       and it is the other way round often enough to matter: people type the
+       street before the ZIP, mistype their own, or give the ZIP of the town
+       rather than the delivery area. Choosing a suggestion overwrites the ZIP
+       field anyway, so a mismatch corrects itself the moment it is picked —
+       whereas an empty list corrects nothing and explains nothing.
+
+       The rectangle is still a hard filter. Ordering is for addresses we could
+       plausibly serve; Worcester is not one of them. */
+    const inZip = [], elsewhere = [];
     const seen = new Set();
     for (const r of list) {
       if (!r || !r.housenumber || !r.street) continue;         // no street-only hits
       const line = String(r.housenumber).trim() + " " + String(r.street).trim();
       const rzip = zipN(r.postcode);
-      if (zip && rzip && rzip !== zip) continue;               // respect the typed ZIP
       const dedupe = (line + "|" + rzip).toUpperCase();
       if (seen.has(dedupe)) continue;
       seen.add(dedupe);
-      out.push({ line, city: String(r.city || r.suburb || "").trim(), zip: rzip });
-      if (out.length >= SUGGEST_LIMIT) break;
+      const item = { line, city: String(r.city || r.suburb || "").trim(), zip: rzip };
+      (zip && rzip === zip ? inZip : elsewhere).push(item);
     }
-    return out;
+    return inZip.concat(elsewhere).slice(0, SUGGEST_LIMIT);
   } catch (err) {
     /* An outage here must be invisible: the field is still a text box. */
     console.error("address_suggest failed: " + String(err));
