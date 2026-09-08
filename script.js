@@ -1896,6 +1896,78 @@ function serveRetirePulse() {
 
 
 /* ------------------------------------------------------------
+   2. Explainer bubbles
+
+   A phrase inside How Serve Works that opens a short panel saying more. It
+   exists because the three-pillar block above that section was repeating the
+   steps; two of those ideas were folded into the step that already made the
+   point, and the one that needed elaborating rather than compressing — the
+   vendor model — moved behind the phrase it explains.
+
+   PROGRESSIVE ENHANCEMENT, AND NOT ONLY IN NAME. Nothing a visitor needs in
+   order to book lives inside a bubble. If this block never runs, the trigger
+   is a button that does nothing and the paragraph around it still reads as a
+   complete sentence.
+
+   Targets are resolved through aria-controls rather than looked up by id.
+   That is the same attribute a screen reader follows, so the accessible
+   wiring and the script's wiring cannot drift apart — and it keeps this file
+   free of id lookups, which is the rule the rest of this module follows.
+   ------------------------------------------------------------ */
+(function initExplainers() {
+    const triggers = [...document.querySelectorAll('.pop-trigger')];
+    if (!triggers.length) return;
+
+    const panelOf = (t) => document.getElementById(t.getAttribute('aria-controls'));
+
+    function close(trigger) {
+        const panel = panelOf(trigger);
+        if (panel) panel.hidden = true;
+        trigger.setAttribute('aria-expanded', 'false');
+    }
+
+    function closeAll(except) {
+        triggers.forEach(t => { if (t !== except) close(t); });
+    }
+
+    triggers.forEach(trigger => {
+        const panel = panelOf(trigger);
+        if (!panel) return;                     // a trigger with no panel stays inert
+
+        trigger.addEventListener('click', (e) => {
+            e.stopPropagation();                // don't trip the outside-click handler below
+            const open = trigger.getAttribute('aria-expanded') === 'true';
+            closeAll(trigger);
+            panel.hidden = open;
+            trigger.setAttribute('aria-expanded', open ? 'false' : 'true');
+        });
+
+        /* Clicks inside the panel are not "outside" it. Without this, reaching
+           for the close button would be handled twice — once as a dismissal
+           and once as the button itself. */
+        panel.addEventListener('click', (e) => e.stopPropagation());
+
+        const closeBtn = panel.querySelector('.pop-bubble__close');
+        if (closeBtn) closeBtn.addEventListener('click', () => {
+            close(trigger);
+            trigger.focus();                    // don't strand the keyboard somewhere gone
+        });
+    });
+
+    /* Anywhere else on the page dismisses it, and so does Escape — the two
+       things a person tries first when a small panel is in the way. */
+    document.addEventListener('click', () => closeAll(null));
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        const open = triggers.filter(t => t.getAttribute('aria-expanded') === 'true')[0];
+        if (!open) return;
+        close(open);
+        open.focus();
+    });
+})();
+
+
+/* ------------------------------------------------------------
    2. Published price ranges
 
    Computed by calling the live computeQuote — the same function behind the

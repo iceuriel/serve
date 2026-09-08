@@ -124,37 +124,44 @@ t('"' + liveLabel + '" appears once per live service and no more',
   liveMentions, CATALOGUE.live().length);
 
 /* ------------------------------------------------------------------ */
-head('5. The hero home card agrees with the catalogue');
-/* The hero lists a short preview of the same truth. It shows fewer services
-   than the grid — that is fine — but it must not disagree about any of them. */
-const heroStart = HTML.indexOf('<ul class="homecard__services">');
-const heroEnd   = HTML.indexOf('</ul>', heroStart);
-if (heroStart === -1) throw new Error('homecard__services not found');
-const heroList = HTML.slice(heroStart, heroEnd);
+head('5. No second, disagreeing list of services');
+/* The hero used to carry a home card listing three services, and this section
+   held it to the catalogue. That card was removed on 2026-09-07, so rather
+   than delete the check it is generalised to the risk it was really guarding:
+   a SECOND place on the page pairing a service name with an availability
+   label, which is how the page starts contradicting itself.
 
-const heroRows = [...heroList.matchAll(
-  /<span class="homecard__svc-name">([^<]+)<\/span>\s*<span class="homecard__svc-status">([^<]+)<\/span>/g)]
-  .map(m => ({ name: m[1].trim(), status: m[2].trim() }));
+   Counting label occurrences outright was the obvious version and it was
+   wrong — "Coming to Serve" is also the honest label on the job record's
+   feature list (rooms, photos, history), which is not a service at all. What
+   makes a claim about availability is a status label sitting NEXT TO A SERVICE
+   NAME, so that adjacency is what is tested. */
+const outsideGrid = HTML.slice(0, gridStart) + HTML.slice(gridEnd);
+const labels = [liveLabel, CATALOGUE.label('planned'), CATALOGUE.label('request')].filter(Boolean);
+const NEAR = 160;
 
-t('the hero lists at least one service', heroRows.length > 0, true);
-
-heroRows.forEach(row => {
-  const svc = all.filter(s => s.name === row.name)[0];
-  if (!svc) { fail('the hero shows "' + row.name + '", which is not in the catalogue'); return; }
-  if (CATALOGUE.label(svc.status) !== row.status) {
-    fail('the hero says ' + row.name + ' is "' + row.status +
-         '" but the catalogue says "' + CATALOGUE.label(svc.status) + '"');
+let strays = 0;
+all.forEach(svc => {
+  const name = svc.name.replace(/&/g, '&amp;');
+  let at = outsideGrid.indexOf(name);
+  while (at !== -1) {
+    const window_ = outsideGrid.slice(Math.max(0, at - NEAR), at + name.length + NEAR);
+    labels.forEach(lab => {
+      if (window_.indexOf(lab) !== -1) {
+        fail('"' + svc.name + '" appears outside the catalogue next to "' + lab + '"');
+        strays++;
+      }
+    });
+    at = outsideGrid.indexOf(name, at + 1);
   }
 });
-ok('every service the hero names exists and carries its real status');
+strays === 0
+  ? ok('no service name outside the grid carries an availability claim')
+  : fail(strays + ' stray availability claim(s)');
 
-/* And the live one is marked as such in the markup, not merely worded that
-   way — the green pill is the modifier class, and a status that reads live
-   without it would be styled as though it were coming. */
-const heroLive = (heroList.match(/homecard__svc--live/g) || []).length;
-const heroLiveByLabel = heroRows.filter(r => r.status === liveLabel).length;
-t('the hero live row is styled live as well as worded live',
-  heroLive, heroLiveByLabel);
+/* And the grid is the only place a live claim is made at all. */
+t('"' + liveLabel + '" appears nowhere outside the catalogue grid',
+  (outsideGrid.match(new RegExp(liveLabel, 'g')) || []).length, 0);
 
 /* ------------------------------------------------------------------ */
 head('6. The page never advertises an unavailable category as bookable');

@@ -369,11 +369,11 @@ t('index.html lists every file carrying a nav, so an edit cannot miss one',
 t('nav is real HTML, never injected by JS', !/innerHTML\s*=\s*[`'"]\s*<nav/.test(SITE));
 
 /* Labels changed on 2026-09-07 with the repositioning — "How It Works" became
-   "How Serve Works" and "Instant quote" became "Book a service". What is under
+   "How Serve Works" and "Instant quote" became "Instant Booking". What is under
    test is unchanged: whatever the nav says, it must say it TWICE, because the
    desktop list and the mobile drawer are separate markup and an edit to one is
    the easy way to leave the other stale. */
-['How Serve Works', 'Pricing', 'Services', 'Book a service'].forEach(label =>
+['How Serve Works', 'Pricing', 'Services', 'Instant Booking'].forEach(label =>
   t('nav offers "' + label + '" twice — desktop list and mobile drawer',
     (navIndex.match(new RegExp('>' + label + '<', 'g')) || []).length === 2));
 t('Examples was removed from the nav', !/>Examples</.test(navIndex));
@@ -396,7 +396,7 @@ t('step 1 links to /pricing',
 t('step 2 links to /services',
   /<a href="\/services" class="serve-inline-link">[^<]+<\/a>/.test(INDEX));
 /* Step 3 is the close. Three exits in three steps turns the funnel into a menu. */
-const step3Mark = 'Your home stays on record';
+const step3Mark = 'Everything stays in one place';
 const step3 = INDEX.slice(INDEX.indexOf(step3Mark), INDEX.indexOf('</section>', INDEX.indexOf(step3Mark)));
 t('step 3 exists', INDEX.includes(step3Mark));
 t('step 3 carries no inline link', !/serve-inline-link/.test(step3));

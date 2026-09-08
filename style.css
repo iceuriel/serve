@@ -363,18 +363,20 @@ a {
     line-height: 1.7;
 }
 
-/* Signature line under the CTA. Deliberately quieter than .hero__sub so it
-   reads as a sign-off rather than a second thing to act on — nothing here
-   should compete with the button it sits beneath. */
+/* The signature line. It sat under the CTA until 2026-09-07 and now sits
+   between the headline and the subhead, so the margins flipped: it needs to
+   read as part of the headline's breath rather than as a sign-off. Still
+   quieter than .hero__sub — it is a phrase, not information. */
 .hero__tagline {
-    font-size: 0.95rem;
-    color: #9ca3af;
-    margin: 1rem 0 0;
+    font-family: var(--flow-serif);
+    font-size: 1.15rem;
+    color: #cbd5e1;
+    margin: 0 0 1rem;
 }
 
 .hero__tagline strong {
     font-weight: 700;
-    color: #e5e7eb;
+    color: #fff;
 }
 
 .hero__image {
@@ -3146,167 +3148,103 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
    ever looking like stock photography.
    ============================================================ */
 
-/* --- Hero: actions row ------------------------------------------------ */
-.hero__actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-    justify-content: center;
+/* The line under the booking button. Quieter than .hero__sub — it is a
+   reassurance about the click, not a second thing to read. */
+.hero__note {
+    font-size: 0.9rem;
+    color: #9ca3af;
+    margin: 0.85rem auto 0;
+    max-width: 520px;
 }
 
-/* The quiet second CTA. On the dark hero a bordered ghost reads as available
-   without competing with the primary — an outline, not a fill. */
-.btn--hero-ghost {
-    background: transparent;
-    color: #e5e7eb;
-    border: 1px solid rgba(255, 255, 255, 0.28);
-    text-decoration: none;
+/* --- Explainer bubbles in How Serve Works ------------------------------
+   The three-pillar block used to sit above this section repeating it. Two of
+   those ideas were folded into the steps; the third needed more room than a
+   step can spare, so it hides behind the phrase it explains.
+
+   THE TRIGGER IS A BUTTON, NOT A SPAN. It is operable from the keyboard for
+   free, it announces itself, and aria-expanded tells a screen reader what
+   just happened. A dotted underline says "this does something" without
+   borrowing the solid underline that means "this navigates" — the two sit in
+   the same sentence here, so they must not look alike. */
+.pop-trigger {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    color: var(--color-dark);
+    font-weight: 700;
+    cursor: pointer;
+    border-bottom: 2px dotted var(--color-accent);
+    line-height: inherit;
 }
-.btn--hero-ghost:hover {
-    background: rgba(255, 255, 255, 0.07);
-    border-color: rgba(255, 255, 255, 0.45);
-    color: #fff;
+.pop-trigger:hover { border-bottom-color: var(--color-dark); }
+.pop-trigger[aria-expanded="true"] {
+    background: var(--color-bg-light);
+    border-bottom-style: solid;
 }
 
-.hero__home {
-    max-width: 1100px;
-    margin: 0 auto;
-    width: 100%;
-    display: flex;
-    justify-content: center;
-}
-
-/* --- The home card ---------------------------------------------------- */
-/* Light card on the dark hero, so it reads as an object sitting ON the
-   section rather than a panel cut out of it. This is the only light surface
-   in the hero and it is where the eye should land after the headline. */
-.homecard {
-    width: 100%;
-    max-width: 370px;
-    background: #fff;
-    border-radius: 14px;
-    padding: 1.25rem 1.25rem 1rem;
-    box-shadow: 0 18px 40px -12px rgba(0, 0, 0, 0.55);
+/* Absolutely positioned so opening it does not shove the other two steps
+   down the page, and stretched to the step's own width so it can never be
+   the thing that causes a horizontal scrollbar on a phone. */
+.step { position: relative; }
+.pop-bubble {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    z-index: 5;
+    margin-top: 0.5rem;
+    background: var(--color-dark);
+    color: #f9fafb;
+    border-radius: 10px;
+    padding: 1rem 2.25rem 1rem 1.1rem;
+    box-shadow: 0 14px 30px -10px rgba(0, 0, 0, 0.45);
     text-align: left;
 }
+.pop-bubble[hidden] { display: none; }
 
-.homecard__eyebrow {
-    font-family: var(--flow-sans);
-    font-size: 0.68rem;
-    font-weight: 700;
-    letter-spacing: 0.11em;
-    text-transform: uppercase;
-    color: var(--color-text-muted);
-    margin: 0;
-}
-
-.homecard__house {
-    display: flex;
-    justify-content: center;
-    padding: 0.5rem 0 0.75rem;
-}
-.homecard__house svg {
-    width: 100%;
-    max-width: 190px;
-    height: auto;
-}
-.hc-roof   { stroke: var(--color-dark); }
-.hc-wall   { fill: var(--color-bg-light); stroke: var(--color-dark); stroke-width: 2; }
-.hc-door   { fill: var(--color-dark); }
-.hc-win    { fill: #fff; stroke: var(--color-accent); stroke-width: 1.6; }
-.hc-ground { stroke: var(--color-border); stroke-width: 2; }
-
-/* The empty address field. Dashed and unfilled on purpose — it is the one
-   thing on this card asking to be acted on, and it goes to the step that
-   actually asks for it. */
-.homecard__addr {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    border: 1.5px dashed var(--color-border);
-    border-radius: var(--radius);
-    padding: 0.7rem 0.85rem;
-    text-decoration: none;
-    transition: border-color 0.15s, background 0.15s;
-}
-.homecard__addr:hover {
-    border-color: var(--color-accent);
-    background: var(--color-bg-light);
-}
-.homecard__addr-label {
-    font-family: var(--flow-sans);
-    font-size: 0.95rem;
-    font-weight: 600;
-    color: var(--color-accent);
-}
-.homecard__addr-arrow {
-    color: var(--color-accent);
-    font-size: 1.05rem;
-    line-height: 1;
-}
-
-.homecard__services {
-    list-style: none;
-    margin: 0.9rem 0 0;
-    padding: 0.9rem 0 0;
-    border-top: 1px solid var(--color-border);
-    display: flex;
-    flex-direction: column;
-    gap: 0.55rem;
-}
-
-.homecard__svc {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    font-family: var(--flow-sans);
-    font-size: 0.9rem;
-}
-.homecard__svc-name   { color: var(--color-text-muted); font-weight: 600; }
-.homecard__svc-status { color: var(--color-text-muted); font-size: 0.8rem; }
-
-/* The live row is the only coloured thing on the card. One category is real
-   today and the card should not be coy about which. */
-.homecard__svc--live .homecard__svc-name { color: var(--color-dark); }
-.homecard__svc--live .homecard__svc-status {
-    color: #166534;
-    font-weight: 700;
-    background: #ecfdf3;
-    border-radius: 999px;
-    padding: 0.16rem 0.55rem;
-}
-
-/* --- The three ideas -------------------------------------------------- */
-.pillars {
-    background: var(--color-bg);
-    padding: 3.25rem 0 1rem;
-}
-.pillars__grid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 2rem;
-}
-.pillar__rule {
-    display: block;
-    width: 34px;
-    height: 2px;
+/* The tail. Drawn with a rotated square rather than a border triangle so it
+   inherits the bubble's background and stays one colour with it. */
+.pop-bubble::before {
+    content: "";
+    position: absolute;
+    top: -5px;
+    left: 2rem;
+    width: 12px;
+    height: 12px;
     background: var(--color-dark);
-    margin-bottom: 0.9rem;
+    transform: rotate(45deg);
+    border-radius: 2px;
 }
-.pillar__title {
+
+.pop-bubble__title {
     font-family: var(--flow-serif);
-    font-size: 1.3rem;
+    font-size: 1.1rem;
     font-weight: 700;
-    color: var(--color-dark);
-    margin: 0 0 0.5rem;
+    margin: 0 0 0.4rem;
+    color: #fff;
 }
-.pillar p {
-    color: var(--color-text);
-    line-height: 1.65;
+.pop-bubble__body {
+    font-size: 0.92rem;
+    line-height: 1.6;
     margin: 0;
+    color: #d1d5db;
 }
+.pop-bubble__close {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.6rem;
+    background: none;
+    border: none;
+    color: #9ca3af;
+    font-size: 1.35rem;
+    line-height: 1;
+    padding: 0.15rem 0.35rem;
+    cursor: pointer;
+    border-radius: 4px;
+}
+.pop-bubble__close:hover { color: #fff; background: rgba(255, 255, 255, 0.08); }
 
 /* The line under How Serve Works. It is the thesis of the whole page, so it
    gets its own rule and its own air rather than being a fourth paragraph. */
@@ -3724,7 +3662,6 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
 
 /* --- Wider screens ---------------------------------------------------- */
 @media (min-width: 720px) {
-    .pillars__grid  { grid-template-columns: repeat(3, 1fr); gap: 2.25rem; }
     .swap__grid     { grid-template-columns: 1.05fr 1fr; gap: 3.5rem; }
     .record__grid   { grid-template-columns: 1fr 1fr; gap: 3rem; }
     .network__grid  { grid-template-columns: 1.15fr 1fr; gap: 3rem; }
@@ -3737,25 +3674,25 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
    the wordmark stacked over the copy on the left. Below this width everything
    stays a centred column — on a phone the card belongs under the CTA, not
    beside it. */
+/* LOGO LEFT, WORDS RIGHT — the layout this hero had before the home card
+   went in, restored on 2026-09-07. Two columns above 900px; below it the
+   flex-column default stacks them centred, which is the right shape on a
+   phone and needs no override. */
 @media (min-width: 900px) {
     .hero {
         display: grid;
-        grid-template-columns: 1fr minmax(320px, 380px);
-        grid-template-areas:
-            "logo    home"
-            "content home";
+        grid-template-columns: minmax(200px, 300px) 1fr;
         align-items: center;
         column-gap: 3.5rem;
-        row-gap: 1.25rem;
         padding: 4rem 2rem;
     }
-    .hero__image   { grid-area: logo; justify-content: flex-start; }
-    .hero__content { grid-area: content; text-align: left; }
-    .hero__home    { grid-area: home; }
-    .hero__logo    { max-width: 210px; }
-    .hero__headline { font-size: 3.1rem; }
-    .hero__sub      { margin-left: 0; max-width: 480px; }
-    .hero__actions  { justify-content: flex-start; }
+    .hero__image    { justify-content: center; }
+    .hero__content  { text-align: left; }
+    .hero__logo     { max-width: 260px; }
+    .hero__headline { font-size: 2.9rem; }
+    .hero__sub      { margin-left: 0; max-width: 520px; }
+    .hero__note     { margin-left: 0; }
+}
 }
 
 @media (min-width: 1024px) {

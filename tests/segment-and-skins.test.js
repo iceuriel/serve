@@ -207,12 +207,12 @@ console.log('\n=== 4. CTA copy is identical across every skin ===');
    and /services were added, because the nav block is now byte-identical across
    three files and a bare "#quote" would point at the wrong page from two of
    them. The rest stay relative — they only ever render here. The LABEL is what
-   is asserted; it became "Book a service" with the repositioning. */
+   is asserted; it became "Instant Booking". */
 const ctas = (HTML.match(/<a[^>]*href="\/?#quote"[^>]*>[^<]+<\/a>/g) || [])
   .filter(tag => /class="[^"]*\b(btn|nav__cta)\b/.test(tag))
   .map(tag => (tag.match(/>([^<]+)</) || [])[1].trim());
-t('every CTA button reads "Book a service"',
-  ctas.length >= 3 && ctas.every(c => c === 'Book a service'), ctas);
+t('every CTA button reads "Instant Booking"',
+  ctas.length >= 3 && ctas.every(c => c === 'Instant Booking'), ctas);
 t('no skin touches the CTA', !/btn--primary|nav__cta/.test(JSON.stringify(vm.runInContext('HERO_SKINS', box))));
 t('skins define a headline and nothing else',
   Object.values(vm.runInContext('HERO_SKINS', box)).every(s => Object.keys(s).join() === 'headline'));

@@ -173,7 +173,7 @@ const ctaTags = (html.match(/<a[^>]*href="\/?#quote"[^>]*>[^<]+<\/a>/g) || []);
 const cta = ctaTags
   .filter(tag => /class="[^"]*\b(btn|nav__cta)\b/.test(tag))
   .map(tag => (tag.match(/>([^<]+)</) || [])[1].trim());
-cta.length >= 3 && cta.every(c => c === 'Book a service')
+cta.length >= 3 && cta.every(c => c === 'Instant Booking')
   ? ok('all ' + cta.length + ' CTA buttons read "Book a service"')
   : fail('CTA buttons inconsistent: ' + JSON.stringify(cta));
 
