@@ -290,11 +290,39 @@
                 </header>
 
                 <form class="flow-card" id="find-form" novalidate>
+                    <!-- ADDRESS, WITH SUGGESTIONS.
+                         =================================================
+                         The combobox pattern, wired by hand: the input owns
+                         role="combobox" and aria-controls, the list owns
+                         role="listbox", and script.js moves
+                         aria-activedescendant as the arrow keys move the
+                         highlight. That is what makes the suggestions audible
+                         to a screen reader rather than a silent visual change.
+
+                         BROWSER AUTOFILL IS TURNED OFF HERE ON PURPOSE.
+                         autocomplete="street-address" would stack Chrome's own
+                         saved-address dropdown on top of ours — two lists, one
+                         field, and the wrong one usually on top. "off" is not
+                         a slight against autofill; it is that we are already
+                         doing the same job with better data.
+
+                         The list is EMPTY IN THE MARKUP and stays empty unless
+                         a suggestion actually arrives. With no provider key, a
+                         provider outage, a rate limit or a typo, nothing
+                         renders and this is a plain text box — which is exactly
+                         what it was before suggestions existed. -->
                     <div class="field-block">
                         <label class="field-label" for="find-address">Your address</label>
-                        <input class="flow-input" type="text" id="find-address" name="find_address"
-                               autocomplete="street-address" placeholder="123 Beacon St" required>
+                        <div class="ac">
+                            <input class="flow-input" type="text" id="find-address" name="find_address"
+                                   autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+                                   role="combobox" aria-expanded="false" aria-autocomplete="list"
+                                   aria-controls="find-address-list" placeholder="123 Beacon St" required>
+                            <ul class="ac__list" id="find-address-list" role="listbox"
+                                aria-label="Address suggestions" hidden></ul>
+                        </div>
                         <p class="field-hint">Greater Boston. We&rsquo;ll check your area automatically.</p>
+                        <p class="ac__credit" id="find-address-credit" hidden>Address suggestions powered by <a href="https://www.geoapify.com/" rel="noopener nofollow" target="_blank">Geoapify</a></p>
                     </div>
                     <div class="field-block">
                         <label class="field-label" for="find-zip">ZIP code</label>

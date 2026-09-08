@@ -103,6 +103,7 @@ export default {
     if (url.pathname === "/api/slots")  return handleSlots(request, env);
     if (url.pathname === "/api/job")    return handleJob(request, env);
     if (url.pathname === "/api/property") return handleProperty(request, env);
+    if (url.pathname === "/api/address")  return handleAddressSuggest(request, env);
     if (url.pathname === "/api/health")   return handleHealth(env);
 
     /* Not an API route — hand back to the static asset server. */
@@ -420,6 +421,179 @@ async function handleProperty(request, env) {
     });
   }
   return json({ ...found, source: "provider" });
+}
+
+/* ============================================================
+   GET /api/address  ->  address suggestions while someone types
+   ============================================================
+
+   A different job from /api/property, and a different vendor. RentCast matches
+   an address; it has no autocomplete endpoint at all. So this is Geoapify,
+   and the two are wired in series: this one turns "123 beac" into a real
+   postal address, and /api/property then asks what that address is.
+
+   WHY IT IS WORTH A SECOND VENDOR. The property lookup matches on an address
+   STRING. A customer who types "123 beacon" instead of "123 Beacon St" misses,
+   silently, and lands in the questions having gained nothing — so the quality
+   of what someone types is the ceiling on how often the fast path works at all.
+
+   NEVER A DEPENDENCY, same as the property lookup. Every failure path returns
+   an empty list, and an empty list means the field behaves exactly as it did
+   before this existed: a plain text box someone types an address into. There
+   is no state in which a booking needs this to have worked.
+
+   TYPEAHEAD FIRES FAR MORE THAN A LOOKUP — several calls per address rather
+   than one — so the per-IP allowance is higher and the cache TTL is long.
+   Street names are not news; a suggestion cached in March is still right in
+   November, which is why the hit rate here climbs toward 1 over time.
+
+   WHAT IS TYPED DOES NOT GO IN LOGS. Same rule as the property endpoint: a
+   partial address is still an address. The ZIP and a short hash are enough. */
+
+const SUGGEST_TTL_S       = 60 * 60 * 24 * 180;  // street names are not news
+const SUGGEST_EMPTY_TTL_S = 60 * 60 * 24;        // a typo, retried, must not re-bill
+const SUGGEST_MONTHLY_CAP = 8000;                // well inside the free 3,000/day
+const SUGGEST_IP_PER_HOUR = 120;                 // ~25 addresses typed, at 4-5 calls each
+const SUGGEST_MIN_CHARS   = 3;
+const SUGGEST_LIMIT       = 5;
+
+/* Greater Boston, as a box. Geoapify's `filter=rect:` is a HARD constraint, not
+   a ranking hint, so a suggestion outside this rectangle is never offered —
+   which is the behaviour we want, because a Worcester address is one we cannot
+   clean. Deliberately a little wider than the served ZIP list: the ZIP field
+   does the exact coverage check, and a box that clipped an edge suburb would
+   silently make the field useless for people we do serve. */
+const SUGGEST_RECT = "-71.40,42.15,-70.85,42.58";
+
+async function handleAddressSuggest(request, env) {
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return json({ suggestions: [], error: "method_not_allowed" }, 405);
+  }
+
+  const url = new URL(request.url);
+  const q   = String(url.searchParams.get("q") || "").trim().slice(0, 120);
+  const zip = zipN(url.searchParams.get("zip"));
+
+  /* Below this a query matches half the city and costs a call to prove it. */
+  if (q.length < SUGGEST_MIN_CHARS) return json({ suggestions: [], reason: "too_short" });
+
+  /* Coverage gate before anything billable, same as the property endpoint. A
+     ZIP we do not serve is not worth buying suggestions for. An ABSENT zip is
+     fine — people type the street first — and the rectangle still bounds it. */
+  if (zip && zipTier(zip) === "unknown") {
+    return json({ suggestions: [], reason: "out_of_area" });
+  }
+
+  const key = "sug:" + (zip || "any") + ":" + q.toUpperCase().replace(/\s+/g, " ");
+  const tag = await shortHash(key);
+  const kv  = env.PROPERTY_CACHE || null;
+
+  if (kv) {
+    const hit = await kv.get(key, "json").catch(() => null);
+    if (hit) return json({ suggestions: hit, source: "cache" });
+  }
+
+  if (!env.GEOAPIFY_KEY) {
+    /* THE STUB, and the same one /api/property shipped with. The field works
+       without it — it is a text box — so this can go live before the key
+       exists and the log line measures whether anyone would have used it. */
+    console.log("address_suggest stub zip=" + (zip || "-") + " tag=" + tag);
+    return json({ suggestions: [], reason: "no_provider" });
+  }
+
+  if (kv) {
+    const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+    const ipKey = "sugip:" + (await shortHash(ip)) + ":" + new Date().toISOString().slice(0, 13);
+    const seen = Number(await kv.get(ipKey)) || 0;
+    if (seen >= SUGGEST_IP_PER_HOUR) {
+      console.warn("address_suggest rate_limited zip=" + (zip || "-"));
+      return json({ suggestions: [], reason: "rate_limited" });
+    }
+    await kv.put(ipKey, String(seen + 1), { expirationTtl: 3600 });
+
+    const monthKey = "sugspend:" + new Date().toISOString().slice(0, 7);
+    const used = Number(await kv.get(monthKey)) || 0;
+    if (used >= SUGGEST_MONTHLY_CAP) {
+      console.warn("address_suggest monthly_cap_reached used=" + used);
+      return json({ suggestions: [], reason: "cap_reached" });
+    }
+    await kv.put(monthKey, String(used + 1), { expirationTtl: 60 * 60 * 24 * 40 });
+  }
+
+  const suggestions = await fetchSuggestions(env, q, zip);
+  console.log("address_suggest provider zip=" + (zip || "-") + " tag=" + tag +
+              " n=" + suggestions.length);
+
+  if (kv) {
+    await kv.put(key, JSON.stringify(suggestions), {
+      expirationTtl: suggestions.length ? SUGGEST_TTL_S : SUGGEST_EMPTY_TTL_S,
+    });
+  }
+  return json({ suggestions, source: "provider" });
+}
+
+/**
+ * Geoapify autocomplete, reduced to the three fields the form actually uses.
+ *
+ * THE RESPONSE IS DELIBERATELY NARROW. Geoapify returns coordinates, timezone,
+ * place ids, confidence scores and a plus code for every hit. None of that
+ * helps someone fill in a form, and all of it would sit in a browser's network
+ * log next to a home address. Line, city, ZIP — nothing else leaves here.
+ *
+ * Anything without a house number is dropped. A street-level hit ("Beacon St,
+ * Boston") looks like a real suggestion, fills the box with something the
+ * property lookup cannot match, and turns a working fallback into a dead end.
+ */
+async function fetchSuggestions(env, q, zip) {
+  /* `type` is deliberately NOT set. It is a category filter — country, state,
+     city, postcode, street, amenity — and the nearest value, `street`, would
+     restrict results to streets, which is precisely the shape with no house
+     number on it. Unconstrained, Geoapify returns house-level hits and the
+     loop below keeps only those. */
+  const params = new URLSearchParams({
+    text:   q,
+    apiKey: env.GEOAPIFY_KEY,
+    filter: "rect:" + SUGGEST_RECT,
+    limit:  String(SUGGEST_LIMIT * 3),   // room to discard street-only hits
+    format: "json",
+    lang:   "en",
+  });
+
+  try {
+    const res = await relay("https://api.geoapify.com/v1/geocode/autocomplete?" + params,
+                            { method: "GET" }, UPSTREAM_TIMEOUT_MS.slots);
+    if (!res.ok) {
+      console.warn("address_suggest provider_error");
+      return [];
+    }
+    const body = JSON.parse(res.text);
+    /* Accept both documented shapes. `format=json` answers with `results`;
+       geojson answers with `features[].properties`. Reading only one of them
+       and getting the other back is a silent empty list — the field would look
+       broken with a working key and a paid call behind every keystroke. */
+    const list = Array.isArray(body && body.results) ? body.results
+               : Array.isArray(body && body.features) ? body.features.map(f => (f && f.properties) || {})
+               : [];
+
+    const out = [];
+    const seen = new Set();
+    for (const r of list) {
+      if (!r || !r.housenumber || !r.street) continue;         // no street-only hits
+      const line = String(r.housenumber).trim() + " " + String(r.street).trim();
+      const rzip = zipN(r.postcode);
+      if (zip && rzip && rzip !== zip) continue;               // respect the typed ZIP
+      const dedupe = (line + "|" + rzip).toUpperCase();
+      if (seen.has(dedupe)) continue;
+      seen.add(dedupe);
+      out.push({ line, city: String(r.city || r.suburb || "").trim(), zip: rzip });
+      if (out.length >= SUGGEST_LIMIT) break;
+    }
+    return out;
+  } catch (err) {
+    /* An outage here must be invisible: the field is still a text box. */
+    console.error("address_suggest failed: " + String(err));
+    return [];
+  }
 }
 
 /**

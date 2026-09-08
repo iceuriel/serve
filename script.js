@@ -562,6 +562,9 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
     const findForm   = $('find-form');
     const findResult = $('find-result');
     const findStatus = $('find-status');
+    /* Hoisted above the autocomplete block below, which fills it when a
+       suggestion carries a ZIP. */
+    const findZipEl  = $('find-zip');
     let   findData   = null;
 
     /* Read the ceiling off the Build stepper instead of repeating it. The two
@@ -842,12 +845,177 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
         setView(1);
     }
 
+    /* ========================================================
+       ADDRESS SUGGESTIONS
+       ========================================================
+       Type-ahead on the address field, served by /api/address.
+
+       IT ONLY EVER HELPS. Every failure — no provider key, an outage, a rate
+       limit, a query too short, a network drop — renders nothing, and nothing
+       is a plain text box, which is what this field was before. There is no
+       state where a booking depends on a suggestion having arrived.
+
+       WHY IT IS WORTH BUILDING AT ALL. /api/property matches on an address
+       STRING. Someone who types "123 beacon" instead of "123 Beacon St" misses
+       and falls through to the questions having gained nothing, and neither
+       they nor we ever find out why. What gets typed is the ceiling on how
+       often the fast path works, so raising the quality of the typing raises
+       everything downstream of it.
+
+       THE RACE IS THE WHOLE PROBLEM. Keystrokes fire faster than responses
+       return, and they return out of order — the answer for "123 b" can land
+       after the answer for "123 beacon" and overwrite a good list with a stale
+       one. Every request carries a sequence number and anything but the newest
+       is discarded on arrival. Debouncing reduces how often that happens; it
+       does not prevent it, and treating it as if it did is the bug.
+       ======================================================== */
+    const acInput  = $('find-address');
+    const acList   = $('find-address-list');
+    const acCredit = $('find-address-credit');
+
+    const AC_MIN_CHARS = 3;
+    const AC_DEBOUNCE_MS = 220;
+
+    let acTimer = null;
+    let acSeq = 0;              // newest request wins, always
+    let acItems = [];
+    let acActive = -1;          // index of the highlighted option, -1 for none
+    let acPicked = '';          // the last value we filled in, so we don't re-query it
+
+    function acClose() {
+        if (!acList) return;
+        acList.hidden = true;
+        acList.textContent = '';
+        acInput.setAttribute('aria-expanded', 'false');
+        acInput.removeAttribute('aria-activedescendant');
+        acItems = [];
+        acActive = -1;
+    }
+
+    function acHighlight(i) {
+        const opts = acList.querySelectorAll('.ac__opt');
+        opts.forEach(o => { o.classList.remove('is-active'); o.setAttribute('aria-selected', 'false'); });
+        acActive = i;
+        if (i < 0 || i >= opts.length) { acInput.removeAttribute('aria-activedescendant'); return; }
+        opts[i].classList.add('is-active');
+        opts[i].setAttribute('aria-selected', 'true');
+        /* The screen-reader half of the highlight. Without this the list moves
+           visually and says nothing. */
+        acInput.setAttribute('aria-activedescendant', opts[i].id);
+        if (opts[i].scrollIntoView) opts[i].scrollIntoView({ block: 'nearest' });
+    }
+
+    /** Take a suggestion: fill the address, fill the ZIP, and get out of the way. */
+    function acChoose(i) {
+        const s = acItems[i];
+        if (!s) return;
+        acPicked = s.line;
+        acInput.value = s.line;
+        if (s.zip && findZipEl) {
+            findZipEl.value = s.zip;
+            /* Dispatch rather than assigning: the input handler is what runs
+               the coverage check and paints "✓ We serve 02116". Setting .value
+               alone leaves the ZIP correct and the page silent about it. */
+            findZipEl.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        acClose();
+        acInput.focus();
+    }
+
+    function acRender(items) {
+        acItems = items;
+        acList.textContent = '';
+        if (!items.length) { acClose(); return; }
+
+        items.forEach((s, i) => {
+            const li = document.createElement('li');
+            li.className = 'ac__opt';
+            li.id = 'ac-opt-' + i;
+            li.setAttribute('role', 'option');
+            li.setAttribute('aria-selected', 'false');
+
+            const line = document.createElement('span');
+            line.className = 'ac__line';
+            line.textContent = s.line;
+            li.appendChild(line);
+
+            const where = [s.city, s.zip].filter(Boolean).join(' · ');
+            if (where) {
+                const sub = document.createElement('span');
+                sub.className = 'ac__where';
+                sub.textContent = where;
+                li.appendChild(sub);
+            }
+
+            /* mousedown, not click: the input's blur fires first on a click and
+               would close the list out from under the pointer. */
+            li.addEventListener('mousedown', (e) => { e.preventDefault(); acChoose(i); });
+            li.addEventListener('mouseenter', () => acHighlight(i));
+            acList.appendChild(li);
+        });
+
+        acList.hidden = false;
+        acInput.setAttribute('aria-expanded', 'true');
+        acActive = -1;
+        if (acCredit) acCredit.hidden = false;   // shown only once it has been used
+    }
+
+    function acQuery(text) {
+        const mine = ++acSeq;
+        const zip = findZipEl ? (findZipEl.value || '').trim() : '';
+        let url = '/api/address?q=' + encodeURIComponent(text);
+        if (/^\d{5}$/.test(zip)) url += '&zip=' + encodeURIComponent(zip);
+
+        fetch(url)
+            .then(r => r.json())
+            .then(d => {
+                if (mine !== acSeq) return;          // a newer keystroke already won
+                const list = (d && Array.isArray(d.suggestions)) ? d.suggestions : [];
+                acRender(list.filter(s => s && s.line));
+            })
+            .catch(() => { if (mine === acSeq) acClose(); });
+    }
+
+    if (acInput && acList) {
+        acInput.addEventListener('input', () => {
+            const v = acInput.value.trim();
+            clearTimeout(acTimer);
+            /* Don't re-query the exact string we just filled in — that answer
+               is on screen and the call would only cost money to confirm it. */
+            if (v.length < AC_MIN_CHARS || v === acPicked) { acClose(); return; }
+            acTimer = setTimeout(() => acQuery(v), AC_DEBOUNCE_MS);
+        });
+
+        acInput.addEventListener('keydown', (e) => {
+            if (acList.hidden) {
+                /* ArrowDown on a closed list re-opens the last one rather than
+                   making the visitor retype a character to see it again. */
+                if (e.key === 'ArrowDown' && acItems.length) { acRender(acItems); e.preventDefault(); }
+                return;
+            }
+            if (e.key === 'ArrowDown')      { e.preventDefault(); acHighlight((acActive + 1) % acItems.length); }
+            else if (e.key === 'ArrowUp')   { e.preventDefault(); acHighlight((acActive - 1 + acItems.length) % acItems.length); }
+            else if (e.key === 'Enter')     {
+                /* Only swallow Enter when a suggestion is actually highlighted.
+                   Otherwise it must submit the form — someone who typed their
+                   address in full and hit Enter is done, and eating that
+                   keystroke would look like the button is broken. */
+                if (acActive >= 0) { e.preventDefault(); acChoose(acActive); }
+                else acClose();
+            }
+            else if (e.key === 'Escape')    { e.preventDefault(); acClose(); }
+            else if (e.key === 'Tab')       { acClose(); }
+        });
+
+        acInput.addEventListener('blur', () => acClose());
+    }
+
     if (findForm) {
         /* Same coverage confirmation the Build step gives, one step earlier —
            and it decides whether we search at all. An address outside the
            service area is not worth a paid lookup, and the Build step is where
            the waitlist lives, so out-of-area goes straight there. */
-        const findZip = $('find-zip');
+        const findZip = findZipEl;
         const findZipStatus = $('find-zip-status');
         findZip.addEventListener('input', () => {
             const z = (findZip.value || '').trim();

@@ -472,6 +472,21 @@ console.log('\n=== 7. the failure UI exists and is reachable ===');
     .map(f => fs.readFileSync(path.join(REPO_ROOT, f), 'utf8')).join('');
   t('the provider key is in nothing the browser downloads', !/RENTCAST/.test(shipped));
 
+  /* THE SAME THREE RULES FOR THE SECOND VENDOR. Geoapify powers /api/address
+     and arrived on 2026-09-08; it is a separate key with a separate bill, and
+     "we already check the other one" is how the second key ends up in a var.
+     Its free tier is capped per day, so a leaked key does not run up a charge
+     — it exhausts the allowance and the suggestions simply stop working for
+     real customers, which is a quieter failure and a worse one. */
+  t('the coverage gate runs before the suggest provider too',
+    before('out_of_area', 'GEOAPIFY_KEY'));
+  t('the suggest key has no value assigned in wrangler.jsonc',
+    !/"GEOAPIFY[A-Z_]*"\s*:/.test(wr), 'an assignment exists in wrangler.jsonc');
+  t('and the config documents it as a secret',
+    /wrangler secret put GEOAPIFY_KEY/.test(
+      fs.readFileSync(path.join(REPO_ROOT, 'wrangler.jsonc'), 'utf8')));
+  t('the suggest key is in nothing the browser downloads', !/GEOAPIFY/.test(shipped));
+
   /* Addresses in logs are addresses in someone else's retention policy. */
   t('no address is written to a log line',
     !/console\.(log|warn|error)\([^)]*rawAddress|console\.(log|warn|error)\([^)]*\baddr\b/.test(SRC));

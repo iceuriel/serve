@@ -957,6 +957,69 @@ a {
     color: var(--color-dark);
 }
 
+/* --- Address suggestions ----------------------------------------------
+   The list floats over whatever is beneath it rather than pushing the form
+   down — a field that grows by 200px while you type moves the button out from
+   under your thumb. `.ac` is the positioning context and nothing else. */
+.ac { position: relative; }
+
+.ac__list {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: calc(100% + 4px);
+    z-index: 20;
+    margin: 0;
+    padding: 0.25rem;
+    list-style: none;
+    background: #fff;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    box-shadow: 0 12px 28px -8px rgba(0, 0, 0, 0.28);
+    max-height: 15rem;
+    overflow-y: auto;
+}
+.ac__list[hidden] { display: none; }
+
+.ac__opt {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    padding: 0.6rem 0.7rem;
+    border-radius: 6px;
+    cursor: pointer;
+}
+/* One highlight for both routes in. `.is-active` is set by the arrow keys and
+   by hover alike, so the keyboard and the mouse cannot disagree about which
+   row is selected — two separate highlights on screen at once is the bug this
+   avoids. */
+.ac__opt.is-active { background: var(--color-bg-light); }
+
+.ac__line {
+    font-family: var(--flow-sans);
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--color-dark);
+}
+.ac__where {
+    font-family: var(--flow-sans);
+    font-size: 0.8rem;
+    color: var(--color-text-muted);
+}
+
+/* Attribution, required by Geoapify's free tier. Hidden until the first
+   suggestion actually renders — crediting a service that has not yet done
+   anything is noise on a form that is trying to be short. */
+.ac__credit {
+    font-family: var(--flow-sans);
+    font-size: 0.72rem;
+    color: var(--color-text-muted);
+    margin-top: 0.4rem;
+}
+.ac__credit[hidden] { display: none; }
+.ac__credit a { color: var(--color-text-muted); text-decoration: underline; }
+.ac__credit a:hover { color: var(--color-accent); }
+
 /* --- Find your home: the confirm card ---------------------------------
    Same materials as the rest of the flow — .flow-card, the gray palette, the
    serif for numbers. What's new is the drawing.

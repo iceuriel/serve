@@ -36,22 +36,31 @@
 
   // SECRETS ARE NOT LISTED HERE, AND MUST NOT BE.
   //
-  // The Worker also expects RENTCAST_KEY, set as a Cloudflare SECRET rather
-  // than as a var:
+  // The Worker expects two provider keys, both set as Cloudflare SECRETS
+  // rather than as vars:
   //
-  //     npx wrangler secret put RENTCAST_KEY
+  //     npx wrangler secret put RENTCAST_KEY     // /api/property
+  //     npx wrangler secret put GEOAPIFY_KEY     // /api/address
   //
-  // The distinction is load-bearing on this project because deploys come from
-  // git. A deploy replaces the dashboard's `vars` with the list below, so a key
-  // added through the dashboard as a plaintext variable is wiped by the next
-  // push — silently, since the endpoint just starts answering "no_provider"
-  // again. Secrets live outside this file and survive deploys.
+  // Two vendors because they do different jobs and only one of them can do
+  // each. RentCast matches a finished address to a property record and has no
+  // autocomplete endpoint at all; Geoapify turns "123 beac" into a real
+  // address and knows nothing about how many bedrooms are behind the door.
+  // They run in series: suggest, then look up.
   //
-  // It is also a key we are billed for. RentCast holds us liable for charges
-  // from a compromised key with no refunds, and a var is readable in the
-  // dashboard forever while a secret is write-only.
+  // The secret-versus-var distinction is load-bearing on this project because
+  // deploys come from git. A deploy replaces the dashboard's `vars` with the
+  // list below, so a key added through the dashboard as a plaintext variable
+  // is wiped by the next push — silently, since both endpoints simply start
+  // answering "no_provider" again. Secrets live outside this file and survive
+  // deploys.
   //
-  // Named here as documentation only. The value must never appear in this file.
+  // They are also keys we are billed against. RentCast holds us liable for
+  // charges from a compromised key with no refunds; Geoapify's free tier is
+  // capped daily and a leaked key would exhaust it for real customers. A var
+  // is readable in the dashboard forever, while a secret is write-only.
+  //
+  // Named here as documentation only. No value may ever appear in this file.
   "vars": {
     // Booking webhook — writes JOBS / LEADS / PROPERTIES and flips the slot.
     "WEBHOOK_URL": "https://script.google.com/macros/s/AKfycbxVWfrn2Mos2-yO1AhDe20tpnFcAdc-nZ_6zb0qK02msdyJZVETgLQ77TvUnxHf5jWMBQ/exec",
