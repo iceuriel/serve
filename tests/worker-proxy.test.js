@@ -487,6 +487,31 @@ console.log('\n=== 7. the failure UI exists and is reachable ===');
       fs.readFileSync(path.join(REPO_ROOT, 'wrangler.jsonc'), 'utf8')));
   t('the suggest key is in nothing the browser downloads', !/GEOAPIFY/.test(shipped));
 
+  /* THE KV BINDING IS DECLARED IN THE CONFIG, NOT ONLY IN THE DASHBOARD.
+     Every use of it in worker.js is behind `if (kv)` so a KV outage cannot
+     take the booking form down — which also means an ABSENT binding fails
+     silently, and expensively: no cache, so every keystroke is a fresh
+     billable call; no per-IP limit; no monthly cap. It ran unbound from the
+     day /api/property shipped until 2026-09-08 and nothing said so.
+
+     Declared here rather than left in the console because deploys come from
+     git and reconcile the Worker against this file — a binding that exists
+     only in the dashboard is one a future push can quietly drop, which is the
+     vars-versus-secrets trap in reverse. The namespace id is not a secret. */
+  const cfg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'wrangler.jsonc'), 'utf8')
+    .replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, ''));
+  const kvBindings = (cfg.kv_namespaces || []).map(k => k.binding);
+  t('the cache namespace is bound in wrangler.jsonc',
+    kvBindings.includes('PROPERTY_CACHE'), kvBindings);
+  t('and it has an id, not a placeholder',
+    (cfg.kv_namespaces || []).every(k => /^[0-9a-f]{32}$/i.test(String(k.id || ''))),
+    (cfg.kv_namespaces || []).map(k => k.id));
+
+  /* The name has to match what the code reads, or the binding is a no-op that
+     looks configured. */
+  t('worker.js reads the same binding name the config declares',
+    /env\.PROPERTY_CACHE/.test(SRC));
+
   /* Addresses in logs are addresses in someone else's retention policy. */
   t('no address is written to a log line',
     !/console\.(log|warn|error)\([^)]*rawAddress|console\.(log|warn|error)\([^)]*\baddr\b/.test(SRC));
