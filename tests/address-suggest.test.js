@@ -174,15 +174,18 @@ const KEYED = { GEOAPIFY_KEY: 'test-key' };
   t('past the monthly cap it stops calling', capped.calls.length, 0);
   t('and says why', capped.body.reason, 'cap_reached');
 
-  const hourKey = 'sugip:';
-  const kvRate = makeKV({});
-  /* Seed the per-IP counter the same way the worker keys it: hash of the IP
-     plus the hour. Rather than reproduce the hash here, drive it by making
-     enough real calls to trip the limit. */
-  const limitSrc = (SRC.match(/SUGGEST_IP_PER_HOUR\s*=\s*(\d+)/) || [])[1];
-  t('the per-IP hourly limit is declared', !!limitSrc, true);
-  t('it is higher than the property limit — type-ahead fires more often',
-    Number(limitSrc) > Number((SRC.match(/PROPERTY_IP_PER_HOUR\s*=\s*(\d+)/) || [])[1]), true);
+  /* The limits exist and are sized for type-ahead, which fires several times
+     per address rather than once. This used to compare against the property
+     endpoint's allowance; that endpoint was deleted on 2026-09-08, so the
+     comparison is now against absolute floors. */
+  const limitSrc = Number((SRC.match(/SUGGEST_IP_PER_HOUR\s*=\s*(\d+)/) || [])[1]);
+  t('a per-IP hourly limit is declared', limitSrc > 0, true);
+  t('and it is sized for type-ahead, not for one call per address',
+    limitSrc >= 60, true);
+  const capSrc = Number((SRC.match(/SUGGEST_MONTHLY_CAP\s*=\s*(\d+)/) || [])[1]);
+  t('a monthly cap is declared', capSrc > 0, true);
+  /* Geoapify's free tier is 3,000/day. A monthly cap above that is not a cap. */
+  t('and it sits inside the free tier', capSrc <= 3000 * 30, true);
 
   /* ------------------------------------------------------------------ */
   head('B. A third party\'s JSON, reduced to three fields');
@@ -433,15 +436,15 @@ const KEYED = { GEOAPIFY_KEY: 'test-key' };
   head('C. The type-ahead');
 
   head('C1. Markup — the combobox contract');
-  const inputTag = (HTML.match(/<input[^>]*id="find-address"[^>]*>/) || [''])[0];
+  const inputTag = (HTML.match(/<input[^>]*id="r-address"[^>]*>/) || [''])[0];
   /role="combobox"/.test(inputTag)      ? ok('input is a combobox')            : fail('no role="combobox"');
   /aria-expanded="false"/.test(inputTag) ? ok('starts collapsed and says so')  : fail('no aria-expanded');
-  /aria-controls="find-address-list"/.test(inputTag)
+  /aria-controls="r-address-list"/.test(inputTag)
     ? ok('input points at the list') : fail('aria-controls missing or wrong');
-  HTML.includes('id="find-address-list"') ? ok('the list exists') : fail('no #find-address-list');
-  /<ul[^>]*id="find-address-list"[^>]*role="listbox"/.test(HTML)
+  HTML.includes('id="r-address-list"') ? ok('the list exists') : fail('no #r-address-list');
+  /<ul[^>]*id="r-address-list"[^>]*role="listbox"/.test(HTML)
     ? ok('the list is a listbox') : fail('the list is not role="listbox"');
-  /<ul[^>]*id="find-address-list"[^>]*\shidden/.test(HTML)
+  /<ul[^>]*id="r-address-list"[^>]*\shidden/.test(HTML)
     ? ok('the list is hidden in the markup, not only by script')
     : fail('the list would flash open before script.js runs');
 
@@ -457,10 +460,24 @@ const KEYED = { GEOAPIFY_KEY: 'test-key' };
                             : fail('Geoapify attribution is missing — the free tier requires it');
 
   head('C2. Behaviour — the real client code');
-  const acStart = JS.indexOf('const acInput  = $(\'find-address\');');
-  const acEnd   = JS.indexOf('if (findForm) {', acStart);
+  const acStart = JS.indexOf('const acInput  = $(\'r-address\');');
+  /* Stop at the START of the next banner comment, not at its text — slicing
+     mid-comment leaves an unterminated /* and the vm refuses to parse it. */
+  const nextBanner = JS.indexOf('STEP 1 — Build', acStart);
+  const acEnd = nextBanner === -1 ? -1 : JS.lastIndexOf('/* ===', nextBanner);
   if (acStart === -1 || acEnd === -1) throw new Error('could not slice the type-ahead');
   const acSrc = JS.slice(acStart, acEnd);
+
+  /* THE ZIP MUST NOT FLOW BACK. This is the assertion that guards the bug
+     which rejected real Back Bay customers: a suggestion's ZIP was written
+     into the form and the coverage gate refused it, because Geoapify answers
+     02117 for 37 Appleton St — a PO-box ZIP nobody lives in. */
+  /(findZipEl|zipInput|\$\('zip'\)|\$\('r-zip'\))\s*\.value\s*=/.test(acSrc)
+    ? fail('a suggestion writes back into a ZIP field — this rejected real customers')
+    : ok('no suggestion ever writes a ZIP back into the form');
+  /state\.zip/.test(acSrc)
+    ? ok('the ZIP is read from state, where the customer put it')
+    : fail('the ZIP is not read from state — suggestions cannot be ranked');
 
   /* THE RACE. Asserted directly rather than trusted to the debounce. */
   /const mine = \+\+acSeq/.test(acSrc) && /if \(mine !== acSeq\) return;/.test(acSrc)
@@ -484,11 +501,12 @@ const KEYED = { GEOAPIFY_KEY: 'test-key' };
     ? ok('the highlight is announced, not only painted')
     : fail('arrow keys move a highlight no screen reader can follow');
 
-  /* Choosing a suggestion has to DISPATCH the zip input event, not just set
-     .value — the handler is what runs the coverage check and paints the tick. */
-  /dispatchEvent\(new Event\('input'/.test(acSrc)
-    ? ok('filling the ZIP fires its handler, so coverage is re-checked')
-    : fail('the ZIP is set silently — the coverage tick would not appear');
+  /* Choosing a suggestion fills the UNIT field when the typed text carried one
+     — the one thing besides the address that a suggestion is allowed to write.
+     It only fills an empty field: what someone typed there by hand wins. */
+  /\$\('r-unit'\)/.test(acSrc) && /!unitEl\.value\.trim\(\)/.test(acSrc)
+    ? ok('a typed unit lands in the unit field, without overwriting a typed one')
+    : fail('the unit is stripped from the search and then lost');
 
   head('C2b. The race, actually run');
   /* Everything above reads the source. This runs it. A regex proving the file
@@ -520,15 +538,18 @@ const KEYED = { GEOAPIFY_KEY: 'test-key' };
     const input  = el('input');
     const list   = el('ul');
     const credit = el('p');
-    const zip    = el('input');
-    zip.value = '02116';
-    const ids = { 'find-address': input, 'find-address-list': list,
-                  'find-address-credit': credit, 'find-zip': zip };
+    const unit   = el('input');
+    const ids = { 'r-address': input, 'r-address-list': list,
+                  'r-address-credit': credit, 'r-unit': unit };
 
     const pending = [];
     const timers = [];
     const box = {
       console,
+      /* The ZIP lives in `state`, filled in step 1. The type-ahead reads it and
+         never writes it — there is deliberately no ZIP element here to write
+         to, so an attempt to would throw and be caught by these tests. */
+      state: { zip: '02116' },
       document: { getElementById: (id) => ids[id] || null, createElement: el },
       Event: function (type) { return { type: type, bubbles: true }; },
       /* Deferred, so the test decides the order responses come back in. */
@@ -537,17 +558,16 @@ const KEYED = { GEOAPIFY_KEY: 'test-key' };
       clearTimeout: (i) => { if (i) timers[i - 1] = null; },
     };
     vm.createContext(box);
-    vm.runInContext(
-      "const $ = (id) => document.getElementById(id);\n" +
-      "const findZipEl = $('find-zip');\n" + acSrc, box);
+    vm.runInContext("const $ = (id) => document.getElementById(id);\n" + acSrc, box);
 
     return {
-      input, list, zip, credit, pending, timers,
+      input, list, unit, credit, pending, timers, box,
       type(v) { input.value = v; input.fire('input'); },
       /** Run every debounce timer that is still armed. */
       flush() { const due = timers.filter(Boolean); timers.length = 0; due.forEach(fn => fn()); },
-      answer(i, suggestions) {
-        pending[i].resolve({ json: () => Promise.resolve({ suggestions }) });
+      answer(i, suggestions, unitBack) {
+        pending[i].resolve({ json: () => Promise.resolve(
+          { suggestions, unit: unitBack || '' }) });
       },
       lines() { return list.children.map(c => (c.children[0] || {})._text); },
     };
@@ -599,21 +619,50 @@ const KEYED = { GEOAPIFY_KEY: 'test-key' };
   /* --- choosing a suggestion --- */
   c = driveClient();
   c.type('123 beacon'); c.flush();
+  /* A suggestion in a DIFFERENT ZIP from the one the customer gave. It must
+     still be offered — the customer might have mistyped their own — but it
+     must not touch the ZIP the flow already accepted. */
   c.answer(0, [S('123 Beacon St', '02143')]);
   await settle();
   const opt = c.list.children[0];
   opt.fire('mousedown', { preventDefault() {} });
   t('choosing fills the address', c.input.value, '123 Beacon St');
-  t('choosing fills the ZIP from the suggestion', c.zip.value, '02143');
+  t('THE CUSTOMER\'S ZIP IS UNTOUCHED, even by a suggestion that disagrees',
+    c.box.state.zip, '02116');
   t('the list closes', c.list.hidden, true);
   t('and says so', c.input.attrs['aria-expanded'], 'false');
   t('focus goes back to the field', c.input._focused > 0, true);
 
+  /* A typed unit lands in the unit field rather than being stripped and lost. */
+  c = driveClient();
+  c.type('100 shawmut ave 907'); c.flush();
+  c.answer(0, [S('100 Shawmut Ave', '02118')], '907');
+  await settle();
+  c.list.children[0].fire('mousedown', { preventDefault() {} });
+  t('the unit the server split out is filled in', c.unit.value, '907');
+
+  /* And a unit typed by hand is never overwritten by one we inferred. */
+  c = driveClient();
+  c.unit.value = '4B';
+  c.type('100 shawmut ave 907'); c.flush();
+  c.answer(0, [S('100 Shawmut Ave', '02118')], '907');
+  await settle();
+  c.list.children[0].fire('mousedown', { preventDefault() {} });
+  t('a hand-typed unit wins over an inferred one', c.unit.value, '4B');
+
   /* The input event that a programmatic .value change can trigger must not
-     start another round trip for the string we just put there. */
+     start another round trip for the string we just put there. Its own client,
+     because it depends on which suggestion was last chosen — sharing one with
+     the tests above made it pass or fail based on their order. */
+  c = driveClient();
+  c.type('123 beacon'); c.flush();
+  c.answer(0, [S('123 Beacon St', '02116')]);
+  await settle();
+  c.list.children[0].fire('mousedown', { preventDefault() {} });
+  const callsAfterChoosing = c.pending.length;
   c.type('123 Beacon St');
   c.flush();
-  t('the chosen value is not queried again', c.pending.length, 1);
+  t('the chosen value is not queried again', c.pending.length, callsAfterChoosing);
 
   head('C3. Styled');
   const CSS = fs.readFileSync(path.join(REPO_ROOT, 'style.css'), 'utf8');

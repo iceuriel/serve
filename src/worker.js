@@ -102,7 +102,6 @@ export default {
     if (url.pathname === "/api/submit") return handleSubmit(request, env);
     if (url.pathname === "/api/slots")  return handleSlots(request, env);
     if (url.pathname === "/api/job")    return handleJob(request, env);
-    if (url.pathname === "/api/property") return handleProperty(request, env);
     if (url.pathname === "/api/address")  return handleAddressSuggest(request, env);
     if (url.pathname === "/api/health")   return handleHealth(env);
 
@@ -259,7 +258,7 @@ async function handleJob(request, env) {
 
    NAMES ONLY. NEVER VALUES. NOT EVEN TRUNCATED ONES.
 
-   Added 2026-09-06 after several rounds of guessing why RENTCAST_KEY was not
+   Added 2026-09-06 after several rounds of guessing why a provider key was not
    reaching the Worker — a secret added in the dashboard is invisible from
    outside, so "no_provider" could mean a missing secret, a misspelt one, a
    build-time variable that never reaches runtime, or one attached to a
@@ -291,49 +290,59 @@ function handleHealth(env) {
 
 
 /* ============================================================
-   GET /api/property  ->  what we already know about a home
+   GET /api/address  ->  address suggestions while someone types
    ============================================================
 
-   Address in, {beds, baths, levels, sqft, type} out, so the customer CONFIRMS
-   their home instead of specifying it. Confirming is a preference; specifying
-   is homework, and the homework is what produced a booking quoted at one level
-   for a three-storey townhouse — $279 against $466.
+   THE ONLY SURVIVOR OF THE PROPERTY-LOOKUP EXPERIMENT.
 
-   THE PROVIDER IS THE FALLBACK, NOT THE FRONT DOOR. Order is cache, then our
-   own PROPERTIES record, then a paid lookup. A repeat customer or an address
-   we have quoted before costs nothing and answers instantly, and that gets
-   better as the business grows rather than worse.
+   /api/property sat beside this until 2026-09-08. It took a confirmed address
+   to RentCast and pre-filled the booking form with the home's bedrooms,
+   bathrooms and floors, so the customer could confirm rather than type. It was
+   removed, and the reason is worth keeping written down:
 
-   WHY THE GUARDS ARE NOT OPTIONAL. Every provider call is billable, this
-   endpoint is reachable by anyone, and RentCast's terms make us liable for
-   charges from a leaked key "whether such calls are authorized or
-   unauthorized," with no refunds and overage billed in $500 increments. Their
-   §2(iii) also requires "commercially reasonable measures" against scraping
-   through our own infrastructure — so rate limiting here is contractual, not
-   merely prudent.
+     Measured against 15 real Boston condo addresses, it matched the ACTUAL
+     UNIT 0% of the time. A tower with hundreds of apartments answers as ONE
+     record — `matches: 1`, not `ambiguous` — so the multi-unit guard never
+     fired and the form confidently pre-filled one arbitrary unit's numbers.
+     240 Devonshire St came back 1 bed / 1 bath / 900 sqft for a unit that is
+     really 1 bed / 2 baths / 1330 sqft, and passing `&unit=4004` changed
+     nothing at all.
 
-   NEVER A DEPENDENCY. They may throttle, reprice or discontinue at will
-   (§13.1). Every failure path returns found:false and the booking form falls
-   back to asking. A quote must never require this to work.
+   Pre-filling a wrong number is worse than an empty field: it gets confirmed
+   without being read. The customer knows their own bed count, and asking is
+   both more accurate and free. RentCast was fine on houses and blind to condo
+   units, which is precisely the segment Serve targets.
 
-   ADDRESSES DO NOT GO IN LOGS. Cloudflare log retention is not the right home
-   for a customer's home address; the ZIP and a short hash are enough to debug
-   with and enough to measure demand. */
+   THE SUGGESTIONS STAYED because they were measured separately and they work:
+   100% street match, ranked first, on those same 25 addresses. This is the
+   field a cleaner navigates by, and a typo in it is a real problem on the day.
 
-const PROPERTY_TTL_S      = 60 * 60 * 24 * 90;   // a home's bed count is not news
-const PROPERTY_MISS_TTL_S = 60 * 60 * 24 * 7;    // an unknown address, retried, must not re-bill
-const PROPERTY_MONTHLY_CAP = 400;                // hard stop well under any painful bill
-const PROPERTY_IP_PER_HOUR = 12;
+   NEVER A DEPENDENCY. Every failure path returns an empty list, and an empty
+   list means the field behaves exactly as it did before this existed: a plain
+   text box someone types an address into.
 
-/* Same normalisation as webhook.gs zipN/addrN/unitN, deliberately. The cache
-   key has to be the same shape as the PROPERTIES key or the two caches miss
-   each other and every repeat address bills again. */
-function zipN(z)  { const d = String(z ?? "").replace(/[^0-9]/g, ""); return d ? ("00000" + d).slice(-5) : ""; }
-function addrN(a) { return String(a ?? "").toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, ""); }
-function unitN(u) {
-  return String(u ?? "").toUpperCase()
-    .replace(/\b(UNIT|APT|APARTMENT|NO|NUM)\b\.?/g, " ")
-    .replace(/[^A-Z0-9]+/g, "").replace(/^0+(?=\d)/, "");
+   TYPEAHEAD FIRES FAR MORE THAN A LOOKUP — several calls per address rather
+   than one — so the per-IP allowance is higher and the cache TTL is long.
+   Street names are not news; a suggestion cached in March is still right in
+   November, which is why the hit rate here climbs toward 1 over time.
+
+   WHAT IS TYPED DOES NOT GO IN LOGS. A partial address is still an address.
+   The ZIP and a short hash are enough to debug and to measure demand.
+
+   AND ITS ZIP IS NEVER TRUSTED BACK. Geoapify answered 02117 for 37 Appleton
+   St, 02205 for 118 B St and 01890 (Winchester) for 5 Lagrange St. The client
+   sends the customer's ZIP in to rank results and ignores whatever comes back;
+   writing those into the form rejected real Back Bay customers at the coverage
+   gate. */
+
+/* Both of these came over from the deleted property endpoint, which is where
+   they were first written. addrN and unitN went with it — nothing normalises
+   an address for a PROPERTIES key any more. */
+
+/** Five digits, zero-padded. Same shape as webhook.gs zipN, deliberately. */
+function zipN(z) {
+  const d = String(z ?? "").replace(/[^0-9]/g, "");
+  return d ? ("00000" + d).slice(-5) : "";
 }
 
 /** Short, non-reversible, enough to correlate two log lines. Never the address. */
@@ -342,113 +351,6 @@ async function shortHash(s) {
   return [...new Uint8Array(buf)].slice(0, 5)
     .map(b => b.toString(16).padStart(2, "0")).join("");
 }
-
-async function handleProperty(request, env) {
-  if (request.method !== "GET" && request.method !== "HEAD") {
-    return json({ found: false, error: "method_not_allowed" }, 405);
-  }
-
-  const url  = new URL(request.url);
-  const zip  = zipN(url.searchParams.get("zip"));
-  const addr = addrN(url.searchParams.get("address"));
-  const unit = unitN(url.searchParams.get("unit"));
-
-  if (!zip || !addr) return json({ found: false, reason: "incomplete" });
-
-  /* Coverage gate FIRST, before anything billable. We do not clean outside the
-     service area, so we have no reason to buy data about it — and this alone
-     turns away most traffic that is not a real customer. */
-  if (zipTier(zip) === "unknown") {
-    return json({ found: false, reason: "out_of_area" });
-  }
-
-  const key  = zip + "-" + addr + (unit ? "-" + unit : "");
-  const tag  = await shortHash(key);
-  const kv   = env.PROPERTY_CACHE || null;      // optional: works before the binding exists
-
-  /* 1. Cache. */
-  if (kv) {
-    const hit = await kv.get("addr:" + key, "json").catch(() => null);
-    if (hit) return json({ ...hit, source: hit.found ? "cache" : "cache_miss" });
-  }
-
-  /* 2. Our own record. Free, and the answer we most trust — a customer already
-        confirmed it once. */
-  const known = await lookupKnownProperty(env, key);
-  if (known) {
-    if (kv) await kv.put("addr:" + key, JSON.stringify(known), { expirationTtl: PROPERTY_TTL_S });
-    return json({ ...known, source: "serve" });
-  }
-
-  /* 3. Paid lookup. Everything below here can cost money. */
-  if (!env.RENTCAST_KEY) {
-    /* THE STUB. Ships before the key so demand can be measured with real
-       traffic — observability is on, so these lines are the count that decides
-       which plan to buy. Costs nothing and needs no vendor. */
-    console.log("property_lookup stub zip=" + zip + " tag=" + tag);
-    return json({ found: false, reason: "no_provider" });
-  }
-
-  if (kv) {
-    const ip = request.headers.get("CF-Connecting-IP") || "unknown";
-    const ipKey = "ip:" + (await shortHash(ip)) + ":" + new Date().toISOString().slice(0, 13);
-    const seen = Number(await kv.get(ipKey)) || 0;
-    if (seen >= PROPERTY_IP_PER_HOUR) {
-      console.warn("property_lookup rate_limited zip=" + zip);
-      return json({ found: false, reason: "rate_limited" });
-    }
-    await kv.put(ipKey, String(seen + 1), { expirationTtl: 3600 });
-
-    /* KV counters are eventually consistent, so this can overshoot slightly
-       under concurrency. The cap is set far enough below a painful bill that
-       being approximate is fine — an exact cap would need a Durable Object,
-       which is not worth it to protect a number this small. */
-    const monthKey = "spend:" + new Date().toISOString().slice(0, 7);
-    const used = Number(await kv.get(monthKey)) || 0;
-    if (used >= PROPERTY_MONTHLY_CAP) {
-      console.warn("property_lookup monthly_cap_reached used=" + used);
-      return json({ found: false, reason: "cap_reached" });
-    }
-    await kv.put(monthKey, String(used + 1), { expirationTtl: 60 * 60 * 24 * 40 });
-  }
-
-  const found = await fetchProvider(env, url.searchParams.get("address"), zip, unit);
-  console.log("property_lookup provider zip=" + zip + " tag=" + tag + " found=" + found.found);
-
-  if (kv) {
-    await kv.put("addr:" + key, JSON.stringify(found), {
-      expirationTtl: found.found ? PROPERTY_TTL_S : PROPERTY_MISS_TTL_S,
-    });
-  }
-  return json({ ...found, source: "provider" });
-}
-
-/* ============================================================
-   GET /api/address  ->  address suggestions while someone types
-   ============================================================
-
-   A different job from /api/property, and a different vendor. RentCast matches
-   an address; it has no autocomplete endpoint at all. So this is Geoapify,
-   and the two are wired in series: this one turns "123 beac" into a real
-   postal address, and /api/property then asks what that address is.
-
-   WHY IT IS WORTH A SECOND VENDOR. The property lookup matches on an address
-   STRING. A customer who types "123 beacon" instead of "123 Beacon St" misses,
-   silently, and lands in the questions having gained nothing — so the quality
-   of what someone types is the ceiling on how often the fast path works at all.
-
-   NEVER A DEPENDENCY, same as the property lookup. Every failure path returns
-   an empty list, and an empty list means the field behaves exactly as it did
-   before this existed: a plain text box someone types an address into. There
-   is no state in which a booking needs this to have worked.
-
-   TYPEAHEAD FIRES FAR MORE THAN A LOOKUP — several calls per address rather
-   than one — so the per-IP allowance is higher and the cache TTL is long.
-   Street names are not news; a suggestion cached in March is still right in
-   November, which is why the hit rate here climbs toward 1 over time.
-
-   WHAT IS TYPED DOES NOT GO IN LOGS. Same rule as the property endpoint: a
-   partial address is still an address. The ZIP and a short hash are enough. */
 
 const SUGGEST_TTL_S       = 60 * 60 * 24 * 180;  // street names are not news
 const SUGGEST_EMPTY_TTL_S = 60 * 60 * 24;        // a typo, retried, must not re-bill
@@ -567,9 +469,9 @@ async function handleAddressSuggest(request, env) {
   }
 
   if (!env.GEOAPIFY_KEY) {
-    /* THE STUB, and the same one /api/property shipped with. The field works
-       without it — it is a text box — so this can go live before the key
-       exists and the log line measures whether anyone would have used it. */
+    /* THE STUB. The field works without a key — it is a text box — so this
+       shipped before the key existed, and the log line measured whether
+       anyone would have used it. */
     console.log("address_suggest stub zip=" + (zip || "-") + " tag=" + tag);
     return json({ suggestions: [], unit, reason: "no_provider" });
   }
@@ -724,91 +626,7 @@ function rankByZip(items, zip) {
   return inZip.concat(elsewhere);
 }
 
-/**
- * Ask Apps Script whether PROPERTIES already has this home. Never fatal — a
- * miss here just means we fall through to the provider, and an outage here must
- * not take the booking form with it.
- */
-async function lookupKnownProperty(env, key) {
-  if (!env.WEBHOOK_URL) return null;
-  const res = await relay(env.WEBHOOK_URL + "?property=" + encodeURIComponent(key),
-                          { method: "GET" }, UPSTREAM_TIMEOUT_MS.slots);
-  if (!res.ok) return null;
-  try {
-    const d = JSON.parse(res.text);
-    return d && d.found ? d : null;
-  } catch (_) { return null; }
-}
 
-/**
- * The provider call, isolated so swapping vendors touches one function. The
- * front end only ever sees /api/property — it does not know or care who
- * answered, which is what makes changing supplier a Worker edit rather than a
- * site change.
- */
-async function fetchProvider(env, rawAddress, zip, unit) {
-  try {
-    const q = new URL("https://api.rentcast.io/v1/properties");
-    q.searchParams.set("address", String(rawAddress || "") + ", " + zip);
-    const res = await fetch(q.toString(), {
-      headers: { "X-Api-Key": env.RENTCAST_KEY, "Accept": "application/json" },
-    });
-    if (!res.ok) return { found: false, reason: "provider_" + res.status };
-
-    const body = await res.json();
-    const list = Array.isArray(body) ? body : (body ? [body] : []);
-    if (!list.length) return { found: false, reason: "no_match" };
-
-    /* A STREET ADDRESS IS NOT A HOME IN A MULTI-UNIT BUILDING.
-       ---------------------------------------------------------------
-       "2 Glenbrook Ln" returns every unit in the building, and taking [0] means
-       quoting a customer against whichever record happened to sort first. Two
-       identical calls for that address came back Condo and then Single Family,
-       which is the same bug wearing different data.
-
-       So: match the unit when we were given one, and report how many records
-       the address matched so the page can ask "which unit?" instead of guessing
-       — asked at confirm time, where it is obviously relevant, rather than as a
-       field on a search box most people would leave blank. */
-    const want = unitN(unit);
-    const unitOf = (r) => unitN(
-      r.addressLine2 || r.unit || r.unitNumber ||
-      ((String(r.formattedAddress || "").split(",")[0].match(/\b(?:UNIT|APT|#)\s*([A-Z0-9-]+)/i) || [])[1] || "")
-    );
-
-    let p = list[0];
-    let unitMatched = false;
-    if (want) {
-      const hit = list.find(r => unitOf(r) === want);
-      if (hit) { p = hit; unitMatched = true; }
-    }
-
-    const f = p.features || {};
-    return {
-      found: true,
-      /* How many records this street address matched. 1 is a house; more is a
-         building, and the page must ask which unit before trusting any of it. */
-      matches: list.length,
-      unitMatched: unitMatched,
-      /* True when we are quoting a record we are NOT sure belongs to them. */
-      ambiguous: list.length > 1 && !unitMatched,
-      beds:  numOrNull(p.bedrooms),
-      baths: numOrNull(p.bathrooms),
-      /* Floors is the field this whole feature exists for — and the one their
-         own §8.2 warns is often stale, because assessor records "do not always
-         include recent additions and/or modifications." Which is exactly how a
-         finished loft goes missing. Never rendered as fact; always confirmed. */
-      levels:   numOrNull(f.floorCount),
-      sqft:     numOrNull(p.squareFootage),
-      type:     p.propertyType || null,
-      year:     numOrNull(p.yearBuilt),
-      unitHint: unit || null,
-    };
-  } catch (err) {
-    console.error("property provider failed: " + String(err));
-    return { found: false, reason: "provider_unreachable" };
-  }
-}
 
 function numOrNull(v) { const n = Number(v); return isFinite(n) && n > 0 ? n : null; }
 

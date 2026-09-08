@@ -284,7 +284,6 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
     const $ = (id) => document.getElementById(id);
 
     const stepEls = {
-        find:       $('step-find'),
         1:          $('step-1'),
         2:          $('step-2'),
         3:          $('step-3'),
@@ -542,310 +541,6 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
     }
 
     /* ========================================================
-       STEP 1a — FIND YOUR HOME
-       ========================================================
-       The fast path. It only ever ADDS information: every failure — no match,
-       out of area, network down, customer says the details are wrong — lands in
-       the Build step, which is the flow that existed before this and still
-       prices every booking. There is deliberately no retry loop and no second
-       chance to search; a lookup that did not work is not worth a customer's
-       second attempt.
-
-       FLOORS GETS A DRAWING AND A STEPPER, and the rest of the specs get a
-       list. That asymmetry is the point. It is the field public records most
-       often have stale — RentCast say so in their own terms, since assessor
-       data "does not always include recent additions" — and the most expensive
-       one to get wrong: a booking quoted at one level for a three-storey home
-       came out $279 against $466. A row of text gets confirmed without being
-       read; a picture of the wrong building does not.
-       ======================================================== */
-    const findForm   = $('find-form');
-    const findResult = $('find-result');
-    const findStatus = $('find-status');
-    /* Hoisted above the autocomplete block below, which fills it when a
-       suggestion carries a ZIP. */
-    const findZipEl  = $('find-zip');
-    let   findData   = null;
-
-    /* Read the ceiling off the Build stepper instead of repeating it. The two
-       controls set the same value, so a hard-coded 3 here would silently start
-       lying the day that stepper's data-max changes. */
-    const FIND_MAX_LEVELS = (function () {
-        const el = $('stepper-levels');
-        const n  = el && parseFloat(el.getAttribute('data-max'));
-        return n > 0 ? n : 3;
-    }());
-    const clampInt = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.round(Number(v) || lo)));
-
-    /* --- find-decisions: pure, so they can be tested without a DOM --- */
-
-    /**
-     * What a lookup response means. The whole fast path reduces to this table,
-     * and it is the one piece here that can quietly cost a booking, so it is a
-     * function with a name rather than three conditions inside a `.then()`.
-     *
-     *   'build'    ask the questions — the flow that prices every booking
-     *   'ask'      one street address, several homes; find out which
-     *   'confirm'  we believe we know their home; show it and let them say
-     *
-     * Unknown, malformed and error-shaped responses all fall to 'build'. There
-     * is no response this returns nothing for.
-     */
-    function findRoute(d, unit) {
-        if (!d || !d.found || !d.beds) return 'build';
-        /* Matched the street but not the home. Every spec is a coin flip
-           between neighbours, so it is not ours to show. Ask once; if a unit
-           still doesn't pin it, we genuinely don't know, and pretending
-           otherwise is how someone gets quoted their neighbour's apartment. */
-        if (d.ambiguous) return unit ? 'build' : 'ask';
-        return 'confirm';
-    }
-
-    /**
-     * A third party's numbers, held inside the range this site can price.
-     * Clamped rather than rejected: a home really can have 6 bedrooms, and 5 is
-     * a real answer here — the Build step routes it to a custom quote on
-     * submit, which is where a home that size belongs.
-     */
-    function findSpecs(d, maxLevels, maxBeds) {
-        return {
-            beds:   clampInt(d.beds, 0, maxBeds),
-            baths:  Math.max(1, Math.min(5, Math.round((Number(d.baths) || 1) * 2) / 2)),
-            levels: clampInt(d.levels || 1, 1, maxLevels),
-            sqft:   Number(d.sqft) > 0 ? Math.round(d.sqft) : null,
-            /* A FLOOR COUNT WE DEFAULTED IS NOT A FINDING.
-               The provider frequently returns no floorCount at all — a real
-               lookup against a served address comes back `levels: null` — and
-               the fallback is 1. Presenting that 1 under "From public records"
-               would put our word behind a number nobody reported, on the one
-               field that most changes the price. So the card has to know the
-               difference and say which it is. */
-            levelsKnown: Number(d.levels) > 0,
-        };
-    }
-
-    /* --- end find-decisions --- */
-
-    function findEl(tag, cls, text) {
-        const n = document.createElement(tag);
-        if (cls) n.className = cls;
-        if (text !== undefined && text !== null && text !== '') n.textContent = String(text);
-        return n;
-    }
-
-    const FLOOR_ORDINAL = { 2: '2nd', 3: '3rd', 4: '4th' };
-
-    /** Side elevation, redrawn from the floor count. */
-    function findHouse(levels) {
-        const NS = 'http://www.w3.org/2000/svg';
-        const fw = 100, fh = 31, roof = 23, pad = 8;
-        const svg = document.createElementNS(NS, 'svg');
-        svg.setAttribute('class', 'find-house');
-        svg.setAttribute('viewBox', '0 0 ' + (fw + pad * 2 + 20) + ' ' + (roof + levels * fh + pad * 2));
-        svg.setAttribute('role', 'img');
-        svg.setAttribute('aria-label', levels + ' floor' + (levels === 1 ? '' : 's'));
-        const add = (t, a) => {
-            const n = document.createElementNS(NS, t);
-            Object.keys(a).forEach(k => n.setAttribute(k, a[k]));
-            svg.appendChild(n);
-            return n;
-        };
-        add('polygon', { 'class': 'fh-roof',
-            points: (pad - 5) + ',' + (pad + roof) + ' ' + (pad + fw / 2) + ',' + pad +
-                    ' ' + (pad + fw + 5) + ',' + (pad + roof) });
-        for (let i = 0; i < levels; i++) {
-            const y = pad + roof + i * fh;
-            add('rect', { 'class': 'fh-wall' + (i % 2 ? ' alt' : ''), x: pad, y: y, width: fw, height: fh });
-            if (i === levels - 1) {
-                add('rect', { 'class': 'fh-door', x: pad + fw / 2 - 7, y: y + fh - 17, width: 14, height: 17, rx: 1.5 });
-                add('rect', { 'class': 'fh-win', x: pad + 13, y: y + 8, width: 14, height: 11, rx: 1 });
-                add('rect', { 'class': 'fh-win', x: pad + fw - 27, y: y + 8, width: 14, height: 11, rx: 1 });
-            } else {
-                add('rect', { 'class': 'fh-win', x: pad + 15, y: y + 9, width: 15, height: 12, rx: 1 });
-                add('rect', { 'class': 'fh-win', x: pad + fw / 2 - 7, y: y + 9, width: 15, height: 12, rx: 1 });
-                add('rect', { 'class': 'fh-win', x: pad + fw - 30, y: y + 9, width: 15, height: 12, rx: 1 });
-            }
-            /* Counted from the ground up, so the bottom band is always "Main"
-               and the one above it is always the 2nd — which is how someone
-               describes their own house. `i` runs top-down, so the storey
-               number is levels - i. */
-            const t = add('text', { 'class': 'fh-lbl', x: pad + fw + 7, y: y + fh / 2 + 2.5 });
-            t.textContent = i === levels - 1 ? 'Main' : (FLOOR_ORDINAL[levels - i] || (levels - i) + 'th');
-        }
-        return svg;
-    }
-
-    /** One `<dt>/<dd>` row. Wrapped in a div so the whole list is a valid `<dl>`. */
-    function findSpec(label, value) {
-        const d = findEl('div', 'find-spec');
-        d.appendChild(findEl('dt', null, label));
-        d.appendChild(findEl('dd', null, value));
-        return d;
-    }
-
-    /**
-     * Everything the lookup told us, offered back for confirmation.
-     *
-     * Built once. Changing the floor count repaints the house, the number and
-     * the caption in place rather than re-rendering the card — a full rebuild
-     * would blow away whatever the customer had just typed into the unit box
-     * and take the caret with it.
-     */
-    function renderFindResult() {
-        findResult.textContent = '';
-        findResult.hidden = false;
-        if (!findData) return;
-
-        const card = findEl('div', 'flow-card find-card');
-        card.appendChild(findEl('p', 'find-tag', 'Found it'));
-        const a = findEl('p', 'find-addr', findData.address);
-        a.appendChild(findEl('small', null, findData.zip));
-        card.appendChild(a);
-
-        /* Not labelled optional — "optional" invites a blank from someone who
-           does have a unit, and the cleaner has to find the door regardless. */
-        const ub = findEl('div', 'field-block find-unit-block');
-        const ul = findEl('label', 'field-label', 'Apartment or unit');
-        ul.setAttribute('for', 'find-unit');
-        const ui = findEl('input', 'flow-input');
-        ui.type = 'text'; ui.id = 'find-unit'; ui.placeholder = 'e.g. 4B';
-        ui.value = findData.unit || '';
-        ui.addEventListener('input', () => { findData.unit = ui.value; });
-        ub.appendChild(ul); ub.appendChild(ui);
-        ub.appendChild(findEl('p', 'field-hint', 'Leave blank if your home doesn’t have one.'));
-        card.appendChild(ub);
-
-        const houseWrap = findEl('div', 'find-house-wrap');
-        card.appendChild(houseWrap);
-
-        const list = findEl('dl', 'find-specs');
-        list.appendChild(findSpec('Bedrooms', findData.beds));
-        list.appendChild(findSpec('Bathrooms', findData.baths));
-        if (findData.sqft) list.appendChild(findSpec('Size', findData.sqft.toLocaleString() + ' sq ft'));
-
-        const floors = findEl('div', 'find-spec find-spec--floors');
-        floors.appendChild(findEl('dt', null, 'Floors'));
-        const fdd = findEl('dd');
-        const cap = findEl('span', 'find-src');
-        const step = findEl('div', 'find-step');
-        const dec = findEl('button', 'stepper__btn', '−');
-        const num = findEl('span', 'find-step__n');
-        const inc = findEl('button', 'stepper__btn', '+');
-        dec.type = 'button'; inc.type = 'button';
-        dec.setAttribute('aria-label', 'One fewer floor');
-        inc.setAttribute('aria-label', 'One more floor');
-        step.appendChild(dec); step.appendChild(num); step.appendChild(inc);
-        fdd.appendChild(step); fdd.appendChild(cap);
-        floors.appendChild(fdd);
-        list.appendChild(floors);
-        card.appendChild(list);
-
-        /* Only shown once they have contradicted the records — thanking them
-           for it, because the records really are wrong more often than the
-           person who lives there. */
-        const note = findEl('p', 'find-edited');
-        note.hidden = true;
-        card.appendChild(note);
-
-        function paintFloors() {
-            houseWrap.textContent = '';
-            houseWrap.appendChild(findHouse(findData.levels));
-            num.textContent = findData.levels + (findData.levels >= FIND_MAX_LEVELS ? '+' : '');
-            /* Same ceiling as the Build stepper — a number this card accepts
-               but that one cannot hold would be lost on confirm. */
-            dec.disabled = findData.levels <= 1;
-            inc.disabled = findData.levels >= FIND_MAX_LEVELS;
-            cap.textContent = findData.edited      ? 'Your correction'
-                            : findData.levelsKnown ? 'From public records'
-                                                   : 'Not in the records — is this right?';
-            /* Three states, and the middle one is the reason this exists.
-               Confirming a number we made up is worse than asking for it. */
-            const askingBlind = !findData.edited && !findData.levelsKnown;
-            note.hidden = !(findData.edited || askingBlind);
-            note.textContent = findData.edited
-                ? 'Thanks — we’ll price it on your number. Public records often miss a finished ' +
-                  'attic or basement, so yours is the one we trust.'
-                : askingBlind
-                ? 'The records for your address don’t list a floor count, so we’ve started at one. ' +
-                  'Set it to what your home actually is — it changes the price.'
-                : '';
-        }
-        dec.addEventListener('click', () => { findData.levels--; findData.edited = true; paintFloors(); });
-        inc.addEventListener('click', () => { findData.levels++; findData.edited = true; paintFloors(); });
-        paintFloors();
-
-        const yes = findEl('button', 'btn btn--primary btn--full find-accept', 'Yes, that’s my home');
-        yes.type = 'button';
-        yes.addEventListener('click', acceptFind);
-        card.appendChild(yes);
-
-        /* One route out, taken immediately. No "are you sure", no partial
-           correction, no second lookup. */
-        const no = findEl('button', 'scheduler-fallback-link find-reject', 'Something’s different');
-        no.type = 'button';
-        no.addEventListener('click', () => toBuildStep());
-        card.appendChild(no);
-
-        findResult.appendChild(card);
-    }
-
-    /** Carry the confirmed specs into the flow that already exists. */
-    function acceptFind() {
-        /* Reserve asks for the address again, three steps later. Fill it now —
-           the whole point of this step is that they typed it once, and making
-           them type it a second time hands back the friction we just removed.
-           Still editable there; it is the field the cleaner navigates by. */
-        if ($('r-address')) $('r-address').value = findData.address;
-        if ($('r-unit') && findData.unit) $('r-unit').value = findData.unit;
-
-        /* Drive the steppers through their own setters rather than assigning
-           state directly. The setter clamps, re-renders the number, fixes the
-           disabled states and fires the same onChange a click would — so if the
-           customer steps back to Build, it shows what they confirmed instead of
-           its own defaults sitting over a state that disagrees. */
-        zipInput.value = findData.zip;
-        evaluateZip();
-        stepperSet['stepper-bedrooms'](findData.beds);
-        stepperSet['stepper-bathrooms'](findData.baths);
-        stepperSet['stepper-levels'](findData.levels);
-
-        toBuildStep(true);
-    }
-
-    /**
-     * The one exit from this step, taken by every path that isn't a confirmed
-     * match. `prefilled` says the specs came from a confirmation, so the
-     * heading can acknowledge that instead of asking again from scratch.
-     *
-     * Whatever they typed comes with them either way. Someone who gave us an
-     * address and a ZIP and got no match should not then be asked for the ZIP
-     * again — that reads as the site having lost their answer.
-     */
-    function toBuildStep(prefilled) {
-        findResult.hidden = true;
-
-        if (!prefilled) {
-            const z = ($('find-zip').value || '').trim();
-            if (/^\d{5}$/.test(z) && !zipInput.value.trim()) {
-                zipInput.value = z;
-                evaluateZip();          // may swap in the waitlist, which is the point
-            }
-            const addr = ($('find-address').value || '').trim();
-            if (addr && $('r-address') && !$('r-address').value.trim()) {
-                $('r-address').value = addr;
-            }
-        }
-
-        const sub = stepEls[1] && stepEls[1].querySelector('.flow-sub');
-        if (sub) {
-            sub.textContent = prefilled
-                ? 'We’ve filled in what we found — check it over, add the rest, and we’ll price it.'
-                : 'Tell us about your home — no name or email yet, just the details we need to price it.';
-        }
-        setView(1);
-    }
-
-    /* ========================================================
        ADDRESS SUGGESTIONS
        ========================================================
        Type-ahead on the address field, served by /api/address.
@@ -855,12 +550,20 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
        is a plain text box, which is what this field was before. There is no
        state where a booking depends on a suggestion having arrived.
 
-       WHY IT IS WORTH BUILDING AT ALL. /api/property matches on an address
-       STRING. Someone who types "123 beacon" instead of "123 Beacon St" misses
-       and falls through to the questions having gained nothing, and neither
-       they nor we ever find out why. What gets typed is the ceiling on how
-       often the fast path works, so raising the quality of the typing raises
-       everything downstream of it.
+       WHY IT SURVIVED THE PROPERTY LOOKUP. This was built to feed an
+       address-first step that looked homes up in public records; that step was
+       removed on 2026-09-08 because the records matched the actual UNIT 0% of
+       the time. The suggestions themselves measured 100% street match on 25
+       real Boston condo addresses, and they still earn their place here: this
+       is the field a cleaner navigates by, and a typo in it is a real problem
+       on the day.
+
+       THE ZIP GOES ONE WAY ONLY. It is read from the Build step to rank
+       results and is NEVER written back from a suggestion. Geoapify returned
+       02117 for 37 Appleton St (a PO-box ZIP), 02205 for 118 B St, and 01890 —
+       Winchester — for 5 Lagrange St. Writing those into the ZIP field tripped
+       the coverage gate and rejected real Back Bay customers mid-booking. The
+       customer's own ZIP is the only one this flow trusts.
 
        THE RACE IS THE WHOLE PROBLEM. Keystrokes fire faster than responses
        return, and they return out of order — the answer for "123 b" can land
@@ -869,9 +572,9 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
        is discarded on arrival. Debouncing reduces how often that happens; it
        does not prevent it, and treating it as if it did is the bug.
        ======================================================== */
-    const acInput  = $('find-address');
-    const acList   = $('find-address-list');
-    const acCredit = $('find-address-credit');
+    const acInput  = $('r-address');
+    const acList   = $('r-address-list');
+    const acCredit = $('r-address-credit');
 
     const AC_MIN_CHARS = 3;
     const AC_DEBOUNCE_MS = 220;
@@ -911,19 +614,27 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
         if (opts[i].scrollIntoView) opts[i].scrollIntoView({ block: 'nearest' });
     }
 
-    /** Take a suggestion: fill the address, fill the ZIP, and get out of the way. */
+    /**
+     * Take a suggestion: fill the address, fill the unit if they typed one,
+     * and get out of the way.
+     *
+     * IT DOES NOT TOUCH THE ZIP, deliberately. Writing the suggestion's ZIP
+     * back into the form is exactly what rejected customers in Back Bay:
+     * Geoapify answers 02117 for 37 Appleton St, which is a PO-box ZIP nobody
+     * lives in, and the coverage gate then told a real customer we do not
+     * serve them. The ZIP the customer typed in step 1 already passed that
+     * gate. A geocoder does not get to overrule it.
+     */
     function acChoose(i) {
         const s = acItems[i];
         if (!s) return;
         acPicked = s.line;
         acInput.value = s.line;
-        if (s.zip && findZipEl) {
-            findZipEl.value = s.zip;
-            /* Dispatch rather than assigning: the input handler is what runs
-               the coverage check and paints "✓ We serve 02116". Setting .value
-               alone leaves the ZIP correct and the page silent about it. */
-            findZipEl.dispatchEvent(new Event('input', { bubbles: true }));
-        }
+        /* If the typed text carried a unit, put it where units go rather than
+           leaving it stripped and lost. Only when that field is still empty —
+           what they typed there by hand wins. */
+        const unitEl = $('r-unit');
+        if (acUnit && unitEl && !unitEl.value.trim()) unitEl.value = acUnit;
         acClose();
         acInput.focus();
     }
@@ -968,7 +679,11 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
 
     function acQuery(text) {
         const mine = ++acSeq;
-        const zip = findZipEl ? (findZipEl.value || '').trim() : '';
+        /* The ZIP the customer gave in step 1, read from state rather than from
+           any field this step owns. It goes OUT to rank suggestions and never
+           comes back — see acChoose. By the time anyone reaches the reserve
+           step this is set and has already cleared the coverage check. */
+        const zip = String(state.zip || '').trim();
         let url = '/api/address?q=' + encodeURIComponent(text);
         if (/^\d{5}$/.test(zip)) url += '&zip=' + encodeURIComponent(zip);
 
@@ -1017,119 +732,7 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
         acInput.addEventListener('blur', () => acClose());
     }
 
-    if (findForm) {
-        /* Same coverage confirmation the Build step gives, one step earlier —
-           and it decides whether we search at all. An address outside the
-           service area is not worth a paid lookup, and the Build step is where
-           the waitlist lives, so out-of-area goes straight there. */
-        const findZip = findZipEl;
-        const findZipStatus = $('find-zip-status');
-        findZip.addEventListener('input', () => {
-            const z = (findZip.value || '').trim();
-            const served = z.length === 5 && zipTier(z) !== 'unknown';
-            findZipStatus.textContent = served ? '✓ We serve ' + z : '';
-            findZipStatus.className = 'zip-status' + (served ? ' is-ok' : '');
-        });
-
-        /**
-         * One lookup. Called twice at most: once on the address, and once more
-         * with a unit if the first came back ambiguous.
-         *
-         * Every failure — no match, out of area, provider down, a match we
-         * cannot pin to their unit — ends in the Build step. That is not a
-         * consolation prize; it is the flow that has priced every booking this
-         * site has ever taken.
-         */
-        function findLookup(addr, zip, unit) {
-            findStatus.textContent = 'Looking…';
-            $('find-submit').disabled = true;
-
-            let q = '/api/property?address=' + encodeURIComponent(addr) + '&zip=' + encodeURIComponent(zip);
-            if (unit) q += '&unit=' + encodeURIComponent(unit);
-
-            fetch(q)
-                .then(r => r.json())
-                .then(d => {
-                    $('find-submit').disabled = false;
-                    findStatus.textContent = '';
-
-                    const route = findRoute(d, unit);
-                    /* Not an error, and not a dead end. Plenty of homes are
-                       missing from public records; the questions price them
-                       just as well. */
-                    if (route === 'build') { toBuildStep(); return; }
-                    if (route === 'ask')   { renderFindUnitAsk(addr, zip, d.matches); return; }
-
-                    findData = Object.assign(
-                        { address: addr, zip: zip, unit: unit || '', edited: false },
-                        findSpecs(d, FIND_MAX_LEVELS, PRICING.OVERFLOW_BEDROOMS));
-                    renderFindResult();
-                })
-                .catch(() => {
-                    /* A lookup outage must never cost a booking. */
-                    $('find-submit').disabled = false;
-                    findStatus.textContent = '';
-                    toBuildStep();
-                });
-        }
-
-        /** "We found 14 homes here — which one is yours?" */
-        function renderFindUnitAsk(addr, zip, matches) {
-            findResult.textContent = '';
-            findResult.hidden = false;
-
-            const card = findEl('div', 'flow-card find-card');
-            card.appendChild(findEl('p', 'find-tag', 'Almost'));
-            card.appendChild(findEl('p', 'find-addr', addr));
-            card.appendChild(findEl('p', 'inline-capture__copy',
-                (matches > 1 ? 'There are ' + matches + ' homes at this address. ' : '') +
-                'Which one is yours? We don’t want to price your neighbour’s.'));
-
-            const block = findEl('div', 'field-block find-unit-block');
-            const lab = findEl('label', 'field-label', 'Apartment or unit');
-            lab.setAttribute('for', 'find-unit-ask');
-            const inp = findEl('input', 'flow-input');
-            inp.type = 'text'; inp.id = 'find-unit-ask'; inp.placeholder = 'e.g. 4B';
-            block.appendChild(lab); block.appendChild(inp);
-            card.appendChild(block);
-
-            const go = findEl('button', 'btn btn--primary btn--full find-accept', 'Look again');
-            go.type = 'button';
-            go.addEventListener('click', () => {
-                const u = inp.value.trim();
-                if (!u) { inp.classList.add('error'); inp.focus(); return; }
-                findLookup(addr, zip, u);
-            });
-            card.appendChild(go);
-
-            const skip = findEl('button', 'scheduler-fallback-link find-reject',
-                                'I’d rather just answer a few questions');
-            skip.type = 'button';
-            skip.addEventListener('click', () => toBuildStep());
-            card.appendChild(skip);
-
-            findResult.appendChild(card);
-            inp.focus();
-        }
-
-        findForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            const addr = ($('find-address').value || '').trim();
-            const zip  = (findZip.value || '').trim();
-            if (!addr || zip.length !== 5) {
-                findStatus.textContent = 'We need a street address and a 5-digit ZIP.';
-                return;
-            }
-            if (zipTier(zip) === 'unknown') { toBuildStep(); return; }
-            /* acUnit only holds a value when the typed text carried one, and
-               the address box now shows the suggestion without it — so this is
-               the unit they gave us, not a guess. */
-            findLookup(addr, zip, acUnit);
-        });
-    }
-    if ($('find-skip')) $('find-skip').addEventListener('click', () => toBuildStep());
-
-    /* ========================================================
+/* ========================================================
        STEP 1 — Build
        ======================================================== */
     const buildForm    = $('build-form');

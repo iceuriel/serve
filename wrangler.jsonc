@@ -36,29 +36,30 @@
 
   // SECRETS ARE NOT LISTED HERE, AND MUST NOT BE.
   //
-  // The Worker expects two provider keys, both set as Cloudflare SECRETS
-  // rather than as vars:
+  // The Worker expects ONE provider key, set as a Cloudflare SECRET rather
+  // than as a var:
   //
-  //     npx wrangler secret put RENTCAST_KEY     // /api/property
   //     npx wrangler secret put GEOAPIFY_KEY     // /api/address
   //
-  // Two vendors because they do different jobs and only one of them can do
-  // each. RentCast matches a finished address to a property record and has no
-  // autocomplete endpoint at all; Geoapify turns "123 beac" into a real
-  // address and knows nothing about how many bedrooms are behind the door.
-  // They run in series: suggest, then look up.
+  // RENTCAST_KEY IS NO LONGER READ, as of 2026-09-08. /api/property was
+  // deleted: measured against 15 real Boston condo addresses it matched the
+  // actual UNIT 0% of the time, because a tower with hundreds of apartments
+  // answers as one record with one bedroom count. Pre-filling a wrong number
+  // is worse than an empty field. The secret can be deleted from the
+  // dashboard and the RentCast plan cancelled — nothing here reads it, and a
+  // test asserts the Worker contains no reference to it.
   //
   // The secret-versus-var distinction is load-bearing on this project because
   // deploys come from git. A deploy replaces the dashboard's `vars` with the
   // list below, so a key added through the dashboard as a plaintext variable
-  // is wiped by the next push — silently, since both endpoints simply start
+  // is wiped by the next push — silently, since the endpoint simply starts
   // answering "no_provider" again. Secrets live outside this file and survive
   // deploys.
   //
-  // They are also keys we are billed against. RentCast holds us liable for
-  // charges from a compromised key with no refunds; Geoapify's free tier is
-  // capped daily and a leaked key would exhaust it for real customers. A var
-  // is readable in the dashboard forever, while a secret is write-only.
+  // It is also a key we are billed against. Geoapify's free tier is capped
+  // daily, and a leaked key would exhaust it for real customers rather than
+  // run up a charge — a quieter failure and a worse one. A var is readable in
+  // the dashboard forever, while a secret is write-only.
   //
   // Named here as documentation only. No value may ever appear in this file.
   "vars": {
@@ -70,22 +71,23 @@
 
   // THE CACHE, AND EVERY SPEND GUARD WE HAVE.
   //
-  // Both provider endpoints treat this as optional — every use is behind
+  // The suggest endpoint treats this as optional — every use is behind
   // `if (kv)`, so the Worker runs without it. That is deliberate: a KV outage
   // must not take the booking form down. But it means an ABSENT binding fails
   // silently and expensively, because the three things it carries are:
   //
-  //   the caches       180 days for a suggestion, 90 for a property record.
-  //                    Without it every keystroke is a fresh billable call
-  //                    and the hit rate never climbs.
-  //   the rate limits  per-IP, per-hour, on both providers.
+  //   the cache        180 days per suggestion. Without it every keystroke is
+  //                    a fresh billable call and the hit rate never climbs.
+  //   the rate limit   per-IP, per-hour.
   //   the monthly cap  the hard stop that keeps a bad day off the invoice.
   //
-  // It ran unbound from the time /api/property shipped until 2026-09-08 —
-  // tolerable while one endpoint made one call per address, and not tolerable
-  // once type-ahead multiplied that by five.
+  // It ran unbound until 2026-09-08 — tolerable while one endpoint made one
+  // call per address, and not tolerable once type-ahead multiplied that by
+  // five. The BINDING NAME is a leftover from the deleted property endpoint;
+  // renaming it would mean a new namespace and throwing away a warm cache,
+  // which is a worse trade than a slightly stale name.
   //
-  // THE ID IS NOT A SECRET, unlike the two provider keys above. It is a
+  // THE ID IS NOT A SECRET, unlike the provider key above. It is a
   // pointer, useless without account credentials, and it belongs in this file
   // rather than only in the dashboard: deploys come from git and reconcile the
   // Worker against this config, so a binding that exists only in the console
@@ -105,7 +107,7 @@
   // in the console and leaving the shorthand here would have let the next push
   // silently turn them back on.
   //
-  // logs — needed. The demand count for /api/property comes from console.log
+  // logs — needed. The demand count for /api/address comes from console.log
   // lines this captures.
   //
   // traces — off. Distributed spans across services, useful for finding where
@@ -113,9 +115,9 @@
   // the log line already says everything a span would.
   //
   // invocation_logs — Cloudflare's own per-request entries. See the note in
-  // handleProperty about addresses: our logging deliberately records a ZIP and
-  // a hash rather than a street address, and these entries do not follow that
-  // rule for the request URL.
+  // handleAddressSuggest: our logging deliberately records a ZIP and a hash
+  // rather than a street address, and these entries do not follow that rule
+  // for the request URL.
   "observability": {
     "logs": {
       "enabled": true,

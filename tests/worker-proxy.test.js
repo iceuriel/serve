@@ -392,123 +392,61 @@ console.log('\n=== 7. the failure UI exists and is reachable ===');
    these are contractual obligations, not optimisations, and a guard that
    silently stopped working would show up on an invoice rather than in a log. */
 {
-  console.log('\n=== /api/property guards ===');
+  console.log('\n=== provider keys and the cache binding ===');
 
-  const call = async (qs, env) => {
-    const { worker } = loadWorker(async () => new Response('{}'));
-    const res = await worker.fetch(
-      new Request('https://servecleaning.com/api/property?' + qs),
-      Object.assign({ WEBHOOK_URL: '' }, env || {}), {});
-    return { status: res.status, body: JSON.parse(await res.text()) };
-  };
+  /* /api/property was deleted on 2026-09-08 along with its RentCast key, so
+     the guards asserted here — coverage gate, monthly cap, per-IP limit,
+     negative caching — moved with it to /api/address and are covered in
+     address-suggest.test.js. What remains is the hygiene that applies to any
+     provider key this Worker ever holds. */
 
-  /* The coverage gate is the cheapest guard and turns away the most traffic:
-     we do not clean outside the area, so we have no reason to buy data on it. */
-  const away = await call('address=1+Main+St&zip=90210');
-  t('an out-of-area ZIP never reaches a provider',
-    away.body.found === false && away.body.reason === 'out_of_area', away.body);
+  const wr = fs.readFileSync(path.join(REPO_ROOT, 'wrangler.jsonc'), 'utf8');
+  const wrNoComments = wr.replace(/^\s*\/\/.*$/gm, '');
+  const shipped = ['script.js', 'ticket.js', 'pricing-engine.js']
+    .map(f => fs.readFileSync(path.join(REPO_ROOT, f), 'utf8')).join('');
 
-  const partial = await call('zip=02474');
-  t('a missing address is refused before spending',
-    partial.body.found === false && partial.body.reason === 'incomplete', partial.body);
+  /* THE RENTCAST KEY IS GONE AND MUST STAY GONE. A dead reference left in the
+     Worker is how a deleted vendor gets quietly re-enabled by someone
+     restoring "the missing key". */
+  t('no RentCast key is read anywhere in the Worker', !/RENTCAST_KEY/.test(SRC));
+  t('and /api/property is not routed', !/pathname === "\/api\/property"/.test(SRC));
 
-  /* Without a key the endpoint still answers — that is the stub, shipped ahead
-     of the vendor so real traffic measures demand before a plan is bought. */
-  const stub = await call('address=2+Glenbrook+Ln&zip=02474&unit=19');
-  t('in-area with no provider configured returns a clean miss',
-    stub.body.found === false && stub.body.reason === 'no_provider', stub.body);
-  t('the stub never 500s — a quote must survive it', stub.status === 200, stub.status);
+  /* Geoapify is the one provider left. Same three rules the other key had. */
+  t('the suggest key has no value assigned in wrangler.jsonc',
+    !/"GEOAPIFY[A-Z_]*"\s*:/.test(wrNoComments), 'an assignment exists');
+  t('and the config documents it as a secret',
+    /wrangler secret put GEOAPIFY_KEY/.test(wr));
+  t('the suggest key is in nothing the browser downloads', !/GEOAPIFY/.test(shipped));
 
-  /* POST would be a way to bypass a cache keyed on the query string. */
-  const posted = await (async () => {
-    const { worker } = loadWorker(async () => new Response('{}'));
-    const res = await worker.fetch(
-      new Request('https://servecleaning.com/api/property?address=x&zip=02474',
-                  { method: 'POST' }), { WEBHOOK_URL: '' }, {});
-    return res.status;
-  })();
-  t('only GET is accepted', posted === 405, posted);
+  /* Ordering is checked against CODE, not comments — worker.js explains these
+     guards in prose naming the same identifiers, and matching the explanation
+     rather than the implementation has broken assertions here three times.
 
-  /* Source-level, because the cost of getting these wrong is money rather than
-     a wrong answer, and none of them can be exercised without a live key. */
-  t('a monthly cap exists', /PROPERTY_MONTHLY_CAP\s*=\s*\d+/.test(SRC));
-  t('a per-IP hourly limit exists', /PROPERTY_IP_PER_HOUR\s*=\s*\d+/.test(SRC));
-  t('misses are cached too, so retries do not re-bill',
-    /PROPERTY_MISS_TTL_S/.test(SRC) && /expirationTtl: found\.found \? PROPERTY_TTL_S/.test(SRC));
-  /* Ordering is checked against CODE, not comments. worker.js explains these
-     guards in prose that names the same identifiers, and matching the
-     explanation instead of the implementation has now broken three separate
-     assertions in this suite — a comment saying "there is no innerHTML here"
-     read as innerHTML, a comment saying <details> read as a tag, and a comment
-     naming RENTCAST_KEY read as the code that uses it.
-
-     `before` must also assert PRESENCE. indexOf returns -1 for a string that is
-     gone and -1 is less than everything, so deleting a guard outright would
-     satisfy a bare `<`. Caught by mutating the coverage gate away. */
+     `before` must also assert PRESENCE: indexOf returns -1 for a string that
+     is gone, and -1 is less than everything, so deleting a guard outright
+     would satisfy a bare `<`. */
   const CODE = SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   const before = (a, b) => {
     const i = CODE.indexOf(a), j = CODE.indexOf(b);
     return i !== -1 && j !== -1 && i < j;
   };
-  t('our own record is consulted before the provider',
-    before('lookupKnownProperty', 'fetchProvider(env'));
-  t('the coverage gate runs before any billable path',
-    before('out_of_area', 'RENTCAST_KEY'));
-
-  /* The key bills us for other people's traffic if it leaks. It belongs in a
-     secret, never in wrangler.jsonc vars, and never in anything served. */
-  /* Comments stripped first. The config DOCUMENTS that RENTCAST_KEY is expected
-     as a secret — that is the point, so the requirement is discoverable — and a
-     bare string match would read that documentation as a leak. What must never
-     appear is an ASSIGNMENT: a key with a value. */
-  const wr = fs.readFileSync(path.join(REPO_ROOT, 'wrangler.jsonc'), 'utf8')
-    .replace(/^\s*\/\/.*$/gm, '');
-  t('the provider key has no value assigned in wrangler.jsonc',
-    !/"RENTCAST[A-Z_]*"\s*:/.test(wr), 'an assignment exists in wrangler.jsonc');
-  t('and the config still documents that it is expected as a secret',
-    /wrangler secret put RENTCAST_KEY/.test(
-      fs.readFileSync(path.join(REPO_ROOT, 'wrangler.jsonc'), 'utf8')));
-  const shipped = ['script.js', 'ticket.js', 'pricing-engine.js']
-    .map(f => fs.readFileSync(path.join(REPO_ROOT, f), 'utf8')).join('');
-  t('the provider key is in nothing the browser downloads', !/RENTCAST/.test(shipped));
-
-  /* THE SAME THREE RULES FOR THE SECOND VENDOR. Geoapify powers /api/address
-     and arrived on 2026-09-08; it is a separate key with a separate bill, and
-     "we already check the other one" is how the second key ends up in a var.
-     Its free tier is capped per day, so a leaked key does not run up a charge
-     — it exhausts the allowance and the suggestions simply stop working for
-     real customers, which is a quieter failure and a worse one. */
-  t('the coverage gate runs before the suggest provider too',
+  t('the coverage gate runs before anything billable',
     before('out_of_area', 'GEOAPIFY_KEY'));
-  t('the suggest key has no value assigned in wrangler.jsonc',
-    !/"GEOAPIFY[A-Z_]*"\s*:/.test(wr), 'an assignment exists in wrangler.jsonc');
-  t('and the config documents it as a secret',
-    /wrangler secret put GEOAPIFY_KEY/.test(
-      fs.readFileSync(path.join(REPO_ROOT, 'wrangler.jsonc'), 'utf8')));
-  t('the suggest key is in nothing the browser downloads', !/GEOAPIFY/.test(shipped));
 
   /* THE KV BINDING IS DECLARED IN THE CONFIG, NOT ONLY IN THE DASHBOARD.
-     Every use of it in worker.js is behind `if (kv)` so a KV outage cannot
-     take the booking form down — which also means an ABSENT binding fails
-     silently, and expensively: no cache, so every keystroke is a fresh
-     billable call; no per-IP limit; no monthly cap. It ran unbound from the
-     day /api/property shipped until 2026-09-08 and nothing said so.
-
-     Declared here rather than left in the console because deploys come from
-     git and reconcile the Worker against this file — a binding that exists
-     only in the dashboard is one a future push can quietly drop, which is the
-     vars-versus-secrets trap in reverse. The namespace id is not a secret. */
-  const cfg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'wrangler.jsonc'), 'utf8')
-    .replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, ''));
+     Every use is behind `if (kv)` so a KV outage cannot take the booking form
+     down — which also means an absent binding fails silently and expensively:
+     no cache, no per-IP limit, no monthly cap. It ran unbound until
+     2026-09-08 and nothing said so. Deploys come from git and reconcile the
+     Worker against this file, so a binding living only in the console is one
+     a future push can drop. */
+  const cfg = JSON.parse(wrNoComments.replace(/\/\*[\s\S]*?\*\//g, ''));
   const kvBindings = (cfg.kv_namespaces || []).map(k => k.binding);
   t('the cache namespace is bound in wrangler.jsonc',
     kvBindings.includes('PROPERTY_CACHE'), kvBindings);
   t('and it has an id, not a placeholder',
     (cfg.kv_namespaces || []).every(k => /^[0-9a-f]{32}$/i.test(String(k.id || ''))),
     (cfg.kv_namespaces || []).map(k => k.id));
-
-  /* The name has to match what the code reads, or the binding is a no-op that
-     looks configured. */
   t('worker.js reads the same binding name the config declares',
     /env\.PROPERTY_CACHE/.test(SRC));
 
@@ -516,10 +454,13 @@ console.log('\n=== 7. the failure UI exists and is reachable ===');
   t('no address is written to a log line',
     !/console\.(log|warn|error)\([^)]*rawAddress|console\.(log|warn|error)\([^)]*\baddr\b/.test(SRC));
 
-  /* The site must quote without this. It is an accelerator, and they reserve
-     the right to throttle or discontinue it at will (§13.1). */
-  t('every failure path returns found:false rather than throwing',
-    (SRC.match(/found: false/g) || []).length >= 6);
+  /* The site must book without any of this. `found: false` was the property
+     endpoint's shape and went with it; the suggester's equivalent invariant —
+     that every path answers {suggestions: []} rather than throwing — is
+     asserted directly against the running handler in address-suggest.test.js,
+     which is a stronger check than counting occurrences in the source. */
+  t('every suggest failure path returns an empty list, never a throw',
+    (SRC.match(/suggestions: \[\]/g) || []).length >= 5);
 
   /* /api/health reports binding NAMES so a missing or misspelt secret is
      diagnosable from outside. It must never report a value — not truncated,

@@ -268,81 +268,21 @@
                 </li>
             </ol>
 
-            <!-- STEP 1 — Build your clean (no identity collected) -->
-            <!-- STEP 1a — FIND YOUR HOME
-                 =========================================================
-                 The fast path, and the default. Address in, specs out, so the
-                 customer CONFIRMS their home rather than specifying it.
+            <!-- STEP 1 — Build your clean (no identity collected)
+                 ZIP first, then the specs. An address-first "Find your home"
+                 step sat in front of this for a day and was removed on
+                 2026-09-08: it looked up the property and pre-filled the specs
+                 from public records, and measured against 15 real Boston condo
+                 addresses it matched the actual UNIT 0% of the time. A tower
+                 with hundreds of apartments comes back as one record with one
+                 bedroom count, reported confidently. Pre-filling a wrong number
+                 is worse than an empty field, because it gets confirmed without
+                 being read — which is exactly how a three-storey home was once
+                 quoted as one storey.
 
-                 Everything here is an accelerator. A miss, a refusal, or a
-                 "something's different" drops straight into #step-1 below,
-                 which is the flow that has always existed and still prices
-                 every booking. Nothing is gated behind the lookup.
-
-                 The unit is asked on the CONFIRM card, not here — one field
-                 keeps this inviting, and by then the address is on screen and
-                 the question is obviously relevant. We need the unit anyway;
-                 the cleaner has to find the door. -->
-            <div class="quote-step step-active" id="step-find" data-progress="1">
-                <header class="step-head">
-                    <h2 class="flow-title">Find your home</h2>
-                    <p class="flow-sub">We&rsquo;ll pull the details so you don&rsquo;t have to &mdash; no name or email yet.</p>
-                </header>
-
-                <form class="flow-card" id="find-form" novalidate>
-                    <!-- ADDRESS, WITH SUGGESTIONS.
-                         =================================================
-                         The combobox pattern, wired by hand: the input owns
-                         role="combobox" and aria-controls, the list owns
-                         role="listbox", and script.js moves
-                         aria-activedescendant as the arrow keys move the
-                         highlight. That is what makes the suggestions audible
-                         to a screen reader rather than a silent visual change.
-
-                         BROWSER AUTOFILL IS TURNED OFF HERE ON PURPOSE.
-                         autocomplete="street-address" would stack Chrome's own
-                         saved-address dropdown on top of ours — two lists, one
-                         field, and the wrong one usually on top. "off" is not
-                         a slight against autofill; it is that we are already
-                         doing the same job with better data.
-
-                         The list is EMPTY IN THE MARKUP and stays empty unless
-                         a suggestion actually arrives. With no provider key, a
-                         provider outage, a rate limit or a typo, nothing
-                         renders and this is a plain text box — which is exactly
-                         what it was before suggestions existed. -->
-                    <div class="field-block">
-                        <label class="field-label" for="find-address">Your address</label>
-                        <div class="ac">
-                            <input class="flow-input" type="text" id="find-address" name="find_address"
-                                   autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
-                                   role="combobox" aria-expanded="false" aria-autocomplete="list"
-                                   aria-controls="find-address-list" placeholder="123 Beacon St" required>
-                            <ul class="ac__list" id="find-address-list" role="listbox"
-                                aria-label="Address suggestions" hidden></ul>
-                        </div>
-                        <p class="field-hint">Greater Boston. We&rsquo;ll check your area automatically.</p>
-                        <p class="ac__credit" id="find-address-credit" hidden>Address suggestions powered by <a href="https://www.geoapify.com/" rel="noopener nofollow" target="_blank">Geoapify</a></p>
-                    </div>
-                    <div class="field-block">
-                        <label class="field-label" for="find-zip">ZIP code</label>
-                        <input class="flow-input" type="text" id="find-zip" name="find_zip" inputmode="numeric"
-                               autocomplete="postal-code" maxlength="5" placeholder="02116" required>
-                        <p class="zip-status" id="find-zip-status" aria-live="polite"></p>
-                    </div>
-                    <button type="submit" class="btn btn--primary btn--full" id="find-submit">Find my home</button>
-                    <p class="field-hint" id="find-status" role="status" aria-live="polite"></p>
-                </form>
-
-                <!-- Rendered by script.js once a lookup returns. -->
-                <div id="find-result" hidden></div>
-
-                <p class="reserve-aftercare">
-                    <button type="button" class="scheduler-fallback-link" id="find-skip">Or answer a few questions instead &rarr;</button>
-                </p>
-            </div>
-
-            <div class="quote-step step-hidden" id="step-1" data-progress="1">
+                 The customer knows their own bed and bath count. Asking is more
+                 accurate than any of that, and it is free. -->
+            <div class="quote-step step-active" id="step-1" data-progress="1">
                 <header class="step-head">
                     <h2 class="flow-title">Build your clean</h2>
                     <p class="flow-sub">Tell us about your home — no name or email yet, just the details we need to price it.</p>
@@ -651,8 +591,36 @@
                              City and state are redundant here — the ZIP above is required and is
                              what actually drives tier, geo factor and the PROPERTIES key. Every
                              test fixture in the suite already uses "123 Beacon St". -->
-                        <input class="flow-input" type="text" id="r-address" name="address" autocomplete="street-address" placeholder="123 Beacon St" required>
+                        <!-- SUGGESTIONS LIVE HERE NOW, and only here.
+                             They were on an address-first first step until
+                             2026-09-08. The step is gone; the suggestions are
+                             worth keeping, because this is the field a cleaner
+                             has to navigate by and a typo in it is a real
+                             problem. Measured at 100% street match on 25 real
+                             Boston condo addresses.
+
+                             THE ZIP IS NEVER WRITTEN BACK FROM A SUGGESTION.
+                             It is sent TO the suggester to rank results and
+                             nothing returns along that path. Geoapify gave
+                             02117 for 37 Appleton St (a PO-box ZIP), 02205 for
+                             118 B St, and 01890 — Winchester — for 5 Lagrange
+                             St. Writing those into the ZIP field tripped the
+                             coverage gate and rejected real Back Bay customers
+                             mid-booking. The ZIP the customer typed in step 1
+                             is the only one this flow trusts.
+
+                             autocomplete="off" so Chrome's own saved-address
+                             dropdown does not stack on top of this one. -->
+                        <div class="ac">
+                            <input class="flow-input" type="text" id="r-address" name="address"
+                                   autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+                                   role="combobox" aria-expanded="false" aria-autocomplete="list"
+                                   aria-controls="r-address-list" placeholder="123 Beacon St" required>
+                            <ul class="ac__list" id="r-address-list" role="listbox"
+                                aria-label="Address suggestions" hidden></ul>
+                        </div>
                         <p class="field-hint">Just the street &mdash; your ZIP already tells us the city.</p>
+                        <p class="ac__credit" id="r-address-credit" hidden>Address suggestions powered by <a href="https://www.geoapify.com/" rel="noopener nofollow" target="_blank">Geoapify</a></p>
                     </div>
                     <div class="field-block">
                         <label class="field-label" for="r-unit">Unit / Apt <span class="opt">(optional)</span></label>
