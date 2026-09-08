@@ -550,21 +550,49 @@ async function fetchSuggestions(env, q, zip) {
      restrict results to streets, which is precisely the shape with no house
      number on it. Unconstrained, Geoapify returns house-level hits and the
      loop below keeps only those. */
-  /* THE ZIP GOES INTO THE QUERY TEXT, NOT INTO A POST-FILTER.
+  /* THE ZIP IS A SECOND ATTEMPT, NOT PART OF THE FIRST QUERY.
      ---------------------------------------------------------------
-     It was a post-filter first, and that was wrong in a way that only shows up
-     against real data: this asks for N results across the whole rectangle and
-     then discards the ones outside the typed ZIP, so whenever the best global
-     matches all sit in other ZIPs, the filter throws away the entire list and
-     the field silently offers nothing.
+     Both simpler designs were tried against production and both are wrong:
 
-     Measured against production: "100 washington st" + 02135 returned NOTHING,
-     because Greater Boston has a Washington Street in a dozen ZIPs and none of
-     the top hits was in Brighton. The same query with 02135 appended to the
-     text returns "100 Washington Street, Boston, 02135" first. Geoapify ranks
-     it correctly when told; it cannot rank what it was never asked about. */
+     Filtering to the ZIP afterwards throws the whole list away whenever the
+     best global matches sit in other ZIPs. "100 washington st" + 02135
+     returned NOTHING — Greater Boston has a Washington Street in a dozen ZIPs
+     and none of the top hits was in Brighton.
+
+     Appending the ZIP to the query text fixes that and breaks something worse.
+     Geoapify only matches a trailing postcode when the STREET NAME IS ALREADY
+     COMPLETE. Measured:
+
+         "123 beacon 02116"  ->  123 Beacon Street, Boston, 02116
+         "123 beac 02116"    ->  nothing at all
+         "50 commonwealth 02116" -> 50 Commonwealth Avenue, Boston, 02116
+         "50 comm 02116"     ->  nothing at all
+
+     A partial street name is the NORMAL state of a type-ahead, so that trade
+     is backwards: it would break the field for most of every word typed.
+
+     So: ask broadly first, which always answers something for a partial word,
+     and order the answer by the typed ZIP. Only when nothing in that answer
+     matches the ZIP is a second, narrower call worth making — and that is
+     exactly the case where the street name is usually complete enough for the
+     postcode trick to land. The common keystroke costs one call; the second
+     fires only when the first could not find their ZIP. */
+  const broad = await suggestOnce(env, q);
+  const ranked = rankByZip(broad, zip);
+  if (!zip || ranked.some(s => s.zip === zip) || !broad.length) {
+    return ranked.slice(0, SUGGEST_LIMIT);
+  }
+
+  const narrow = rankByZip(await suggestOnce(env, q + " " + zip), zip);
+  /* Only prefer the narrow answer if it actually found the ZIP. Otherwise the
+     broad list is strictly more useful than an empty one. */
+  return (narrow.some(s => s.zip === zip) ? narrow : ranked).slice(0, SUGGEST_LIMIT);
+}
+
+/** One call to Geoapify, reduced to {line, city, zip}. Never throws. */
+async function suggestOnce(env, text) {
   const params = new URLSearchParams({
-    text:   zip ? q + " " + zip : q,
+    text:   text,
     apiKey: env.GEOAPIFY_KEY,
     filter: "rect:" + SUGGEST_RECT,
     limit:  String(SUGGEST_LIMIT * 3),   // room to discard street-only hits
@@ -588,17 +616,7 @@ async function fetchSuggestions(env, q, zip) {
                : Array.isArray(body && body.features) ? body.features.map(f => (f && f.properties) || {})
                : [];
 
-    /* The typed ZIP now ORDERS the list rather than censoring it. Dropping a
-       mismatch outright assumes the ZIP is right and the geocoder is wrong,
-       and it is the other way round often enough to matter: people type the
-       street before the ZIP, mistype their own, or give the ZIP of the town
-       rather than the delivery area. Choosing a suggestion overwrites the ZIP
-       field anyway, so a mismatch corrects itself the moment it is picked —
-       whereas an empty list corrects nothing and explains nothing.
-
-       The rectangle is still a hard filter. Ordering is for addresses we could
-       plausibly serve; Worcester is not one of them. */
-    const inZip = [], elsewhere = [];
+    const out = [];
     const seen = new Set();
     for (const r of list) {
       if (!r || !r.housenumber || !r.street) continue;         // no street-only hits
@@ -607,15 +625,30 @@ async function fetchSuggestions(env, q, zip) {
       const dedupe = (line + "|" + rzip).toUpperCase();
       if (seen.has(dedupe)) continue;
       seen.add(dedupe);
-      const item = { line, city: String(r.city || r.suburb || "").trim(), zip: rzip };
-      (zip && rzip === zip ? inZip : elsewhere).push(item);
+      out.push({ line, city: String(r.city || r.suburb || "").trim(), zip: rzip });
     }
-    return inZip.concat(elsewhere).slice(0, SUGGEST_LIMIT);
+    return out;
   } catch (err) {
     /* An outage here must be invisible: the field is still a text box. */
     console.error("address_suggest failed: " + String(err));
     return [];
   }
+}
+
+/**
+ * The typed ZIP ORDERS the list; it never censors it.
+ *
+ * Dropping a mismatch assumes the ZIP is right and the geocoder wrong, and it
+ * is the other way round often enough to matter: people type the street before
+ * the ZIP, mistype their own, or give the town's rather than the delivery
+ * area's. Picking a suggestion overwrites the ZIP field, so a mismatch
+ * corrects itself the moment it is chosen — an empty list corrects nothing.
+ */
+function rankByZip(items, zip) {
+  if (!zip) return items;
+  const inZip = [], elsewhere = [];
+  items.forEach(s => (s.zip === zip ? inZip : elsewhere).push(s));
+  return inZip.concat(elsewhere);
 }
 
 /**

@@ -238,17 +238,71 @@ const KEYED = { GEOAPIFY_KEY: 'test-key' };
   t('when nothing matches the ZIP the list is still offered, never emptied',
     noneInZip.body.suggestions.length, 2);
 
-  /* And the ZIP is handed to the provider so it can rank properly at source,
-     rather than being applied here after the ranking is already lost. */
-  const texted = await ask('q=100 washington st&zip=02135', KEYED, geo([]));
-  /100\+washington\+st\+02135|100%20washington%20st%2002135/.test(texted.calls[0].target)
-    ? ok('the ZIP is sent as part of the query text, where it can affect ranking')
-    : fail('the ZIP never reaches the provider: ' + texted.calls[0].target);
+  head('B2. Broad first, ZIP second — and why');
+  /* MEASURED AGAINST PRODUCTION, both simpler designs are wrong.
+
+     Filtering to the ZIP afterwards empties the list whenever the best global
+     matches sit elsewhere: "100 washington st" + 02135 returned nothing.
+
+     Appending the ZIP to the query text fixes that and breaks something worse
+     — Geoapify only matches a trailing postcode once the STREET NAME IS
+     COMPLETE:
+         "123 beacon 02116"      -> 123 Beacon Street, Boston, 02116
+         "123 beac 02116"        -> nothing at all
+         "50 commonwealth 02116" -> 50 Commonwealth Avenue, Boston, 02116
+         "50 comm 02116"         -> nothing at all
+     A partial street name is the NORMAL state of a type-ahead, so that trade
+     would break the field for most of every word typed.
+
+     Hence: broad first, ZIP-appended only as a rescue. */
+
+  /** A fetch that answers each call from a queue, so a two-pass run is visible. */
+  const sequence = (...bodies) => {
+    let i = 0;
+    return async () => new Response(JSON.stringify({ results: bodies[Math.min(i++, bodies.length - 1)] }),
+                                    { status: 200 });
+  };
+  const H = (num, street, city, pc) => ({ housenumber: num, street, city, postcode: pc });
+
+  const firstCall = await ask('q=123 beac&zip=02116', KEYED,
+    sequence([H('123', 'Beacon St', 'Boston', '02116')]));
+  /text=123\+beac&/.test(firstCall.calls[0].target)
+    ? ok('the first call sends the raw partial query, with no ZIP glued on')
+    : fail('the first call already carries the ZIP: ' + firstCall.calls[0].target);
+  t('and when it already found the ZIP, there is no second call', firstCall.calls.length, 1);
+
+  /* The rescue: nothing in the typed ZIP, so try again with it appended. */
+  const rescued = await ask('q=100 washington st&zip=02135', KEYED, sequence(
+    [H('100', 'Washington St', 'Somerville', '02143')],
+    [H('100', 'Washington St', 'Boston', '02135')]));
+  t('a broad answer with no ZIP match triggers exactly one retry', rescued.calls.length, 2);
+  /100\+washington\+st\+02135/.test(rescued.calls[1].target)
+    ? ok('the retry is the one that carries the ZIP')
+    : fail('the retry did not append the ZIP: ' + rescued.calls[1].target);
+  t('and the retry wins when it finds the ZIP',
+    rescued.body.suggestions, [{ line: '100 Washington St', city: 'Boston', zip: '02135' }]);
+
+  /* THE REGRESSION GUARD. "123 beac 02116" returns nothing from Geoapify, so
+     the rescue comes back empty — and a partial word is the normal case. The
+     broad list must survive that, or the field goes blank while someone is
+     mid-word. */
+  const rescueEmpty = await ask('q=123 beac&zip=02116', KEYED, sequence(
+    [H('123', 'Beach St', 'Boston', '02111'), H('123', 'Beacon St', 'Somerville', '02143')],
+    []));
+  t('an empty rescue never blanks the broad list',
+    rescueEmpty.body.suggestions.length, 2);
+  t('and the broad list is still ZIP-ordered',
+    rescueEmpty.body.suggestions.map(s => s.zip), ['02111', '02143']);
 
   const noZip = await ask('q=100 washington st', KEYED, geo([]));
+  t('with no ZIP typed there is only ever one call', noZip.calls.length, 1);
   /text=100\+washington\+st&/.test(noZip.calls[0].target)
-    ? ok('with no ZIP typed, the text is left alone')
+    ? ok('and the text is left alone')
     : fail('a ZIP was invented: ' + noZip.calls[0].target);
+
+  const nothingAnywhere = await ask('q=zzzz nowhere&zip=02116', KEYED, geo([]));
+  t('a query that matches nothing does not retry — there is nothing to rescue',
+    nothingAnywhere.calls.length, 1);
 
   const dupes = await ask('q=5 elm&zip=02116', KEYED, geo([
     { housenumber: '5', street: 'Elm St', city: 'Boston', postcode: '02116' },
