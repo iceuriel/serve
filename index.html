@@ -30,18 +30,27 @@
          it. The word still has to appear here — it is what people search for
          in Boston, and /pricing and /services carry it far harder — but the
          title's job is now to say what Serve is. -->
-    <title>Serve — Greater Boston's Premier Service Manager</title>
+    <title>Serve — Greater Boston's Premier Service Network</title>
     <!-- The snippet Google shows under this page in search results. Left blank,
          Google writes its own from whatever text it finds first, which here
          would be the nav.
 
-         149 characters — Google truncates around 155-160, so this survives
-         whole. It is the hero's own subhead, near enough word for word, which
-         is the point: the snippet in the results and the first line on the
-         page should not be two different promises. No price figure on purpose
-         — /pricing owns those numbers, and duplicating one here is a second
-         place to go stale. -->
-    <meta name="description" content="Starting with home cleaning, Serve coordinates your service by partnering with trusted local Boston vendors. Instantly quote and book in under a minute.">
+         153 characters — Google truncates around 155-160, so this survives
+         whole. It is the hero's own subhead, near enough word for word: the
+         snippet in the results and the first line on the page should not be
+         two different promises.
+
+         "Home cleaning" is the one clause NOT in the hero, and it is here
+         deliberately. As of 2026-09-08 the hero names no category at all, so
+         this is the only place in the head where the word appears — and it is
+         what Boston actually searches for. The page's honesty about cleaning
+         being the sole live service now rests entirely on the catalogue
+         section further down, which tests/service-catalogue.test.js holds to
+         serve-services.js.
+
+         No price figure on purpose — /pricing owns those numbers, and
+         duplicating one here is a second place to go stale. -->
+    <meta name="description" content="Serve books, coordinates and manages your home service by partnering with trusted local Boston vendors. Home cleaning today — quote and book in a minute.">
     <!-- Every campaign slug creates another crawlable copy of this page —
          /?src=qr-card-founder-01, /?src=dh-clean, one more per card printed —
          and www would double the lot again. All identical content. This
@@ -56,12 +65,12 @@
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="Serve">
     <meta property="og:url" content="https://servecleaning.com/">
-    <meta property="og:title" content="Serve — Greater Boston's Premier Service Manager">
-    <meta property="og:description" content="Starting with home cleaning, Serve coordinates your service by partnering with trusted local Boston vendors. Instantly quote and book in under a minute.">
+    <meta property="og:title" content="Serve — Greater Boston's Premier Service Network">
+    <meta property="og:description" content="Serve books, coordinates and manages your home service by partnering with trusted local Boston vendors. Home cleaning today — quote and book in a minute.">
     <meta property="og:image" content="https://servecleaning.com/images/serve-header-img.jpg">
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Serve — Greater Boston's Premier Service Manager">
-    <meta name="twitter:description" content="Starting with home cleaning, Serve coordinates your service by partnering with trusted local Boston vendors.">
+    <meta name="twitter:title" content="Serve — Greater Boston's Premier Service Network">
+    <meta name="twitter:description" content="Serve books, coordinates and manages your home service by partnering with trusted local Boston vendors.">
     <link rel="icon" type="image/x-icon" href="images/favicon.ico">
     <link rel="icon" type="image/svg+xml" href="images/favicon.svg">
     <link rel="icon" type="image/png" sizes="32x32" href="images/favicon-32.png">
@@ -156,9 +165,9 @@
             <img class="hero__logo" src="images/serve-logo-v2.svg" alt="Serve Home Cleaning">
         </div>
         <div class="hero__content">
-            <h1 class="hero__headline">Greater Boston's Premier Service Manager</h1>
+            <h1 class="hero__headline">Greater Boston's Premier Service Network</h1>
             <p class="hero__tagline">Made to Serve <strong>your</strong> needs</p>
-            <p class="hero__sub">Starting with home cleaning, Serve coordinates your whole service by partnering with local &amp; trusted Boston vendors.</p>
+            <p class="hero__sub">Serve books, coordinates, and manages your service by partnering with local &amp; trusted Boston vendors.</p>
             <a href="#quote" class="btn btn--primary serve-pulse">Instant Booking</a>
             <p class="hero__note">Instantly quote &amp; book in under 1 minute</p>
         </div>
