@@ -368,22 +368,37 @@ t('index.html lists every file carrying a nav, so an edit cannot miss one',
     .every(f => INDEX.slice(0, INDEX.indexOf('<html')).includes(f)));
 t('nav is real HTML, never injected by JS', !/innerHTML\s*=\s*[`'"]\s*<nav/.test(SITE));
 
-['How It Works', 'Pricing', 'Services', 'Instant quote'].forEach(label =>
+/* Labels changed on 2026-09-07 with the repositioning — "How It Works" became
+   "How Serve Works" and "Instant quote" became "Book a service". What is under
+   test is unchanged: whatever the nav says, it must say it TWICE, because the
+   desktop list and the mobile drawer are separate markup and an edit to one is
+   the easy way to leave the other stale. */
+['How Serve Works', 'Pricing', 'Services', 'Book a service'].forEach(label =>
   t('nav offers "' + label + '" twice — desktop list and mobile drawer',
     (navIndex.match(new RegExp('>' + label + '<', 'g')) || []).length === 2));
 t('Examples was removed from the nav', !/>Examples</.test(navIndex));
-t('but the Serve Standard section itself is untouched and still in place',
-  INDEX.includes('id="examples"') && INDEX.includes('The Serve Standard') &&
-  INDEX.indexOf('id="examples"') < INDEX.indexOf('id="quote"'));
+/* The photo section survives the repositioning. It was retitled ("Work we put
+   our name on") and deliberately MOVED BELOW the booking flow, so this no
+   longer asserts either the old heading or the old position — what matters is
+   that the page's only proof of real work is still on it, still has its
+   photos, and still is not the thing standing between a visitor and the form. */
+t('the before/after section is still on the page, below the form',
+  INDEX.includes('id="examples"') && INDEX.includes('ba-grid') &&
+  INDEX.indexOf('id="examples"') > INDEX.indexOf('id="quote"'));
 
-/* ---------- 7. How It Works copy ---------- */
-console.log('\n=== 7. How It Works links out twice, never three times ===');
-t('step 1 links "price" to /pricing',
-  /<a href="\/pricing" class="serve-inline-link">price<\/a>/.test(INDEX));
-t('step 2 links the service phrase to /services',
-  /<a href="\/services" class="serve-inline-link">first deep clean, a recurring visit, or a move-in<\/a>/.test(INDEX));
+/* ---------- 7. How Serve Works copy ---------- */
+console.log('\n=== 7. How Serve Works links out twice, never three times ===');
+/* The rule is one outbound link per step for the first two steps and none in
+   the third — not the exact sentence they sit in, which is marketing copy and
+   is expected to change. */
+t('step 1 links to /pricing',
+  /<a href="\/pricing" class="serve-inline-link">[^<]+<\/a>/.test(INDEX));
+t('step 2 links to /services',
+  /<a href="\/services" class="serve-inline-link">[^<]+<\/a>/.test(INDEX));
 /* Step 3 is the close. Three exits in three steps turns the funnel into a menu. */
-const step3 = INDEX.slice(INDEX.indexOf('Enjoy Your Space'), INDEX.indexOf('</section>', INDEX.indexOf('Enjoy Your Space')));
+const step3Mark = 'Your home stays on record';
+const step3 = INDEX.slice(INDEX.indexOf(step3Mark), INDEX.indexOf('</section>', INDEX.indexOf(step3Mark)));
+t('step 3 exists', INDEX.includes(step3Mark));
 t('step 3 carries no inline link', !/serve-inline-link/.test(step3));
 t('the existing "see how the day runs" link survived', /href="#after-you-book"/.test(step3));
 
@@ -493,13 +508,23 @@ t('the arrival cue respects reduced motion', /prefers-reduced-motion[\s\S]{0,160
 const bannerAt   = CSS.indexOf('SERVE — PRICING & SERVICES');
 const newBlockAt = bannerAt === -1 ? -1 : CSS.lastIndexOf('/*', bannerAt);
 t('the new stylesheet block is present', newBlockAt !== -1);
+/* BOUNDED AT BOTH ENDS.
+   This slice used to run to the end of the file, which quietly made the rule
+   "every future line of CSS must be namespaced serve-*". That was never the
+   deal — it governs the pricing/services block, whose classes share a
+   stylesheet with the homepage and therefore need a prefix to stay out of its
+   way. The 2026-09-07 repositioning block that follows carries its own banner
+   and its own component names, so the slice now stops where that begins. */
+const nextBannerAt = CSS.indexOf('SERVE AS A HOME COMPANY');
+const blockEnd = nextBannerAt === -1 ? CSS.length : CSS.lastIndexOf('/*', nextBannerAt);
+t('the block has an end, not just a beginning', blockEnd > newBlockAt);
 /* Comments are stripped before matching. Both halves of the file discuss class
    names in prose — this very block names `.card` as the kind of collision it
    exists to prevent — and reading those back as declarations reports the
    documentation rather than the code. */
 const strip     = css => css.replace(/\/\*[\s\S]*?\*\//g, '');
 const oldCss    = strip(CSS.slice(0, newBlockAt));
-const newCss    = strip(CSS.slice(newBlockAt));
+const newCss    = strip(CSS.slice(newBlockAt, blockEnd));
 const classesIn = css => new Set((css.match(/\.[A-Za-z_][A-Za-z0-9_-]*/g) || []).map(c => c.slice(1)));
 const preExisting = classesIn(oldCss);
 const introduced  = [...classesIn(newCss)].filter(c =>

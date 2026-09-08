@@ -46,7 +46,14 @@ mkdir -p "$OUT"
 # still render — the engine falls back to neutral pricing when it is absent —
 # so the failure would be silent: correct-looking prices with the entire
 # geographic adjustment quietly switched off in production only.
-cp index.html pricing.html services.html privacy.html sms-terms.html serve-geo-data.js pricing-engine.js script.js style.css "$OUT"/
+#
+# serve-services.js is the service catalogue: which categories exist and which
+# of them Serve can actually deliver today. The homepage's service grid is
+# static HTML that mirrors it (crawlers read served markup), so a missing file
+# here does not blank the page — the booking flow just loses its category
+# chooser, which is dormant while cleaning is the only live service. Listed
+# anyway, because that stops being harmless the day a second category ships.
+cp index.html pricing.html services.html privacy.html sms-terms.html serve-geo-data.js pricing-engine.js serve-services.js script.js style.css "$OUT"/
 
 # j.html is served at /j and renders ONE job from an id in the query string.
 # It is not in the sitemap and carries noindex both in the markup and as an

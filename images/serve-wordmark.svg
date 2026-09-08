@@ -1,0 +1,10 @@
+<!-- Serve wordmark — the master brand, without a category under it.
+     Same roofline and the same Times setting as serve-logo-v2.svg, which is
+     kept untouched: it is still the right mark anywhere "HOME CLEANING" is the
+     honest label, and it may already be printed on things this repo cannot
+     reach. This file is the one the site wears now that cleaning is the first
+     service rather than the whole company. -->
+<svg width="400" height="404" viewBox="40 12 200 202" role="img" aria-label="Serve" xmlns="http://www.w3.org/2000/svg">
+    <path d="M 88 150 L 88 78 L 145 30 L 202 78 L 202 118" fill="none" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"></path>
+    <text x="140" y="196" text-anchor="middle" font-family="&#39;Times New Roman&#39;, Times, serif" font-weight="400" font-size="64" letter-spacing="1" fill="#ffffff">Serve</text>
+</svg>

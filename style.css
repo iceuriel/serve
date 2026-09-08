@@ -3128,3 +3128,649 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
     .serve-page-head { padding: 4rem 1.25rem 3rem; }
     .serve-teaser, .serve-section { padding-top: 4rem; padding-bottom: 4rem; }
 }
+
+
+/* ============================================================
+   SERVE AS A HOME COMPANY  ·  2026-09-07
+   ============================================================
+   The repositioning: Serve is the company, cleaning is its first service.
+   Everything below is new surface for that story — the hero home card, the
+   three ideas, the before/after argument, the job record, the service
+   catalogue, the network, and the closer.
+
+   No new palette. The existing grays carry it; what changes is the amount of
+   air between things. The one recurring device is a thin architectural line —
+   the roofline in the home card, the rules under the pillars, the connectors
+   in the network diagram — because a home is drawn, not photographed, and a
+   line drawing is the one visual that scales from a hero to a favicon without
+   ever looking like stock photography.
+   ============================================================ */
+
+/* --- Hero: actions row ------------------------------------------------ */
+.hero__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    justify-content: center;
+}
+
+/* The quiet second CTA. On the dark hero a bordered ghost reads as available
+   without competing with the primary — an outline, not a fill. */
+.btn--hero-ghost {
+    background: transparent;
+    color: #e5e7eb;
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    text-decoration: none;
+}
+.btn--hero-ghost:hover {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: rgba(255, 255, 255, 0.45);
+    color: #fff;
+}
+
+.hero__home {
+    max-width: 1100px;
+    margin: 0 auto;
+    width: 100%;
+    display: flex;
+    justify-content: center;
+}
+
+/* --- The home card ---------------------------------------------------- */
+/* Light card on the dark hero, so it reads as an object sitting ON the
+   section rather than a panel cut out of it. This is the only light surface
+   in the hero and it is where the eye should land after the headline. */
+.homecard {
+    width: 100%;
+    max-width: 370px;
+    background: #fff;
+    border-radius: 14px;
+    padding: 1.25rem 1.25rem 1rem;
+    box-shadow: 0 18px 40px -12px rgba(0, 0, 0, 0.55);
+    text-align: left;
+}
+
+.homecard__eyebrow {
+    font-family: var(--flow-sans);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    margin: 0;
+}
+
+.homecard__house {
+    display: flex;
+    justify-content: center;
+    padding: 0.5rem 0 0.75rem;
+}
+.homecard__house svg {
+    width: 100%;
+    max-width: 190px;
+    height: auto;
+}
+.hc-roof   { stroke: var(--color-dark); }
+.hc-wall   { fill: var(--color-bg-light); stroke: var(--color-dark); stroke-width: 2; }
+.hc-door   { fill: var(--color-dark); }
+.hc-win    { fill: #fff; stroke: var(--color-accent); stroke-width: 1.6; }
+.hc-ground { stroke: var(--color-border); stroke-width: 2; }
+
+/* The empty address field. Dashed and unfilled on purpose — it is the one
+   thing on this card asking to be acted on, and it goes to the step that
+   actually asks for it. */
+.homecard__addr {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    border: 1.5px dashed var(--color-border);
+    border-radius: var(--radius);
+    padding: 0.7rem 0.85rem;
+    text-decoration: none;
+    transition: border-color 0.15s, background 0.15s;
+}
+.homecard__addr:hover {
+    border-color: var(--color-accent);
+    background: var(--color-bg-light);
+}
+.homecard__addr-label {
+    font-family: var(--flow-sans);
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--color-accent);
+}
+.homecard__addr-arrow {
+    color: var(--color-accent);
+    font-size: 1.05rem;
+    line-height: 1;
+}
+
+.homecard__services {
+    list-style: none;
+    margin: 0.9rem 0 0;
+    padding: 0.9rem 0 0;
+    border-top: 1px solid var(--color-border);
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+}
+
+.homecard__svc {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    font-family: var(--flow-sans);
+    font-size: 0.9rem;
+}
+.homecard__svc-name   { color: var(--color-text-muted); font-weight: 600; }
+.homecard__svc-status { color: var(--color-text-muted); font-size: 0.8rem; }
+
+/* The live row is the only coloured thing on the card. One category is real
+   today and the card should not be coy about which. */
+.homecard__svc--live .homecard__svc-name { color: var(--color-dark); }
+.homecard__svc--live .homecard__svc-status {
+    color: #166534;
+    font-weight: 700;
+    background: #ecfdf3;
+    border-radius: 999px;
+    padding: 0.16rem 0.55rem;
+}
+
+/* --- The three ideas -------------------------------------------------- */
+.pillars {
+    background: var(--color-bg);
+    padding: 3.25rem 0 1rem;
+}
+.pillars__grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 2rem;
+}
+.pillar__rule {
+    display: block;
+    width: 34px;
+    height: 2px;
+    background: var(--color-dark);
+    margin-bottom: 0.9rem;
+}
+.pillar__title {
+    font-family: var(--flow-serif);
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: var(--color-dark);
+    margin: 0 0 0.5rem;
+}
+.pillar p {
+    color: var(--color-text);
+    line-height: 1.65;
+    margin: 0;
+}
+
+/* The line under How Serve Works. It is the thesis of the whole page, so it
+   gets its own rule and its own air rather than being a fourth paragraph. */
+.steps__coda {
+    margin: 2.5rem auto 0;
+    padding-top: 1.75rem;
+    border-top: 1px solid var(--color-border);
+    max-width: 620px;
+    text-align: center;
+    font-family: var(--flow-serif);
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: var(--color-dark);
+}
+
+/* --- What Serve removes ----------------------------------------------- */
+.swap {
+    background: var(--color-bg-light);
+    border-top: 1px solid var(--color-border);
+    border-bottom: 1px solid var(--color-border);
+    padding: 3.25rem 0;
+}
+.swap__grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 2.25rem;
+    align-items: center;
+}
+.swap__label {
+    font-family: var(--flow-sans);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    margin: 0 0 1rem;
+}
+
+/* Struck through, not crossed out with an icon. The line through the words is
+   the whole graphic — it says "this list stops existing" without a single
+   red X, which would read as a comparison chart. */
+.swap__list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+.swap__list li {
+    font-family: var(--flow-sans);
+    font-size: 1rem;
+    color: var(--color-text-muted);
+    text-decoration: line-through;
+    text-decoration-color: rgba(107, 114, 128, 0.55);
+    text-decoration-thickness: 1px;
+}
+
+.swap__col--after { text-align: left; }
+.swap__line {
+    font-family: var(--flow-serif);
+    font-size: 1.6rem;
+    font-weight: 700;
+    line-height: 1.25;
+    color: var(--color-dark);
+    margin: 0;
+}
+.swap__line--strong { font-size: 2rem; }
+.swap__arrow {
+    font-size: 1.35rem;
+    color: var(--color-accent);
+    margin: 0.5rem 0;
+    line-height: 1;
+}
+.swap__cta { margin-top: 1.5rem; text-decoration: none; }
+
+/* --- The job record --------------------------------------------------- */
+.record { padding: 3.5rem 0; }
+.record__grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 2.25rem;
+    align-items: start;
+}
+.record__title { text-align: left; }
+.record__lede {
+    color: var(--color-text);
+    line-height: 1.7;
+    margin: 0 0 1.25rem;
+}
+.record__pull {
+    font-family: var(--flow-serif);
+    font-size: 1.35rem;
+    font-weight: 700;
+    line-height: 1.35;
+    color: var(--color-dark);
+    border-left: 3px solid var(--color-dark);
+    padding-left: 1rem;
+    margin: 0 0 1.25rem;
+}
+.record__note {
+    font-size: 0.9rem;
+    color: var(--color-text-muted);
+    line-height: 1.6;
+    margin: 0;
+}
+
+/* The ticket. Every field on it is one /j renders today, so it is styled as a
+   document rather than as an illustration — a real thing shown at rest. */
+.ticket {
+    background: #fff;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 1.25rem;
+    box-shadow: var(--shadow-md);
+}
+.ticket__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    padding-bottom: 0.85rem;
+    border-bottom: 1px solid var(--color-border);
+}
+.ticket__brand {
+    font-family: var(--flow-serif);
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--color-dark);
+}
+.ticket__id {
+    font-family: var(--flow-sans);
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: var(--color-text-muted);
+    font-variant-numeric: tabular-nums;
+}
+.ticket__service {
+    font-family: var(--flow-serif);
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--color-dark);
+    margin: 1rem 0 0.15rem;
+}
+.ticket__when {
+    font-family: var(--flow-sans);
+    font-size: 0.95rem;
+    color: var(--color-text);
+    margin: 0 0 1rem;
+}
+.ticket__addr {
+    background: var(--color-bg-light);
+    border-radius: var(--radius);
+    padding: 0.75rem 0.85rem;
+    margin-bottom: 1rem;
+}
+.ticket__street {
+    font-family: var(--flow-sans);
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--color-dark);
+    margin: 0;
+}
+.ticket__specs {
+    font-family: var(--flow-sans);
+    font-size: 0.85rem;
+    color: var(--color-text-muted);
+    margin: 0.2rem 0 0;
+}
+.ticket__rows {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+}
+.ticket__row {
+    display: grid;
+    grid-template-columns: 5.5rem 1fr;
+    gap: 0.75rem;
+    align-items: baseline;
+}
+.ticket__row dt {
+    font-family: var(--flow-sans);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+}
+.ticket__row dd {
+    margin: 0;
+    font-family: var(--flow-sans);
+    font-size: 0.9rem;
+    color: var(--color-text);
+    line-height: 1.55;
+}
+.ticket__row--notes dd { font-style: italic; }
+.ticket__pill {
+    display: inline-block;
+    background: #ecfdf3;
+    color: #166534;
+    font-weight: 700;
+    font-size: 0.8rem;
+    border-radius: 999px;
+    padding: 0.18rem 0.6rem;
+}
+.ticket__foot {
+    margin: 1.1rem 0 0;
+    padding-top: 0.85rem;
+    border-top: 1px solid var(--color-border);
+    font-family: var(--flow-sans);
+    font-size: 0.78rem;
+    color: var(--color-text-muted);
+}
+
+/* Held visually apart from the ticket above it, because one is real and one is
+   not, and a reader must never have to work out which. */
+.record__soon {
+    margin-top: 1rem;
+    border: 1px dashed var(--color-border);
+    border-radius: 12px;
+    padding: 0.9rem 1.1rem;
+}
+.record__soon-label {
+    font-family: var(--flow-sans);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    margin: 0 0 0.5rem;
+}
+.record__soon-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.25rem;
+}
+.record__soon-list li {
+    font-family: var(--flow-sans);
+    font-size: 0.88rem;
+    color: var(--color-text-muted);
+}
+
+/* --- The service catalogue -------------------------------------------- */
+.catalogue {
+    background: var(--color-bg-light);
+    border-top: 1px solid var(--color-border);
+    padding: 3.5rem 0;
+}
+.cat-grid {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1rem;
+}
+.cat-card {
+    background: #fff;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+/* A "coming" card must not look pressable. No pointer, no hover, no link —
+   the styling is the promise, and a card that invites a click it cannot
+   honour is worse than no card. */
+.cat-card__link {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    text-decoration: none;
+    color: inherit;
+}
+.cat-card--live {
+    border-color: var(--color-dark);
+    box-shadow: var(--shadow);
+}
+.cat-card--live:hover { box-shadow: var(--shadow-md); }
+
+.cat-card__icon { display: block; width: 30px; height: 30px; margin-bottom: 0.2rem; }
+.cat-card__icon svg {
+    width: 100%;
+    height: 100%;
+    stroke: var(--color-text-muted);
+    stroke-linecap: round;
+}
+.cat-card--live .cat-card__icon svg { stroke: var(--color-dark); }
+
+.cat-card__name {
+    font-family: var(--flow-serif);
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--color-text-muted);
+}
+.cat-card--live .cat-card__name { color: var(--color-dark); }
+
+.cat-card__status {
+    font-family: var(--flow-sans);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+}
+.cat-card__status--live { color: #166534; }
+
+.cat-card__blurb {
+    font-family: var(--flow-sans);
+    font-size: 0.88rem;
+    line-height: 1.55;
+    color: var(--color-text-muted);
+}
+.cat-card__go {
+    font-family: var(--flow-sans);
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--color-accent);
+    margin-top: 0.2rem;
+}
+.cat-card__link:hover .cat-card__go { color: var(--color-dark); }
+
+.catalogue__foot {
+    text-align: center;
+    margin: 1.75rem auto 0;
+    max-width: 560px;
+    font-size: 0.92rem;
+    color: var(--color-text-muted);
+}
+.catalogue__foot a { color: var(--color-accent); text-decoration: underline; }
+.catalogue__foot a:hover { color: var(--color-dark); }
+
+/* --- The network ------------------------------------------------------ */
+.network { padding: 3.5rem 0; }
+.network__grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 2rem;
+    align-items: center;
+}
+.network__title { text-align: left; }
+.network p {
+    color: var(--color-text);
+    line-height: 1.7;
+    margin: 0 0 1rem;
+}
+.network__note {
+    font-family: var(--flow-serif);
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: var(--color-dark);
+}
+.network__diagram { display: flex; justify-content: center; }
+.network__diagram svg { width: 100%; max-width: 340px; height: auto; }
+.nw-node {
+    fill: #fff;
+    stroke: var(--color-border);
+    stroke-width: 1.5;
+}
+.nw-node--hub {
+    fill: var(--color-dark);
+    stroke: var(--color-dark);
+}
+.nw-hub-label {
+    font-family: var(--flow-serif);
+    font-size: 17px;
+    font-weight: 700;
+    fill: #fff;
+}
+.nw-line { stroke: var(--color-accent); stroke-width: 1.5; }
+.nw-line--soft { stroke: var(--color-border); stroke-width: 1.5; }
+.nw-foot {
+    font-family: var(--flow-sans);
+    font-size: 10px;
+    font-weight: 600;
+    fill: var(--color-text-muted);
+}
+
+/* --- The closer ------------------------------------------------------- */
+.closer {
+    background: var(--color-dark);
+    color: #fff;
+    padding: 4rem 1.25rem;
+    text-align: center;
+}
+.closer__inner { max-width: 640px; margin: 0 auto; }
+.closer__title {
+    font-family: var(--flow-serif);
+    font-size: 1.9rem;
+    font-weight: 700;
+    line-height: 1.25;
+    color: #f9fafb;
+    margin: 0 0 0.85rem;
+    text-wrap: balance;
+}
+.closer__sub {
+    font-size: 1.05rem;
+    color: #9ca3af;
+    margin: 0 0 1.75rem;
+    line-height: 1.7;
+}
+.closer__cta { text-decoration: none; }
+.closer__where {
+    margin: 1.25rem 0 0;
+    font-size: 0.9rem;
+    color: #9ca3af;
+}
+
+/* --- Wider screens ---------------------------------------------------- */
+@media (min-width: 720px) {
+    .pillars__grid  { grid-template-columns: repeat(3, 1fr); gap: 2.25rem; }
+    .swap__grid     { grid-template-columns: 1.05fr 1fr; gap: 3.5rem; }
+    .record__grid   { grid-template-columns: 1fr 1fr; gap: 3rem; }
+    .network__grid  { grid-template-columns: 1.15fr 1fr; gap: 3rem; }
+    .closer__title  { font-size: 2.4rem; }
+    .swap__line     { font-size: 1.9rem; }
+    .swap__line--strong { font-size: 2.4rem; }
+}
+
+/* The hero goes two-column here, with the home card holding the right side and
+   the wordmark stacked over the copy on the left. Below this width everything
+   stays a centred column — on a phone the card belongs under the CTA, not
+   beside it. */
+@media (min-width: 900px) {
+    .hero {
+        display: grid;
+        grid-template-columns: 1fr minmax(320px, 380px);
+        grid-template-areas:
+            "logo    home"
+            "content home";
+        align-items: center;
+        column-gap: 3.5rem;
+        row-gap: 1.25rem;
+        padding: 4rem 2rem;
+    }
+    .hero__image   { grid-area: logo; justify-content: flex-start; }
+    .hero__content { grid-area: content; text-align: left; }
+    .hero__home    { grid-area: home; }
+    .hero__logo    { max-width: 210px; }
+    .hero__headline { font-size: 3.1rem; }
+    .hero__sub      { margin-left: 0; max-width: 480px; }
+    .hero__actions  { justify-content: flex-start; }
+}
+
+@media (min-width: 1024px) {
+    .hero__headline { font-size: 3.6rem; }
+}
+
+/* The category line above the H1 on /services and /pricing. Those two pages
+   still lead with cleaning because that is what they rank for; this is what
+   places them inside Serve rather than beside it. */
+.serve-page-head__eyebrow {
+    font-family: var(--flow-sans);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    margin: 0 0 0.6rem;
+}

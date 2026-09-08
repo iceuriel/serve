@@ -24,25 +24,43 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Serve — Professional Home Cleaning | Greater Boston</title>
+    <!-- THE HOMEPAGE NOW LEADS WITH THE COMPANY, NOT THE CATEGORY.
+         "Professional Home Cleaning" was the whole positioning until
+         2026-09-07. The brand is Serve; cleaning is the first service inside
+         it. The word still has to appear here — it is what people search for
+         in Boston, and /pricing and /services carry it far harder — but the
+         title's job is now to say what Serve is. -->
+    <title>Serve — Your Home, Handled | Greater Boston</title>
     <!-- The snippet Google shows under this page in search results. Left blank,
          Google writes its own from whatever text it finds first, which here
          would be the nav.
 
-         149 characters — Google truncates around 155-160, so this survives
-         whole. Every claim is checked against the page itself: "bonded,
-         insured" is the trust bar, "all-in pricing" is the trust strip inside
-         the quote flow, "about a minute" matches the hero, and the 50% is
-         PRICING.FIRST_CLEAN_FACTOR. No price figure on purpose — /pricing owns
-         those numbers, and duplicating one here is a second place to go stale.
-         If the first-clean discount ever moves off 50%, this line moves too. -->
-    <meta name="description" content="Instant quotes for home cleaning across Greater Boston — price and book in about a minute. Bonded, insured, all-in pricing. 50% off your first clean.">
+         150 characters — Google truncates around 155-160, so this survives
+         whole. Every claim is checked against the page itself: the
+         coordination promise is what "How Serve Works" describes, and
+         "available now" is the one category with status:'live' in
+         serve-services.js. No price figure on purpose — /pricing owns those
+         numbers, and duplicating one here is a second place to go stale. -->
+    <meta name="description" content="One place to take care of your home. Serve coordinates trusted Greater Boston pros and handles everything around the work. Home cleaning, available now.">
     <!-- Every campaign slug creates another crawlable copy of this page —
          /?src=qr-card-founder-01, /?src=dh-clean, one more per card printed —
          and www would double the lot again. All identical content. This
          collapses them onto one URL so ranking signals do not split across
          however many tags we end up printing. Must match sitemap.xml. -->
     <link rel="canonical" href="https://servecleaning.com/">
+    <!-- What a link to Serve looks like when someone texts or posts it. Without
+         these a share renders as a bare URL and whatever text the scraper finds
+         first. og:image is the wordmark rather than a photo of a clean kitchen:
+         the share is for the company now, not the category. -->
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Serve">
+    <meta property="og:url" content="https://servecleaning.com/">
+    <meta property="og:title" content="Serve — Your Home, Handled">
+    <meta property="og:description" content="One place to take care of your home. Serve coordinates trusted Greater Boston pros and handles everything around the work. Home cleaning, available now.">
+    <meta property="og:image" content="https://servecleaning.com/images/serve-header-img.jpg">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Serve — Your Home, Handled">
+    <meta name="twitter:description" content="One place to take care of your home. Serve coordinates trusted Greater Boston pros and handles everything around the work.">
     <link rel="icon" type="image/x-icon" href="images/favicon.ico">
     <link rel="icon" type="image/svg+xml" href="images/favicon.svg">
     <link rel="icon" type="image/png" sizes="32x32" href="images/favicon-32.png">
@@ -61,10 +79,10 @@
         <div class="nav__inner">
             <a href="/" class="nav__logo">Serve</a>
             <ul class="nav__links">
-                <li><a href="/#how-it-works">How It Works</a></li>
-                <li><a href="/pricing">Pricing</a></li>
+                <li><a href="/#how-it-works">How Serve Works</a></li>
                 <li><a href="/services">Services</a></li>
-                <li><a href="/#quote" class="nav__cta serve-pulse">Instant quote</a></li>
+                <li><a href="/pricing">Pricing</a></li>
+                <li><a href="/#quote" class="nav__cta serve-pulse">Book a service</a></li>
             </ul>
             <button class="nav__hamburger" aria-label="Open menu" aria-expanded="false">
                 <span></span><span></span><span></span>
@@ -72,10 +90,10 @@
         </div>
         <div class="nav__mobile-menu" id="mobile-menu">
             <ul>
-                <li><a href="/#how-it-works">How It Works</a></li>
-                <li><a href="/pricing">Pricing</a></li>
+                <li><a href="/#how-it-works">How Serve Works</a></li>
                 <li><a href="/services">Services</a></li>
-                <li><a href="/#quote">Instant quote</a></li>
+                <li><a href="/pricing">Pricing</a></li>
+                <li><a href="/#quote">Book a service</a></li>
             </ul>
         </div>
     </nav>
@@ -131,13 +149,75 @@
             </svg>
         </div>
         <div class="hero__image">
-            <img class="hero__logo" src="images/serve-logo-v2.svg" alt="Serve Home Cleaning">
+            <!-- serve-wordmark.svg, not serve-logo-v2.svg. The old mark sets
+                 "HOME CLEANING" under the name, which is the category, not the
+                 company. The full mark is untouched and still correct wherever
+                 the category IS the label. -->
+            <img class="hero__logo" src="images/serve-wordmark.svg" alt="Serve">
         </div>
         <div class="hero__content">
-            <h1 class="hero__headline">Greater Boston's Premier Cleaning Service</h1>
-            <p class="hero__sub">Quote &amp; book a cleaning with Serve in 1 minute</p>
-            <a href="#quote" class="btn btn--primary serve-pulse">Instant quote</a>
-            <p class="hero__tagline">made to Serve <strong>your</strong> needs</p>
+            <h1 class="hero__headline">Your home.<br>Handled.</h1>
+            <p class="hero__sub">One place to take care of your home. Serve finds the right local professional, coordinates the work, and keeps the details straight &mdash; starting with home cleaning across Greater Boston.</p>
+            <div class="hero__actions">
+                <a href="#quote" class="btn btn--primary serve-pulse">Book a service</a>
+                <a href="#how-it-works" class="btn btn--hero-ghost">See how Serve works</a>
+            </div>
+            <p class="hero__tagline">Built for Greater Boston homes</p>
+        </div>
+
+        <!-- THE HOME CARD.
+             =============================================================
+             The one picture that has to carry the whole repositioning: a home
+             is the object, and services attach to it.
+
+             NO ADDRESS ON PURPOSE. A real one would either be a customer's —
+             which is not ours to put on a billboard — or invented, which makes
+             the card a small lie in the place the page is least able to afford
+             one. The empty field is better anyway: it is an invitation, it
+             matches the first thing the booking flow asks for, and it goes
+             there when tapped.
+
+             The service rows are the honest version of the vision. Cleaning
+             reads live because it is; everything else reads as coming because
+             it is coming. Those labels are the `status` values in
+             serve-services.js, and a test holds the two in sync — see
+             tests/service-catalogue.test.js. Move a status there without
+             moving it here and the suite fails. -->
+        <div class="hero__home">
+            <div class="homecard">
+                <p class="homecard__eyebrow">Your home</p>
+
+                <div class="homecard__house" aria-hidden="true">
+                    <svg viewBox="0 0 200 132" fill="none">
+                        <path class="hc-roof" d="M22 62 L100 14 L178 62" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                        <rect class="hc-wall" x="38" y="62" width="124" height="56" rx="2"/>
+                        <rect class="hc-door" x="90" y="90" width="20" height="28" rx="1.5"/>
+                        <rect class="hc-win" x="54" y="74" width="22" height="18" rx="1.5"/>
+                        <rect class="hc-win" x="124" y="74" width="22" height="18" rx="1.5"/>
+                        <line class="hc-ground" x1="14" y1="118" x2="186" y2="118" stroke-linecap="round"/>
+                    </svg>
+                </div>
+
+                <a href="#quote" class="homecard__addr">
+                    <span class="homecard__addr-label">Add your address</span>
+                    <span class="homecard__addr-arrow" aria-hidden="true">&rarr;</span>
+                </a>
+
+                <ul class="homecard__services">
+                    <li class="homecard__svc homecard__svc--live">
+                        <span class="homecard__svc-name">Cleaning</span>
+                        <span class="homecard__svc-status">Available now</span>
+                    </li>
+                    <li class="homecard__svc">
+                        <span class="homecard__svc-name">Handyman</span>
+                        <span class="homecard__svc-status">Coming to Serve</span>
+                    </li>
+                    <li class="homecard__svc">
+                        <span class="homecard__svc-name">Plumbing</span>
+                        <span class="homecard__svc-status">Coming to Serve</span>
+                    </li>
+                </ul>
+            </div>
         </div>
     </section>
 
@@ -163,117 +243,69 @@
         </div>
     </section>
 
-    <!-- HOW IT WORKS -->
-    <section class="how-it-works" id="how-it-works">
+    <!-- THE THREE IDEAS
+         Serve's model is unfamiliar, so this sits as high as it can: three
+         sentences that say what is different before anyone has to scroll for
+         it. Each one is a claim the rest of the page has to back up — the
+         instant price is the calculator below, the coordination is How Serve
+         Works, and the memory is the job record. Nothing here is aspirational. -->
+    <section class="pillars" id="why-serve">
         <div class="section-inner">
-            <h2 class="section-title">How It Works</h2>
-            <p class="section-sub">Three simple steps to a cleaner home.</p>
-            <div class="steps">
-                <div class="step">
-                    <div class="step__number">1</div>
-                    <h3>Instant Quotes</h3>
-                    <p>Fill out your home details below and instantly calculate an honest
-                    <a href="/pricing" class="serve-inline-link">price</a> — no commitment required.</p>
-                </div>
-                <div class="step">
-                    <div class="step__number">2</div>
-                    <h3>We Schedule Your Clean</h3>
-                    <p>Whether it's your
-                    <a href="/services" class="serve-inline-link">first deep clean, a recurring visit, or a move-in</a>,
-                    pick a time that works for you. Our team shows up on time, fully
-                    equipped, and ready to work.</p>
-                </div>
-                <div class="step">
-                    <div class="step__number">3</div>
-                    <h3>Enjoy Your Space</h3>
-                    <p>Come home to a spotless space. We're not done until you're completely satisfied.</p>
-                    <p class="step__link"><a href="#after-you-book">See how the day runs, start to finish &rarr;</a></p>
-                </div>
+            <div class="pillars__grid">
+                <article class="pillar">
+                    <span class="pillar__rule" aria-hidden="true"></span>
+                    <h2 class="pillar__title">Instant, not endless</h2>
+                    <p>A real price and a real time slot in about a minute. No calling around, no waiting on three quotes to come back.</p>
+                </article>
+                <article class="pillar">
+                    <span class="pillar__rule" aria-hidden="true"></span>
+                    <h2 class="pillar__title">The right professional</h2>
+                    <p>Serve works with trusted Greater Boston service businesses and picks the one that fits the job and your home. You never have to vet anyone.</p>
+                </article>
+                <article class="pillar">
+                    <span class="pillar__rule" aria-hidden="true"></span>
+                    <h2 class="pillar__title">One point of contact</h2>
+                    <p>Booking, scheduling, access, notes, follow-up. It all goes through Serve, and it stays attached to your home.</p>
+                </article>
             </div>
         </div>
     </section>
 
-    <!-- WORK EXAMPLES -->
-    <section class="work" id="examples">
+    <!-- HOW SERVE WORKS
+         The numbering is real sequence, not decoration: these happen in this
+         order and the customer only participates in the first one. That is the
+         entire pitch, so the middle step is deliberately the one with the most
+         words — it is the work Serve is taking off them, and if a reader skims
+         only one panel it should be that one. -->
+    <section class="how-it-works" id="how-it-works">
         <div class="section-inner">
-            <h2 class="section-title">The Serve Standard</h2>
-
-            <!-- Collapsed by default so the quote form sits higher on the page.
-                 Same reasoning as the RECENT WORK STRIP below: these are
-                 supporting photos, not a reason to scroll past the form.
-
-                 <details> rather than a JS toggle. It costs no JavaScript, is
-                 keyboard-operable and screen-reader-announced for free, and it
-                 still works if script.js fails to load — which matters here,
-                 because a broken toggle would hide the page's only proof.
-
-                 It is also a real load saving, not just a shorter page: the
-                 eight photos are loading="lazy", and a browser does not fetch
-                 lazy images inside a closed <details>. That is ~1.2 MB most
-                 visitors never request. -->
-            <details class="work-acc">
-                <summary class="work-acc__summary">See before &amp; after photos</summary>
-
-                <div class="ba-grid">
-                    <div class="ba-item">
-                        <div class="ba-pair">
-                            <figure class="ba-photo">
-                                <img src="images/bath1_before.jpeg" alt="Cluttered bathroom vanity before Serve cleaning" loading="lazy">
-                                <figcaption class="ba-tag ba-tag--before">Before</figcaption>
-                            </figure>
-                            <figure class="ba-photo">
-                                <img src="images/bath1_after.jpeg" alt="Spotless bathroom vanity after Serve cleaning" loading="lazy">
-                                <figcaption class="ba-tag ba-tag--after">After</figcaption>
-                            </figure>
-                        </div>
-                        <p class="ba-caption">Bathrooms cleared, polished, and disinfected — vanities, fixtures, mirrors, and floors.</p>
-                    </div>
-
-                    <div class="ba-item">
-                        <div class="ba-pair">
-                            <figure class="ba-photo">
-                                <img src="images/kitchen1_before.jpeg" alt="Cluttered kitchen counter before Serve cleaning" loading="lazy">
-                                <figcaption class="ba-tag ba-tag--before">Before</figcaption>
-                            </figure>
-                            <figure class="ba-photo">
-                                <img src="images/kitchen1_after.jpeg" alt="Spotless kitchen counter after Serve cleaning" loading="lazy">
-                                <figcaption class="ba-tag ba-tag--after">After</figcaption>
-                            </figure>
-                        </div>
-                        <p class="ba-caption">Kitchens reset top to bottom — counters degreased, sinks scrubbed, and surfaces ready to cook on.</p>
-                    </div>
-
-                    <div class="ba-item">
-                        <div class="ba-pair">
-                            <figure class="ba-photo">
-                                <img src="images/living1_before.jpeg" alt="Cluttered living room before Serve cleaning" loading="lazy">
-                                <figcaption class="ba-tag ba-tag--before">Before</figcaption>
-                            </figure>
-                            <figure class="ba-photo">
-                                <img src="images/living1_after.jpeg" alt="Tidy living room after Serve cleaning" loading="lazy">
-                                <figcaption class="ba-tag ba-tag--after">After</figcaption>
-                            </figure>
-                        </div>
-                        <p class="ba-caption">Living spaces vacuumed, dusted, and reset — exactly how home should feel.</p>
-                    </div>
-
-                    <div class="ba-item">
-                        <div class="ba-pair">
-                            <figure class="ba-photo">
-                                <img src="images/bath2_before.jpeg" alt="Shower with water spots before Serve cleaning" loading="lazy">
-                                <figcaption class="ba-tag ba-tag--before">Before</figcaption>
-                            </figure>
-                            <figure class="ba-photo">
-                                <img src="images/bath2_after.jpeg" alt="Sparkling clean shower after Serve cleaning" loading="lazy">
-                                <figcaption class="ba-tag ba-tag--after">After</figcaption>
-                            </figure>
-                        </div>
-                        <p class="ba-caption">Showers and tile detailed — glass streak-free, grout brightened, floors finished.</p>
-                    </div>
+            <h2 class="section-title">How Serve works</h2>
+            <p class="section-sub">You do the first step. Serve does the rest.</p>
+            <div class="steps">
+                <div class="step">
+                    <div class="step__number">01</div>
+                    <h3>Tell Serve what your home needs</h3>
+                    <p>Give us your address and we pull up what we can about your home, so you confirm the details instead of filling them in. You get a
+                    <a href="/pricing" class="serve-inline-link">real price</a> and real times &mdash; no commitment.</p>
                 </div>
-            </details>
+                <div class="step">
+                    <div class="step__number">02</div>
+                    <h3>Serve handles the logistics</h3>
+                    <p>We assign the right professional for
+                    <a href="/services" class="serve-inline-link">the work you booked</a>,
+                    confirm your window, pass on your access notes and parking, and stay on it through the visit. No vendor hunting, no quote chasing, no repeating yourself.</p>
+                </div>
+                <div class="step">
+                    <div class="step__number">03</div>
+                    <h3>Your home stays on record</h3>
+                    <p>What we learn about your home &mdash; the pets, the parking, the room you asked us to skip &mdash; stays with Serve, so the next visit starts where the last one left off.</p>
+                    <p class="step__link"><a href="#after-you-book">See how the day runs, start to finish &rarr;</a></p>
+                </div>
+            </div>
+            <p class="steps__coda">You manage your home. Serve manages everything underneath it.</p>
         </div>
     </section>
+
 
     <!-- QUOTE FLOW — Build → Price → Reserve -->
     <section class="quote-section" id="quote">
@@ -789,6 +821,315 @@
         </div>
     </section>
 
+    <!-- WHAT SERVE REMOVES
+         The clearest statement of the value proposition on the page, and the
+         only place the old way is named out loud. Deliberately NOT a
+         feature-comparison table: the left side is a list of chores and the
+         right side is two sentences, and the asymmetry between those two
+         shapes is the argument. Nothing is ticked or crossed. -->
+    <section class="swap" id="what-serve-removes">
+        <div class="section-inner">
+            <div class="swap__grid">
+                <div class="swap__col swap__col--before">
+                    <p class="swap__label">Getting something done at home</p>
+                    <ul class="swap__list">
+                        <li>Search around for someone</li>
+                        <li>Call three places</li>
+                        <li>Explain the problem again</li>
+                        <li>Wait on quotes</li>
+                        <li>Try to tell who's reliable</li>
+                        <li>Work out a time</li>
+                        <li>Repeat the access instructions</li>
+                        <li>Chase the follow-up</li>
+                        <li>Start over next time</li>
+                    </ul>
+                </div>
+                <div class="swap__col swap__col--after">
+                    <p class="swap__label">With Serve</p>
+                    <p class="swap__line">Tell us what you need.</p>
+                    <p class="swap__arrow" aria-hidden="true">&darr;</p>
+                    <p class="swap__line swap__line--strong">We handle the rest.</p>
+                    <a href="#quote" class="btn btn--primary swap__cta">Book a service</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- YOUR HOME ON SERVE
+         =============================================================
+         THIS CARD IS A REAL PAGE, NOT A MOCK-UP OF A FUTURE ONE.
+
+         Everything inside the ticket below already exists: /j renders exactly
+         these fields from the JOBS row — service, window, address, home size,
+         status, access method, and the customer's own notes read back to them.
+         Every booking gets one and the link is in the confirmation.
+
+         The rooms / history / photos layer underneath is separated and clearly
+         marked as coming, because it is. Mixing the two would make the honest
+         half unbelievable. The address is 123 Beacon St, which is the fixture
+         address used throughout this repo's tests — a customer's real address
+         is not ours to put on a marketing page. -->
+    <section class="record" id="your-home">
+        <div class="section-inner">
+            <div class="record__grid">
+                <div class="record__copy">
+                    <h2 class="section-title record__title">Serve gets to know your home</h2>
+                    <p class="record__lede">Your address, the size of the place, how we get in, the dog's name, the room you asked us to skip. It stays with Serve and it comes back on the next visit.</p>
+                    <p class="record__pull">The more you use Serve, the less you have to explain.</p>
+                    <p class="record__note">Every Serve booking gets its own page. You get the link when you book &mdash; no account, no password, no app.</p>
+                </div>
+
+                <div class="record__card">
+                    <div class="ticket">
+                        <div class="ticket__head">
+                            <span class="ticket__brand">Serve</span>
+                            <span class="ticket__id">SRV&#8209;0916&#8209;A4K1</span>
+                        </div>
+
+                        <p class="ticket__service">First clean</p>
+                        <p class="ticket__when">Wed, Sep 16 &middot; 10:00 AM &ndash; 1:00 PM</p>
+
+                        <div class="ticket__addr">
+                            <p class="ticket__street">123 Beacon St, Apt 4B</p>
+                            <p class="ticket__specs">3 BR &middot; 2.5 ba &middot; 2 floors</p>
+                        </div>
+
+                        <dl class="ticket__rows">
+                            <div class="ticket__row">
+                                <dt>Status</dt>
+                                <dd><span class="ticket__pill">Confirmed</span></dd>
+                            </div>
+                            <div class="ticket__row">
+                                <dt>Access</dt>
+                                <dd>Lockbox</dd>
+                            </div>
+                            <div class="ticket__row">
+                                <dt>Parking</dt>
+                                <dd>Resident permit &mdash; use the driveway</dd>
+                            </div>
+                            <div class="ticket__row ticket__row--notes">
+                                <dt>Your notes</dt>
+                                <dd>&ldquo;Friendly dog, please keep the back door shut. Skip the office.&rdquo;</dd>
+                            </div>
+                        </dl>
+
+                        <p class="ticket__foot">Live today &mdash; this is what a Serve job page shows.</p>
+                    </div>
+
+                    <div class="record__soon">
+                        <p class="record__soon-label">Coming to Serve</p>
+                        <ul class="record__soon-list">
+                            <li>Room-by-room notes</li>
+                            <li>Photos from every visit</li>
+                            <li>Full service history</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- THE SERVICE CATALOGUE
+         =============================================================
+         MIRRORS serve-services.js AND IS TESTED AGAINST IT.
+
+         Static HTML rather than JS-rendered, for the same reason the nav is:
+         crawlers and Twilio's A2P reviewers read the served markup, and a
+         service list that only exists after JavaScript runs is one some of them
+         never see. The data file stays the source of truth and
+         tests/service-catalogue.test.js fails if the two ever disagree — so
+         "edit one place" is enforced rather than merely intended.
+
+         ONLY CLEANING SAYS "AVAILABLE NOW", BECAUSE ONLY CLEANING IS. The rest
+         are named so the direction is legible and are deliberately not
+         clickable and not requestable. A card that took an order Serve cannot
+         fill would cost more than the six it impresses. -->
+    <section class="catalogue" id="services">
+        <div class="section-inner">
+            <h2 class="section-title">One relationship. Everything your home needs.</h2>
+            <p class="section-sub">Home care starts with cleaning. The rest is on the way.</p>
+
+            <ul class="cat-grid">
+                <li class="cat-card cat-card--live">
+                    <a class="cat-card__link" href="/services">
+                        <span class="cat-card__icon" aria-hidden="true">
+                            <svg viewBox="0 0 32 32" fill="none"><path d="M12 5h5v6h-5z" stroke-width="1.8" stroke-linejoin="round"/><path d="M10.5 11h8l1.5 16h-11z" stroke-width="1.8" stroke-linejoin="round"/><path d="M20 8h4M22 6v4" stroke-width="1.8" stroke-linecap="round"/></svg>
+                        </span>
+                        <span class="cat-card__name">Cleaning</span>
+                        <span class="cat-card__status cat-card__status--live">Available now</span>
+                        <span class="cat-card__blurb">Recurring upkeep, first deep cleans, and move-in / move-out.</span>
+                        <span class="cat-card__go">See what&rsquo;s included &rarr;</span>
+                    </a>
+                </li>
+
+                <li class="cat-card">
+                    <span class="cat-card__icon" aria-hidden="true">
+                        <svg viewBox="0 0 32 32" fill="none"><path d="M21 6a6 6 0 0 0-7.8 7.8L6 21l5 5 7.2-7.2A6 6 0 0 0 26 11l-3.5 3.5-3-3L23 8z" stroke-width="1.8" stroke-linejoin="round"/></svg>
+                    </span>
+                    <span class="cat-card__name">Handyman</span>
+                    <span class="cat-card__status">Coming to Serve</span>
+                    <span class="cat-card__blurb">Mounting, patching, doors, and the small jobs that pile up.</span>
+                </li>
+
+                <li class="cat-card">
+                    <span class="cat-card__icon" aria-hidden="true">
+                        <svg viewBox="0 0 32 32" fill="none"><path d="M16 4s8 9 8 14a8 8 0 1 1-16 0c0-5 8-14 8-14z" stroke-width="1.8" stroke-linejoin="round"/></svg>
+                    </span>
+                    <span class="cat-card__name">Plumbing</span>
+                    <span class="cat-card__status">Coming to Serve</span>
+                    <span class="cat-card__blurb">Leaks, fixtures, drains, and water heaters.</span>
+                </li>
+
+                <li class="cat-card">
+                    <span class="cat-card__icon" aria-hidden="true">
+                        <svg viewBox="0 0 32 32" fill="none"><path d="M13 18V8a3 3 0 0 1 6 0v10a5 5 0 1 1-6 0z" stroke-width="1.8" stroke-linejoin="round"/><path d="M16 12v7" stroke-width="1.8" stroke-linecap="round"/></svg>
+                    </span>
+                    <span class="cat-card__name">Heating &amp; Cooling</span>
+                    <span class="cat-card__status">Coming to Serve</span>
+                    <span class="cat-card__blurb">Seasonal service, filters, and the call you make in July.</span>
+                </li>
+
+                <li class="cat-card">
+                    <span class="cat-card__icon" aria-hidden="true">
+                        <svg viewBox="0 0 32 32" fill="none"><path d="M18 3 8 18h7l-1 11 10-15h-7z" stroke-width="1.8" stroke-linejoin="round"/></svg>
+                    </span>
+                    <span class="cat-card__name">Electrical</span>
+                    <span class="cat-card__status">Coming to Serve</span>
+                    <span class="cat-card__blurb">Fixtures, switches, and panel work by a licensed pro.</span>
+                </li>
+
+                <li class="cat-card">
+                    <span class="cat-card__icon" aria-hidden="true">
+                        <svg viewBox="0 0 32 32" fill="none"><path d="M26 6C14 6 7 12 7 20c0 3 2 6 2 6s10-1 14-6c3.5-4 3-14 3-14z" stroke-width="1.8" stroke-linejoin="round"/><path d="M7 26 19 13" stroke-width="1.8" stroke-linecap="round"/></svg>
+                    </span>
+                    <span class="cat-card__name">Lawn &amp; Snow</span>
+                    <span class="cat-card__status">Coming to Serve</span>
+                    <span class="cat-card__blurb">Mowing through the summer, plowing through the winter.</span>
+                </li>
+            </ul>
+
+            <p class="catalogue__foot">Need something we haven&rsquo;t listed? <a href="#quote">Tell us what your home needs</a> and we&rsquo;ll say honestly whether we can help yet.</p>
+        </div>
+    </section>
+
+    <!-- THE NETWORK
+         Two claims to keep straight, and they pull in opposite directions.
+
+         Serve owns the customer relationship — booking, price, scheduling,
+         follow-up — which is what makes this not a lead marketplace.
+
+         But the people doing the work are INDEPENDENT LOCAL BUSINESSES, not
+         Serve employees, and this section must never read otherwise. Under
+         Massachusetts §148B that distinction is a legal one, not a stylistic
+         one, and the wording is deliberately "businesses" rather than any
+         named individual. See constraint_serve_joint_employer. -->
+    <section class="network" id="network">
+        <div class="section-inner">
+            <div class="network__grid">
+                <div class="network__copy">
+                    <h2 class="section-title network__title">Great home service starts with great people</h2>
+                    <p>Serve works with trusted independent service businesses across Greater Boston. We handle booking, pricing, scheduling, access and communication, so our partners can put their attention where it belongs &mdash; on the work.</p>
+                    <p class="network__note">You deal with Serve. Serve deals with everyone else.</p>
+                </div>
+                <div class="network__diagram" aria-hidden="true">
+                    <svg viewBox="0 0 300 210" fill="none">
+                        <rect class="nw-node nw-node--hub" x="106" y="10" width="88" height="38" rx="6"/>
+                        <text class="nw-hub-label" x="150" y="34" text-anchor="middle">Serve</text>
+                        <path class="nw-line" d="M150 48 V78 M60 78 H240 M60 78 V104 M150 78 V104 M240 78 V104" stroke-linecap="round"/>
+                        <rect class="nw-node" x="18" y="104" width="84" height="34" rx="6"/>
+                        <rect class="nw-node" x="108" y="104" width="84" height="34" rx="6"/>
+                        <rect class="nw-node" x="198" y="104" width="84" height="34" rx="6"/>
+                        <path class="nw-line nw-line--soft" d="M60 138 V166 M150 138 V166 M240 138 V166 M60 166 H240" stroke-linecap="round"/>
+                        <text class="nw-foot" x="150" y="192" text-anchor="middle">Trusted local service businesses</text>
+                    </svg>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- WORK EXAMPLES -->
+    <section class="work" id="examples">
+        <div class="section-inner">
+            <h2 class="section-title">Work we put our name on</h2>
+            <p class="section-sub">Real homes, real Serve cleans. Every job ends with photos.</p>
+
+            <!-- Collapsed by default so the quote form sits higher on the page.
+                 Same reasoning as the RECENT WORK STRIP below: these are
+                 supporting photos, not a reason to scroll past the form.
+
+                 <details> rather than a JS toggle. It costs no JavaScript, is
+                 keyboard-operable and screen-reader-announced for free, and it
+                 still works if script.js fails to load — which matters here,
+                 because a broken toggle would hide the page's only proof.
+
+                 It is also a real load saving, not just a shorter page: the
+                 eight photos are loading="lazy", and a browser does not fetch
+                 lazy images inside a closed <details>. That is ~1.2 MB most
+                 visitors never request. -->
+            <details class="work-acc">
+                <summary class="work-acc__summary">See before &amp; after photos</summary>
+
+                <div class="ba-grid">
+                    <div class="ba-item">
+                        <div class="ba-pair">
+                            <figure class="ba-photo">
+                                <img src="images/bath1_before.jpeg" alt="Cluttered bathroom vanity before Serve cleaning" loading="lazy">
+                                <figcaption class="ba-tag ba-tag--before">Before</figcaption>
+                            </figure>
+                            <figure class="ba-photo">
+                                <img src="images/bath1_after.jpeg" alt="Spotless bathroom vanity after Serve cleaning" loading="lazy">
+                                <figcaption class="ba-tag ba-tag--after">After</figcaption>
+                            </figure>
+                        </div>
+                        <p class="ba-caption">Bathrooms cleared, polished, and disinfected — vanities, fixtures, mirrors, and floors.</p>
+                    </div>
+
+                    <div class="ba-item">
+                        <div class="ba-pair">
+                            <figure class="ba-photo">
+                                <img src="images/kitchen1_before.jpeg" alt="Cluttered kitchen counter before Serve cleaning" loading="lazy">
+                                <figcaption class="ba-tag ba-tag--before">Before</figcaption>
+                            </figure>
+                            <figure class="ba-photo">
+                                <img src="images/kitchen1_after.jpeg" alt="Spotless kitchen counter after Serve cleaning" loading="lazy">
+                                <figcaption class="ba-tag ba-tag--after">After</figcaption>
+                            </figure>
+                        </div>
+                        <p class="ba-caption">Kitchens reset top to bottom — counters degreased, sinks scrubbed, and surfaces ready to cook on.</p>
+                    </div>
+
+                    <div class="ba-item">
+                        <div class="ba-pair">
+                            <figure class="ba-photo">
+                                <img src="images/living1_before.jpeg" alt="Cluttered living room before Serve cleaning" loading="lazy">
+                                <figcaption class="ba-tag ba-tag--before">Before</figcaption>
+                            </figure>
+                            <figure class="ba-photo">
+                                <img src="images/living1_after.jpeg" alt="Tidy living room after Serve cleaning" loading="lazy">
+                                <figcaption class="ba-tag ba-tag--after">After</figcaption>
+                            </figure>
+                        </div>
+                        <p class="ba-caption">Living spaces vacuumed, dusted, and reset — exactly how home should feel.</p>
+                    </div>
+
+                    <div class="ba-item">
+                        <div class="ba-pair">
+                            <figure class="ba-photo">
+                                <img src="images/bath2_before.jpeg" alt="Shower with water spots before Serve cleaning" loading="lazy">
+                                <figcaption class="ba-tag ba-tag--before">Before</figcaption>
+                            </figure>
+                            <figure class="ba-photo">
+                                <img src="images/bath2_after.jpeg" alt="Sparkling clean shower after Serve cleaning" loading="lazy">
+                                <figcaption class="ba-tag ba-tag--after">After</figcaption>
+                            </figure>
+                        </div>
+                        <p class="ba-caption">Showers and tile detailed — glass streak-free, grout brightened, floors finished.</p>
+                    </div>
+                </div>
+            </details>
+        </div>
+    </section>
+
     <!-- PRICING TEASER
          Placed below the form, not above it. Someone who scrolls past the
          calculator without using it has told us they will not fill in five
@@ -939,12 +1280,25 @@
         </div>
     </section>
 
+    <!-- FINAL CTA
+         The last thing on the page before the footer, and deliberately the
+         emptiest section on it. Everything above has already made the argument;
+         this is only a door. -->
+    <section class="closer">
+        <div class="closer__inner">
+            <h2 class="closer__title">One home. One place to take care of it.</h2>
+            <p class="closer__sub">Tell Serve what you need. We&rsquo;ll handle the rest.</p>
+            <a href="#quote" class="btn btn--primary closer__cta">Book a service</a>
+            <p class="closer__where">Currently serving Greater Boston</p>
+        </div>
+    </section>
+
     <!-- FOOTER -->
     <footer class="footer">
         <div class="footer__inner">
             <div class="footer__brand">
                 <span class="footer__logo">Serve</span>
-                <p>Professional home cleaning for Greater Boston.</p>
+                <p>One place to take care of your home. Greater Boston.</p>
             </div>
             <div class="footer__contact">
                 <p>Questions? Reach us at:</p>
@@ -968,6 +1322,11 @@
          home prices as the neutral case rather than breaking. -->
     <script src="serve-geo-data.js"></script>
     <script src="pricing-engine.js"></script>
+    <!-- The service catalogue. Read by the booking flow to decide whether a
+         category chooser is needed at all — with one live service it is a
+         screen with one button on it, so it stays out of the way until a
+         second category goes live. -->
+    <script src="serve-services.js"></script>
     <script src="script.js"></script>
 </body>
 </html>

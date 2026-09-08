@@ -155,16 +155,27 @@ head('Availability feed isolation');
 js.includes('AVAILABILITY_TIMEOUT_MS = 5000') ? ok('5s timeout constant present') : fail('no 5s timeout');
 js.includes('if (!AVAILABILITY_SOURCE_URL)')  ? ok('empty-URL short circuit present') : fail('no empty-URL short circuit');
 
-/* 10. CTA copy unified — the CONTROLS, not every use of the phrase.
-   Headings are prose and may differ; a button must not.
+/* 10. CTA copy unified — the BUTTONS, not every link that happens to point at
+   the form. Headings are prose and may differ; a button must not.
+
+   Scoped on the class rather than on href, as of 2026-09-07. href alone was a
+   fine proxy for "control" until the page grew links to #quote that are
+   deliberately NOT buttons and must not read the same: the home card's empty
+   address field says "Add your address", and the service catalogue ends with a
+   sentence whose link is prose. Matching those would have forced two good
+   pieces of copy to become a fourth "Book a service".
+
    Both href forms count: the nav uses the absolute "/#quote" so one nav block
-   can be byte-identical across index, pricing and services; the hero stays
-   relative. The label is what is under test and it did not change. */
+   can be byte-identical across index, pricing and services; the others stay
+   relative. */
 head('CTA copy');
-const cta = [...html.matchAll(/<a[^>]*href="\/?#quote"[^>]*>([^<]+)<\/a>/g)].map(m => m[1].trim());
-cta.length === 3 && cta.every(c => c === 'Instant quote')
-  ? ok('all ' + cta.length + ' CTA controls read "Instant quote"')
-  : fail('CTA controls inconsistent: ' + JSON.stringify(cta));
+const ctaTags = (html.match(/<a[^>]*href="\/?#quote"[^>]*>[^<]+<\/a>/g) || []);
+const cta = ctaTags
+  .filter(tag => /class="[^"]*\b(btn|nav__cta)\b/.test(tag))
+  .map(tag => (tag.match(/>([^<]+)</) || [])[1].trim());
+cta.length >= 3 && cta.every(c => c === 'Book a service')
+  ? ok('all ' + cta.length + ' CTA buttons read "Book a service"')
+  : fail('CTA buttons inconsistent: ' + JSON.stringify(cta));
 
 /* 11. The hero skyline, and specifically the thing that makes it loop.
    Each sail is in the markup TWICE — once in place, once shifted one full
@@ -223,8 +234,19 @@ skyline ? ok('skyline block present in the hero')
    forgetting to remove it would undo both, invisibly — the page would simply
    look the way it used to. */
 head('Before/after photos collapsed');
-const workSection = (html.match(/<!-- WORK EXAMPLES -->[\s\S]*?<!-- QUOTE FLOW/) || [''])[0]
+/* Sliced by the section's OWN boundaries, not by what follows it. This used to
+   read from the WORK EXAMPLES marker to the QUOTE FLOW marker, which silently
+   encoded an assumption about page order — and when the photos moved below the
+   booking flow on 2026-09-07 the regex matched nothing at all, so every check
+   below it reported against an empty string. "0 of 0 photos are not lazy" is
+   what a vacuously-passing assertion looks like when it finally fails out
+   loud; it could just as easily have gone the other way. */
+const workStart = html.indexOf('<!-- WORK EXAMPLES -->');
+const workSection = (workStart === -1 ? '' :
+    html.slice(workStart, html.indexOf('</section>', workStart) + 10))
   .replace(/<!--[\s\S]*?-->/g, '');          // my own comments mention <details>
+workStart !== -1 ? ok('the photo section is on the page')
+                 : fail('WORK EXAMPLES section is gone from index.html');
 
 /<details class="work-acc">/.test(workSection)
   ? ok('photo grid wrapped in <details>')

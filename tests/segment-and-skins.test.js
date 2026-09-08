@@ -195,19 +195,24 @@ t('build stages _redirects',
 
 /* ============================================================ */
 console.log('\n=== 4. CTA copy is identical across every skin ===');
-/* Scoped to the actual controls — anchors pointing at the quote flow — not to
-   every occurrence of the phrase. Headings elsewhere on the page are prose and
-   may legitimately read differently ("Instant Quotes" in How It Works). The
-   rule is that a CONTROL says the same thing everywhere it appears.
+/* Scoped to the BUTTONS, not to every anchor pointing at the quote flow.
+   Headings elsewhere on the page are prose and may legitimately read
+   differently. The rule is that a control says the same thing everywhere it
+   appears — and as of 2026-09-07 the page also has non-button links to #quote
+   that must NOT match it: the home card's empty address field ("Add your
+   address") and a sentence in the service catalogue. Selecting on href alone
+   would have dragged both into the CTA vocabulary.
 
    Both href forms count. The nav moved to the absolute "/#quote" when /pricing
    and /services were added, because the nav block is now byte-identical across
    three files and a bare "#quote" would point at the wrong page from two of
-   them. The hero stays relative — it only ever renders here. What is being
-   asserted is the LABEL, which did not change and must not. */
-const ctas = [...HTML.matchAll(/<a[^>]*href="\/?#quote"[^>]*>([^<]+)<\/a>/g)].map(m => m[1].trim());
-t('every CTA control reads "Instant quote"',
-  ctas.length === 3 && ctas.every(c => c === 'Instant quote'), ctas);
+   them. The rest stay relative — they only ever render here. The LABEL is what
+   is asserted; it became "Book a service" with the repositioning. */
+const ctas = (HTML.match(/<a[^>]*href="\/?#quote"[^>]*>[^<]+<\/a>/g) || [])
+  .filter(tag => /class="[^"]*\b(btn|nav__cta)\b/.test(tag))
+  .map(tag => (tag.match(/>([^<]+)</) || [])[1].trim());
+t('every CTA button reads "Book a service"',
+  ctas.length >= 3 && ctas.every(c => c === 'Book a service'), ctas);
 t('no skin touches the CTA', !/btn--primary|nav__cta/.test(JSON.stringify(vm.runInContext('HERO_SKINS', box))));
 t('skins define a headline and nothing else',
   Object.values(vm.runInContext('HERO_SKINS', box)).every(s => Object.keys(s).join() === 'headline'));
