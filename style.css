@@ -3670,34 +3670,20 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
     .swap__line--strong { font-size: 2.4rem; }
 }
 
-/* The hero goes two-column here, with the home card holding the right side and
-   the wordmark stacked over the copy on the left. Below this width everything
-   stays a centred column — on a phone the card belongs under the CTA, not
-   beside it. */
-/* LOGO LEFT, WORDS RIGHT — the layout this hero had before the home card
-   went in, restored on 2026-09-07. Two columns above 900px; below it the
-   flex-column default stacks them centred, which is the right shape on a
-   phone and needs no override. */
-@media (min-width: 900px) {
-    .hero {
-        display: grid;
-        grid-template-columns: minmax(200px, 300px) 1fr;
-        align-items: center;
-        column-gap: 3.5rem;
-        padding: 4rem 2rem;
-    }
-    .hero__image    { justify-content: center; }
-    .hero__content  { text-align: left; }
-    .hero__logo     { max-width: 260px; }
-    .hero__headline { font-size: 2.9rem; }
-    .hero__sub      { margin-left: 0; max-width: 520px; }
-    .hero__note     { margin-left: 0; }
-}
-}
+/* NO HERO RULES HERE — deliberately.
+   ---------------------------------------------------------------
+   The hero's two-column layout is the ORIGINAL one, and it already lives in
+   the Tablet (640px+) and Desktop (1024px+) blocks further up this file:
+   `.hero` becomes a flex row, `.hero__image` and `.hero__content` are each
+   `flex: 1`, so the logo centres in the left half and the copy centres in the
+   right. That is the layout this section had before 2026-09-07 and the one it
+   has again.
 
-@media (min-width: 1024px) {
-    .hero__headline { font-size: 3.6rem; }
-}
+   A grid override sat here for a day and did two things wrong: it broke the
+   centring by forcing `text-align: left`, and being later in the file it beat
+   the original rules it was duplicating. Anything hero-shaped that needs
+   changing belongs in those two blocks, not in a third one down here — a
+   second source of truth for the same component is what caused this. */
 
 /* The category line above the H1 on /services and /pricing. Those two pages
    still lead with cleaning because that is what they rank for; this is what

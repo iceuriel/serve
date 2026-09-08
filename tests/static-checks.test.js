@@ -465,5 +465,34 @@ staged.some(f => /rel="canonical"[^>]*href="https:\/\/www\./.test(
   ? fail('a canonical points at www — it must be apex, matching the redirect rule')
   : ok('no canonical points at www');
 
+/* The stylesheet parses.
+   ---------------------------------------------------------------
+   Browsers recover from a stray brace silently — an extra `}` at the top level
+   is discarded and the page renders, so nothing on screen says the file is
+   malformed. One shipped here on 2026-09-07, left behind by a script that cut
+   a block out of this file, and it survived a full green suite and a deploy.
+   A MISSING brace is the version that actually costs something: every rule
+   after it is swallowed into the unclosed block and silently stops applying.
+
+   Comments are stripped first — this very comment contains braces. */
+head('Stylesheet is balanced');
+const cssNoComments = css.replace(/\/\*[\s\S]*?\*\//g, '');
+const cssOpens  = (cssNoComments.match(/\{/g) || []).length;
+const cssCloses = (cssNoComments.match(/\}/g) || []).length;
+cssOpens === cssCloses
+  ? ok(cssOpens + ' blocks, all closed')
+  : fail('style.css has ' + cssOpens + ' { and ' + cssCloses + ' } — a rule is unclosed or a brace is stray');
+
+/* Depth never goes negative, which catches a stray closer even in the case
+   where a matching extra opener elsewhere keeps the totals equal. */
+let cssDepth = 0, cssLine = 1, cssStrayAt = 0;
+for (const ch of cssNoComments) {
+  if (ch === '\n') cssLine++;
+  else if (ch === '{') cssDepth++;
+  else if (ch === '}' && --cssDepth < 0 && !cssStrayAt) cssStrayAt = cssLine;
+}
+cssStrayAt ? fail('style.css closes a block that was never opened, near line ' + cssStrayAt)
+           : ok('no stray closing brace');
+
 console.log('\n' + (fails ? 'FAILURES: ' + fails : 'ALL CHECKS PASSED'));
 process.exit(fails ? 1 : 0);
