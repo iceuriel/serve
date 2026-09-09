@@ -126,6 +126,26 @@
   Cache-Control: no-store, private
   Referrer-Policy: no-referrer
 
+# The customer portal. Both path forms, because the asset server resolves /h
+# to /h.html. Referrer-Policy is the one that matters most here: the token is
+# in the URL, and without it every outbound click would hand that token to
+# whatever site was clicked.
+/h
+  Content-Type: text/html; charset=utf-8
+  X-Robots-Tag: noindex, nofollow, noarchive
+  Cache-Control: no-store, private
+  Referrer-Policy: no-referrer
+
+/h.html
+  Content-Type: text/html; charset=utf-8
+  X-Robots-Tag: noindex, nofollow, noarchive
+  Cache-Control: no-store, private
+  Referrer-Policy: no-referrer
+
+/portal.js
+  Content-Type: text/javascript; charset=utf-8
+  Cache-Control: public, max-age=0, must-revalidate
+
 /ticket.js
   Content-Type: text/javascript; charset=utf-8
   Cache-Control: public, max-age=0, must-revalidate

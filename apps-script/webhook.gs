@@ -1,7 +1,33 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-08  ·  master  ·  r13 — the domain layer
+ * VERSION STAMP:  2026-09-08  ·  master  ·  r14 — the client portal
+ *
+ * r14 = ONE PERMANENT LINK PER CUSTOMER, keyed on contact_id.
+ *      A ticket was per booking, which is wrong for how people behave: they
+ *      have a home, they book repeatedly, and how to get in is true every
+ *      visit rather than once. /h shows all their bookings and their access
+ *      answers, and the link never changes.
+ *
+ *      NEEDS ONE COLUMN: contact_id on LEADS. upsertLead writes it only when
+ *      that column exists, so it has been a no-op since r9. Adding it starts
+ *      it working, and it self-backfills on each customer's next booking. No
+ *      JOBS column is needed — the chain is contact_id -> LEADS -> lead_id ->
+ *      JOBS, and lead_id is already column 2 of the live JOBS header.
+ *
+ *      PROPERTY_ACCESS is new and auto-created: the customer's own answers
+ *      about getting in, PROPERTY-scoped so they outlive one booking. Kept
+ *      apart from PROPERTY_MEMORY, which is the crew's curated record.
+ *      The entry_code column is WRITE-ONLY: no view model returns it and
+ *      nothing logs it. The portal reports only the date it was saved.
+ *
+ *      Access is now CHOICES rather than free text. One taxonomy
+ *      (ACCESS_QUESTIONS) drives the bullets, the validation and where each
+ *      answer is stored, so the three cannot disagree.
+ *
+ *      A portal token authorises ONE contact. Every write proves the target
+ *      belongs to them before touching it — without that check a valid token
+ *      would be a key to every booking in the sheet.
  *
  * r13 = A DATA LAYER BETWEEN THE SHEET AND THE TICKET, plus two fixes to r11
  *      found while building on it.
@@ -456,6 +482,33 @@ const INSTRUCTIONS_HEADERS = [
   "instruction_id", "job_id", "scope_type", "scope_key",
   "instruction", "created_at", "updated_at", "source",
 ];
+/* PROPERTY_ACCESS — how to get into this home, in the customer's own words.
+   -------------------------------------------------------------------
+   Auto-created like BOOKING_INSTRUCTIONS and EVENTS, so no setup step.
+
+   PROPERTY-SCOPED, NOT BOOKING-SCOPED, and that is the whole point of the
+   portal: the lockbox is in the same place next month. Asking again every
+   visit is exactly what "Serve remembers your home" exists to stop.
+
+   Separate from PROPERTY_MEMORY, which is the crew's curated record and sits
+   on PROTECTED_TABS — a form submission knows nothing about a sticky gate
+   latch. This tab is the customer's own answers; the partner ticket shows
+   both, labelled, and never merges them.
+
+   `entry_code` IS WRITE-ONLY. No view model returns it, nothing logs it, and
+   two tests assert both. The portal reports only the date it was saved. If
+   Leads MASTER is ever shared with anyone outside the business, hide that one
+   column — moving this tab to Access MASTER later is a spreadsheet-id change,
+   not a redesign. */
+const PROPERTY_ACCESS_TAB = "PROPERTY_ACCESS";
+const PROPERTY_ACCESS_HEADERS = [
+  "property_id",
+  "occupancy_choice", "occupancy_detail",
+  "entry_choice", "entry_detail", "entry_code", "entry_code_set_at",
+  "parking_choice", "parking_detail",
+  "pet_notes", "updated_at",
+];
+
 
 /** Payload keys the webhook may write to PROPERTIES. Nothing else. */
 const PROPERTIES_FIELDS = ["property_key", "address", "unit", "zip", "bedrooms", "bathrooms"];
@@ -534,6 +587,10 @@ function doPost(e) {
        than on submission_id, because it is the customer editing their own
        booking rather than the site reporting one. */
     if (eventType === "booking_instruction") return handleInstruction(ss, data);
+
+    /* Portal writes. Authorised by a portal token and an ownership check
+       rather than by a per-job ticket token — see handlePortalWrite. */
+    if (eventType === "portal_write") return handlePortalWrite(ss, data);
 
     if (!isReservation) return handleEvent(ss, data, eventType);
 
@@ -733,9 +790,10 @@ function doGet(e) {
      check that has always been here. */
   var p = (e && e.parameter) || {};
   if (p.job) return handleTicket(p);
+  if (p.portal) return handlePortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-08 r13" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-08 r14" });
 }
 
 
@@ -910,13 +968,76 @@ function deriveRooms(beds, baths) {
   return rooms;
 }
 
-/* The five things a customer can tell us about getting in. A FIXED SET, not
-   free text keys: the partner ticket renders them under known headings, and a
-   sixth key invented by a caller would be stored and then never shown.
+/* THE ACCESS QUESTIONS, as options rather than free text.
+   -------------------------------------------------------------------
+   ONE STRUCTURE DRIVES THREE THINGS: the bullets the portal renders, the
+   validation on write, and where each answer is stored. Three separate lists
+   would be three chances to disagree about what "KEY" means.
 
-   DOOR CODE IS NOT ONE OF THEM, deliberately. Codes live in Access MASTER and
-   reach the cleaner by direct message; a field here would put one behind a URL
-   token, which is the separation this whole design exists to keep. */
+   A choice is what Serve can route on — "no parking" is actionable, a
+   paragraph mentioning parking is not. The optional detail is what a human
+   reads, and only some choices have one.
+
+   `secret: true` is the door code, and it is the reason this table exists in
+   this shape. Its detail is written to `entry_code`, which NO VIEW MODEL
+   RETURNS. The customer sets it and the portal thereafter shows only the date
+   it was saved. Codes still reach the cleaner by direct message at dispatch;
+   a URL token has never been the place for one and still is not. */
+var ACCESS_QUESTIONS = [
+  {
+    field: "occupancy",
+    label: "Will someone be home?",
+    choices: [
+      { key: "YES",   label: "Yes" },
+      { key: "NO",    label: "No" },
+      { key: "OTHER", label: "Other", detail: "Tell us more" },
+    ],
+  },
+  {
+    field: "entry",
+    /* `access_notes` used to be its own question. It is this question's detail
+       box now — "how do we get in" and "notes about getting in" were always
+       one thing asked twice. */
+    label: "How to get in",
+    choices: [
+      { key: "LET_IN",   label: "I'll let you in" },
+      { key: "KEY",      label: "Key",         detail: "Where will the key be?" },
+      { key: "CODE",     label: "Access code", detail: "Access code", secret: true },
+      { key: "UNLOCKED", label: "Unlocked for instant entry and service" },
+      { key: "OTHER",    label: "Other",       detail: "Tell us more" },
+    ],
+  },
+  {
+    field: "parking",
+    label: "Parking",
+    choices: [
+      { key: "FREE_STREET", label: "Free available street parking" },
+      { key: "PAID_STREET", label: "Paid street parking" },
+      { key: "GARAGE",      label: "Parking garage" },
+      { key: "NONE",        label: "No parking" },
+      { key: "OTHER",       label: "Other", detail: "Tell us more" },
+    ],
+  },
+];
+
+/* Pets is deliberately not a question with choices. The booking form already
+   screens for pets, so this is the one thing left worth knowing. */
+var ACCESS_PET_PLACEHOLDER = "We'd love to know their names!";
+
+/** The choice definition for a field, or null when the key is not one of ours. */
+function accessChoice(field, key) {
+  for (var i = 0; i < ACCESS_QUESTIONS.length; i++) {
+    var q = ACCESS_QUESTIONS[i];
+    if (q.field !== field) continue;
+    for (var j = 0; j < q.choices.length; j++) {
+      if (q.choices[j].key === String(key || "").toUpperCase()) return q.choices[j];
+    }
+  }
+  return null;
+}
+
+/* The old per-booking ACCESS scope keys, kept so instructions written before
+   the portal existed still render. Nothing writes these any more. */
 var ACCESS_KEYS = {
   OCCUPANCY: "Will someone be home?",
   METHOD:    "How to get in",
@@ -1379,6 +1500,497 @@ function buildVendorTicketModel(ss, booking) {
   };
 }
 
+
+
+/* ============================================================
+   THE PORTAL  —  one customer, all their homes and bookings
+   ============================================================
+   Added r14.
+
+   KEYED ON contact_id, NOT ON A PROPERTY. A portal tied to one home cannot
+   serve someone with several, and contact_id is the seam a real account with a
+   password attaches to later. The link never changes.
+
+   NO NEW JOBS COLUMN IS NEEDED. The chain is
+       contact_id -> LEADS row -> lead_id -> every JOBS row with that lead_id
+   and lead_id is already column 2 of the live JOBS header. That deliberately
+   avoids depending on JOBS.property_id or JOBS.contact_id, neither of whose
+   presence in the live sheet is confirmed. */
+
+/** The person. Returns null when the id is unknown — never a partial object. */
+function getContact(ss, contactId) {
+  var want = String(contactId || "").trim();
+  if (!want) return null;
+  var sheet = ss.getSheetByName(LEADS_TAB);
+  if (!sheet) return null;
+  var h = sheetHeaders(sheet);
+  var ci = h.indexOf("contact_id");
+  var li = h.indexOf("lead_id");
+  /* Without the column there is no portal. It is documented as a one-line
+     addition to LEADS rather than guessed at from an email. */
+  if (ci === -1 || li === -1) return null;
+
+  var last = sheet.getLastRow();
+  if (last < 2) return null;
+  var rows = sheet.getRange(2, 1, last - 1, h.length).getValues();
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i][ci]).trim() !== want) continue;
+    var name = String(rows[i][h.indexOf("name")] || "").trim();
+    return {
+      contactId: want,
+      leadId:    String(rows[i][li] || "").trim(),
+      name:      name,
+      firstName: name.split(" ")[0] || "",
+    };
+  }
+  return null;
+}
+
+/**
+ * Every booking this person has made, newest first.
+ *
+ * Matched on lead_id, which is their normalised email. Two people at one
+ * address with different emails therefore get separate portals showing the
+ * bookings each of them personally made — the right behaviour for something
+ * that becomes an account, though it is a behaviour worth knowing.
+ */
+function getContactBookings(ss, leadId) {
+  var want = String(leadId || "").trim().toLowerCase();
+  if (!want) return [];
+  var jobs = requireTab(ss, JOBS_TAB);
+  var h = sheetHeaders(jobs);
+  var li = h.indexOf("lead_id");
+  var idc = h.indexOf("job_id");
+  if (li === -1 || idc === -1) return [];
+
+  var last = jobs.getLastRow();
+  if (last < 2) return [];
+  var rows = jobs.getRange(2, 1, last - 1, h.length).getValues();
+
+  var out = [];
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i][li]).trim().toLowerCase() !== want) continue;
+    var id = String(rows[i][idc]).trim();
+    if (!id) continue;
+    var b = getBooking(ss, id);
+    if (b) out.push(b);
+  }
+  /* Newest first. An undated booking is a preference with no slot yet, which
+     is the most current thing there is, so it sorts to the top. */
+  out.sort(function (a, z) {
+    var av = a.scheduledDate || "9999-99-99";
+    var zv = z.scheduledDate || "9999-99-99";
+    return av < zv ? 1 : av > zv ? -1 : 0;
+  });
+  return out;
+}
+
+/** The distinct homes behind a set of bookings, most recent first. */
+function getContactProperties(bookings) {
+  var seen = {}, out = [];
+  bookings.forEach(function (b) {
+    var pid = String(b.propertyId || "").trim();
+    /* No property_id means the JOBS column is missing or the row predates r9.
+       Fall back to the address so the portal still has something to group by
+       rather than collapsing every home into one. */
+    var key = pid || (b.address + "|" + b.unit + "|" + b.zip).toUpperCase();
+    if (!key.replace(/\|/g, "").trim() || seen[key]) return;
+    seen[key] = true;
+    out.push({
+      propertyId: pid,
+      key:        key,
+      address:    b.address,
+      unit:       b.unit,
+      zip:        b.zip,
+      label:      [b.address, b.unit].filter(Boolean).join(", "),
+    });
+  });
+  return out;
+}
+
+/**
+ * How to get into one home, as the customer answered it.
+ *
+ * THE CODE NEVER COMES BACK. `entry_code` is read here and deliberately
+ * discarded; what is returned is whether one exists and when it was saved, so
+ * the portal can say "saved 8 Sep" and offer to replace it. A leaked portal
+ * link exposes no code, which is the property that made collecting one
+ * acceptable in the first place.
+ */
+function getPropertyAccess(ss, propertyId) {
+  var empty = {
+    occupancyChoice: "", occupancyDetail: "",
+    entryChoice: "", entryDetail: "",
+    entryCodeSet: false, entryCodeSetAt: "",
+    parkingChoice: "", parkingDetail: "",
+    petNotes: "", updatedAt: "",
+  };
+  var want = String(propertyId || "").trim();
+  if (!want) return empty;
+  try {
+    var sheet = ss.getSheetByName(PROPERTY_ACCESS_TAB);
+    if (!sheet) return empty;
+    var h = sheetHeaders(sheet);
+    var pi = h.indexOf("property_id");
+    var last = sheet.getLastRow();
+    if (pi === -1 || last < 2) return empty;
+    var rows = sheet.getRange(2, 1, last - 1, h.length).getValues();
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i][pi]).trim() !== want) continue;
+      var v = {};
+      h.forEach(function (n, idx) { v[n] = rows[i][idx]; });
+      return {
+        occupancyChoice: String(v.occupancy_choice || ""),
+        occupancyDetail: String(v.occupancy_detail || ""),
+        entryChoice:     String(v.entry_choice || ""),
+        entryDetail:     String(v.entry_detail || ""),
+        entryCodeSet:    String(v.entry_code || "").trim() !== "",
+        entryCodeSetAt:  String(v.entry_code_set_at || ""),
+        parkingChoice:   String(v.parking_choice || ""),
+        parkingDetail:   String(v.parking_detail || ""),
+        petNotes:        String(v.pet_notes || ""),
+        updatedAt:       String(v.updated_at || ""),
+      };
+    }
+  } catch (err) {
+    console.warn("PROPERTY_ACCESS read failed: " + err);
+  }
+  return empty;
+}
+
+/** Auto-created on first save, exactly like BOOKING_INSTRUCTIONS. */
+function ensurePropertyAccessTab(ss) {
+  assertWritable(PROPERTY_ACCESS_TAB);
+  var sheet = ss.getSheetByName(PROPERTY_ACCESS_TAB);
+  if (!sheet) {
+    sheet = ss.insertSheet(PROPERTY_ACCESS_TAB);
+    sheet.appendRow(PROPERTY_ACCESS_HEADERS);
+    sheet.setFrozenRows(1);
+    console.log("Created the " + PROPERTY_ACCESS_TAB + " tab.");
+  }
+  return sheet;
+}
+
+/** The questions, with this home's answers filled in. Drives the portal form. */
+function accessQuestionList(access) {
+  return ACCESS_QUESTIONS.map(function (q) {
+    return {
+      field:  q.field,
+      label:  q.label,
+      choice: String(access[q.field + "Choice"] || "").toUpperCase(),
+      detail: String(access[q.field + "Detail"] || ""),
+      /* Never the code — only whether one exists and when it was set. */
+      secretSet:   q.field === "entry" ? access.entryCodeSet : false,
+      secretSetAt: q.field === "entry" ? access.entryCodeSetAt : "",
+      choices: q.choices.map(function (c) {
+        return { key: c.key, label: c.label, detail: c.detail || "", secret: !!c.secret };
+      }),
+    };
+  });
+}
+
+/**
+ * THE PORTAL VIEW MODEL. A whitelist, built field by field, like the two
+ * ticket models beside it.
+ *
+ * Upcoming bookings carry their editable detail inline; completed ones are a
+ * read-only record. One request, no second token, and a finished job is not a
+ * form.
+ */
+function buildPortalModel(ss, contact) {
+  var bookings = getContactBookings(ss, contact.leadId);
+
+  var homes = getContactProperties(bookings).map(function (p) {
+    var access = getPropertyAccess(ss, p.propertyId);
+    return {
+      propertyId: p.propertyId,
+      key:        p.key,
+      label:      p.label,
+      zip:        p.zip,
+      questions:  accessQuestionList(access),
+      petNotes:   access.petNotes,
+      petPlaceholder: ACCESS_PET_PLACEHOLDER,
+      updatedAt:  access.updatedAt,
+    };
+  });
+
+  return {
+    ok: true,
+    view: "portal",
+    contactId: contact.contactId,
+    firstName: contact.firstName,
+    name:      contact.name,
+    homes:     homes,
+    bookings:  bookings.map(function (b) {
+      var done = !!b.completedDate;
+      var row = {
+        bookingId:    b.bookingId,
+        serviceCode:  b.serviceCode,
+        serviceLabel: SERVICE_CODES[b.serviceCode] || b.serviceLabel,
+        date:         b.scheduledDate,
+        time:         b.startTime,
+        when:         b.scheduleSummary,
+        status:       b.status,
+        completed:    b.completedDate,
+        price:        b.price.final || b.price.quoted,
+        paid:         b.payment.paid,
+        addOns:       b.addOns,
+        propertyLabel: [b.address, b.unit].filter(Boolean).join(", "),
+        editable:     !done,
+      };
+      /* Rooms and instructions only where they can still be acted on. A past
+         booking is a receipt, and loading every room of every job a customer
+         has ever had would grow the payload for nothing. */
+      if (!done) {
+        var sorted = sortInstructions(getBookingInstructions(ss, b.bookingId));
+        row.rooms = deriveRooms(b.beds, b.baths).map(function (r) {
+          return { key: r.key, label: r.label, instruction: sorted.rooms[r.key] || "" };
+        });
+        row.generalInstruction = sorted.general;
+        row.atBooking = b.customerNotes;
+      }
+      return row;
+    }),
+  };
+}
+
+
+/**
+ * The portal link's token. A third audience, a third scope, one secret.
+ *
+ * Same construction as ticketToken, and deliberately NOT the same value: a
+ * ticket token must not open a portal and a portal token must not open a
+ * ticket. Scoping by string inside the HMAC is what keeps three audiences
+ * apart without three secrets to manage.
+ */
+function portalToken(contactId) {
+  var raw = Utilities.computeHmacSha256Signature(String(contactId) + "|portal", ticketSecret());
+  var hex = raw.map(function (b) {
+    return ("0" + (b < 0 ? b + 256 : b).toString(16)).slice(-2);
+  }).join("");
+  return hex.slice(0, 20);
+}
+
+/** The one link a customer keeps. Same every booking, forever. */
+function portalUrl(contactId) {
+  return "https://servecleaning.com/h?id=" + encodeURIComponent(contactId) +
+         "&t=" + portalToken(contactId);
+}
+
+/** GET the portal. */
+function handlePortal(p) {
+  var contactId = String(p.portal || "").trim();
+  if (!contactId || portalToken(contactId) !== String(p.t || "").trim()) {
+    return json({ ok: false, error: "not_found" });
+  }
+  try {
+    var ss = SPREADSHEET_ID ? SpreadsheetApp.openById(SPREADSHEET_ID)
+                            : SpreadsheetApp.getActiveSpreadsheet();
+    var contact = getContact(ss, contactId);
+    /* Refused identically to a bad token. Telling a caller that an id exists
+       but they hold the wrong key is still telling them the id exists. */
+    if (!contact) return json({ ok: false, error: "not_found" });
+    return json(buildPortalModel(ss, contact));
+  } catch (err) {
+    console.error("handlePortal failed: " + (err && err.stack ? err.stack : err));
+    return json({ ok: false, error: "lookup_failed" });
+  }
+}
+
+/**
+ * POST from the portal: an instruction on one booking, or an access answer on
+ * one home.
+ *
+ * THE OWNERSHIP CHECK IS THE WHOLE SECURITY MODEL HERE, and it is not
+ * optional. A portal token authorises ONE contact, not the sheet. Every write
+ * resolves that contact's lead_id first and then proves the target belongs to
+ * them — the job carries their lead_id, or the property appears on one of
+ * their bookings. Without it a valid token would be a key to every booking
+ * Serve has ever taken, which is a far worse failure than the one the token
+ * was protecting against.
+ *
+ * Never throws. A note that fails to save must return an error the page can
+ * show, not a stack trace.
+ */
+function handlePortalWrite(ss, data) {
+  var contactId = String(data.contact_id || "").trim();
+  if (!contactId || portalToken(contactId) !== String(data.t || "").trim()) {
+    return json({ ok: false, error: "not_found" });
+  }
+
+  try {
+    var contact = getContact(ss, contactId);
+    if (!contact) return json({ ok: false, error: "not_found" });
+
+    var bookings = getContactBookings(ss, contact.leadId);
+    var kind = String(data.kind || "").toLowerCase();
+
+    if (kind === "instruction") {
+      var jobId = String(data.job_id || "").trim();
+      var mine = null;
+      for (var i = 0; i < bookings.length; i++) {
+        if (bookings[i].bookingId === jobId) { mine = bookings[i]; break; }
+      }
+      /* Not theirs, or not a job at all — the same answer either way. */
+      if (!mine) return json({ ok: false, error: "not_found" });
+      if (mine.completedDate) return json({ ok: false, error: "closed" });
+      return writeInstruction(ss, mine, data);
+    }
+
+    if (kind === "access") {
+      var propertyId = String(data.property_id || "").trim();
+      var owns = false;
+      for (var k = 0; k < bookings.length; k++) {
+        if (String(bookings[k].propertyId || "").trim() === propertyId && propertyId) {
+          owns = true; break;
+        }
+      }
+      if (!owns) return json({ ok: false, error: "not_found" });
+      return writeAccess(ss, propertyId, data);
+    }
+
+    return json({ ok: false, error: "unknown_kind" });
+
+  } catch (err) {
+    console.error("handlePortalWrite failed: " + (err && err.stack ? err.stack : err));
+    return json({ ok: false, error: "save_failed" });
+  }
+}
+
+/**
+ * One access answer: a choice, and the detail that choice allows.
+ *
+ * THE SECRET GOES SOMEWHERE ELSE. A choice flagged `secret` in
+ * ACCESS_QUESTIONS writes its detail to `entry_code`, never to
+ * `entry_detail` — so the field a view model reads and the field holding a
+ * door code are different cells, and no future edit to the read path can
+ * accidentally return one.
+ */
+function writeAccess(ss, propertyId, data) {
+  var field = String(data.field || "").toLowerCase();
+  var known = false;
+  for (var i = 0; i < ACCESS_QUESTIONS.length; i++) {
+    if (ACCESS_QUESTIONS[i].field === field) { known = true; break; }
+  }
+
+  var sheet = ensurePropertyAccessTab(ss);
+  var h = sheetHeaders(sheet);
+  var col = function (n) { return h.indexOf(n); };
+  var now = new Date();
+
+  /* Find or create this home's row. */
+  var rowIndex = -1;
+  var last = sheet.getLastRow();
+  if (last > 1) {
+    var pi = col("property_id");
+    var ids = sheet.getRange(2, pi + 1, last - 1, 1).getValues();
+    for (var r = 0; r < ids.length; r++) {
+      if (String(ids[r][0]).trim() === propertyId) { rowIndex = r + 2; break; }
+    }
+  }
+  if (rowIndex === -1) {
+    var blank = new Array(h.length).fill("");
+    blank[col("property_id")] = propertyId;
+    sheet.appendRow(blank);
+    rowIndex = sheet.getLastRow();
+  }
+
+  var set = function (name, value) {
+    var c = col(name);
+    if (c !== -1) sheet.getRange(rowIndex, c + 1).setValue(value);
+  };
+
+  /* Pets is the one free-text answer — the booking form already screens for
+     pets, so this only asks the thing left worth knowing. */
+  if (field === "pets") {
+    set("pet_notes", String(data.detail || "").trim().slice(0, 500));
+    set("updated_at", now);
+    return json({ ok: true, field: "pets" });
+  }
+
+  if (!known) return json({ ok: false, error: "unknown_field" });
+
+  var choiceKey = String(data.choice || "").toUpperCase();
+  var choice = accessChoice(field, choiceKey);
+  if (!choice) return json({ ok: false, error: "unknown_choice" });
+
+  var detail = String(data.detail || "").trim().slice(0, 500);
+  set(field + "_choice", choice.key);
+
+  if (choice.secret) {
+    /* An empty detail on a secret choice leaves the stored code alone —
+       selecting "Access code" again should not wipe a code they set last
+       month just because the box renders blank, which it always does. */
+    if (detail) {
+      set("entry_code", detail);
+      set("entry_code_set_at", now);
+    }
+    set(field + "_detail", "");
+  } else {
+    set(field + "_detail", choice.detail ? detail : "");
+    /* Moving off the code option clears the code. Leaving it behind would
+       mean a home whose access says "I'll let you in" still has a live door
+       code sitting in the sheet. */
+    if (field === "entry") {
+      set("entry_code", "");
+      set("entry_code_set_at", "");
+    }
+  }
+
+  set("updated_at", now);
+  return json({ ok: true, field: field, choice: choice.key });
+}
+
+/**
+ * A room or general instruction, written on behalf of a verified owner.
+ *
+ * Shares BOOKING_INSTRUCTIONS and its one-row-per-scope semantics with
+ * handleInstruction, which still serves the older per-job client link. The
+ * ownership check happened in the caller; this only validates the scope.
+ */
+function writeInstruction(ss, booking, data) {
+  var raw = String(data.scope_type || "BOOKING").toUpperCase();
+  var scopeType = raw === "ROOM" ? "ROOM" : "BOOKING";
+  var scopeKey = scopeType === "BOOKING"
+    ? "GENERAL"
+    : String(data.scope_key || "").toUpperCase();
+
+  var allowed = validScopeKeys(booking.beds, booking.baths);
+  if (!allowed[scopeKey]) return json({ ok: false, error: "unknown_room" });
+
+  var text = String(data.instruction || "").trim().slice(0, 2000);
+  var sheet = ensureInstructionsTab(ss);
+  var h = sheetHeaders(sheet);
+  var col = function (n) { return h.indexOf(n); };
+  var now = new Date();
+
+  var last = sheet.getLastRow();
+  if (last > 1) {
+    var rows = sheet.getRange(2, 1, last - 1, h.length).getValues();
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i][col("job_id")]).trim() !== booking.bookingId) continue;
+      if (String(rows[i][col("scope_type")]).toUpperCase() !== scopeType) continue;
+      if (String(rows[i][col("scope_key")]).toUpperCase() !== scopeKey) continue;
+      sheet.getRange(i + 2, col("instruction") + 1).setValue(text);
+      sheet.getRange(i + 2, col("updated_at") + 1).setValue(now);
+      return json({ ok: true, updated: true, scope_key: scopeKey });
+    }
+  }
+
+  if (!text) return json({ ok: true, updated: false, scope_key: scopeKey });
+
+  var row = new Array(h.length).fill("");
+  row[col("instruction_id")] = "INS-" + Utilities.getUuid().slice(0, 8).toUpperCase();
+  row[col("job_id")]      = booking.bookingId;
+  row[col("scope_type")]  = scopeType;
+  row[col("scope_key")]   = scopeKey;
+  row[col("instruction")] = text;
+  row[col("created_at")]  = now;
+  row[col("updated_at")]  = now;
+  row[col("source")]      = "portal";
+  sheet.appendRow(row);
+  return json({ ok: true, created: true, scope_key: scopeKey });
+}
 
 /* ============================================================
    JOB TICKET — one row, two audiences
@@ -2491,7 +3103,7 @@ function sendReservationEmail(data, sched, leadId, leadResult, propertyResult, s
 
        Wrapped because a ticket must never be the reason a booking email fails
        to send. */
-    ticketBlock(makeJobId(data, sched)) +
+    ticketBlock(makeJobId(data, sched), leadResult && leadResult.contact_id) +
     "\nSubmission: " + (data.submission_id || "(none)") +
     "\nSubmitted:  " + firstSet(data.submitted_at, data.timestamp, "");
 
@@ -2607,24 +3219,34 @@ function serviceLabel(data) {
 }
 
 /**
- * The two links to hand out, one per audience.
+ * The links to hand out: the customer's portal and this job's cleaner ticket.
  *
- * DIFFERENT LINKS, NOT ONE LINK WITH A SWITCH. Each token is an HMAC of the
- * job_id and the audience, so the customer's link opens only the customer's
- * view and the cleaner's opens only the cleaner's. Forwarding one to the wrong
- * person shows them nothing rather than showing them the other view — which is
- * what happened before r13, when a single token opened both and the price rode
- * along to whoever held it.
+ * THE CUSTOMER GETS A PORTAL LINK, NOT A JOB LINK, as of r14. It is the same
+ * link every booking — their bookings, their homes and their access answers
+ * live behind it — so the one they were sent in March still works in November.
  *
- * Never throws. A ticket link is not worth failing a booking notification for.
+ * FALLS BACK TO THE PER-JOB CLIENT LINK when there is no contact_id, which
+ * happens only when the LEADS column has not been added yet. Without the
+ * fallback, adding the portal would silently remove the customer's link
+ * altogether on every booking until that column exists.
+ *
+ * The cleaner's link is unchanged and still per job: a cleaner should only
+ * ever see the one job, and the link closes when it is finished.
+ *
+ * Never throws. A link is not worth failing a booking notification for.
  */
-function ticketBlock(jobId) {
+function ticketBlock(jobId, contactId) {
   try {
+    var customer = contactId
+      ? "Customer portal (same link every booking):\n" + portalUrl(contactId) + "\n"
+      : "Send to the customer:\n" + ticketUrl(jobId, "client") + "\n" +
+        "(per-job link — add a contact_id column to LEADS for a portal link)\n";
+
     return "\n— TICKETS —\n" +
-           "Send to the customer:\n" + ticketUrl(jobId, "client") + "\n\n" +
-           "Send to the cleaner:\n"  + ticketUrl(jobId, "partner") + "\n" +
-           "(these are different links — the cleaner's stops working once\n" +
-           " completed_date is filled; the customer's is their record and stays)\n";
+           customer + "\n" +
+           "Send to the cleaner:\n" + ticketUrl(jobId, "partner") + "\n" +
+           "(different links — the cleaner's stops working once\n" +
+           " completed_date is filled; the customer's is theirs to keep)\n";
   } catch (err) {
     console.error("ticket links unavailable: " + err);
     return "";

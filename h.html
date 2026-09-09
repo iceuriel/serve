@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<!--
+    CLIENT PORTAL — one customer, every booking, one link that never changes.
+
+        /h?id=CON-0007&t=<token>
+
+    NOT ONE PAGE PER CUSTOMER. This file takes a contact id, asks /api/portal
+    for that person, and renders it. Ten customers or ten thousand, it is this
+    file and nothing else.
+
+    THE SERVER DECIDES WHAT MAY BE SEEN, not this page. The response carries
+    only that contact's bookings and homes, and it never carries a door code —
+    only whether one is saved and when. If filtering happened here, everything
+    would have to be sent and the page trusted not to render it.
+
+    NOINDEX is in the markup AND as X-Robots-Tag on /h in _headers. The header
+    is the one that counts. Referrer-Policy: no-referrer is set there too, and
+    matters more than either: the token is in the URL, and a referrer header
+    would hand it to every site the customer clicks through to.
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow, noarchive">
+    <meta name="referrer" content="no-referrer">
+    <title>Your Serve</title>
+    <link rel="icon" type="image/x-icon" href="images/favicon.ico">
+    <link rel="icon" type="image/svg+xml" href="images/favicon.svg">
+    <link rel="apple-touch-icon" href="images/apple-touch-icon.png">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="ticket-body">
+
+    <main class="portal" id="portal">
+        <header class="ticket__bar">
+            <a href="/" class="ticket__brand">Serve</a>
+            <span class="portal__for" id="p-for"></span>
+        </header>
+
+        <p class="ticket__state" id="p-state">Loading&hellip;</p>
+
+        <!-- Tabs on a phone, a sidebar from 720px. One nav, not two. -->
+        <nav class="portal__nav" id="p-nav" hidden aria-label="Sections"></nav>
+
+        <div class="portal__body" id="p-body" hidden></div>
+
+        <footer class="ticket__foot" id="p-foot" hidden>
+            <a href="tel:+16178047201">(617) 804-7201</a>
+            &middot;
+            <a href="mailto:management@servecos.com">management@servecos.com</a>
+        </footer>
+    </main>
+
+    <script src="portal.js"></script>
+</body>
+</html>

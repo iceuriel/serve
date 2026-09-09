@@ -103,6 +103,7 @@ export default {
     if (url.pathname === "/api/slots")  return handleSlots(request, env);
     if (url.pathname === "/api/job")    return handleJob(request, env);
     if (url.pathname === "/api/address")  return handleAddressSuggest(request, env);
+    if (url.pathname === "/api/portal")   return handlePortal(request, env);
     if (url.pathname === "/api/health")   return handleHealth(env);
 
     /* Not an API route — hand back to the static asset server. */
@@ -291,6 +292,76 @@ async function handleJobWrite(request, env) {
   }
 
   return new Response(upstream.text, {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store, private",
+    },
+  });
+}
+
+
+/* ============================================================
+   /api/portal  ->  one customer's homes and bookings
+   ============================================================
+
+   GET  reads the portal; POST saves an instruction or an access answer.
+
+   Thin, exactly like /api/job. This layer does not validate the token, does
+   not decide which bookings belong to whom, and does not cache. Apps Script
+   owns all of it, because a second opinion on authorisation is a second place
+   for the two to disagree.
+
+   NEVER CACHED, and the token travels in the BODY on writes. A query string
+   lands in proxy logs, browser history and referrer headers; this token is the
+   only thing between a URL and a customer's whole account. */
+async function handlePortal(request, env) {
+  if (!env.WEBHOOK_URL) return json({ ok: false, error: "not_configured" }, 500);
+
+  if (request.method === "POST") {
+    let body;
+    try {
+      body = await request.text();
+    } catch (_) {
+      return json({ ok: false, error: "unreadable_body" }, 400);
+    }
+    if (!body || body.length > 8000) return json({ ok: false, error: "bad_body" }, 400);
+
+    const up = await relay(env.WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body,
+    }, UPSTREAM_TIMEOUT_MS.submit);
+    if (!up.ok) {
+      console.error("portal write relay failed: " + up.error);
+      return json({ ok: false, error: "upstream_unreachable" }, 502);
+    }
+    return portalResponse(up.text);
+  }
+
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return json({ ok: false, error: "method_not_allowed" }, 405);
+  }
+
+  const url = new URL(request.url);
+  const id  = url.searchParams.get("id") || "";
+  const tok = url.searchParams.get("t")  || "";
+  /* Cheap rejection before spending a round trip on an obviously malformed
+     link. Anything past this is still validated upstream. */
+  if (!id || !tok || tok.length < 16) return json({ ok: false, error: "not_found" }, 404);
+
+  const up = await relay(
+    env.WEBHOOK_URL + "?portal=" + encodeURIComponent(id) + "&t=" + encodeURIComponent(tok),
+    { method: "GET" }, UPSTREAM_TIMEOUT_MS.slots);
+  if (!up.ok) {
+    console.error("portal relay failed: " + up.error);
+    return json({ ok: false, error: "upstream_unreachable" }, 502);
+  }
+  return portalResponse(up.text);
+}
+
+function portalResponse(text) {
+  return new Response(text, {
     status: 200,
     headers: {
       "Content-Type": "application/json; charset=utf-8",

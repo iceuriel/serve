@@ -193,7 +193,67 @@ Every booking also carries its own consent snapshot in the JOBS `quote_meta` JSO
 | `OUTREACH_LOG` | Sends, opens, replies per lead. | MAN |
 | `DASHBOARD` | Channel spend → cost-per-booked-job. Spend entered by hand. | FX + OPS |
 | `EVENTS` | Non-reservation site events (quote viewed, waitlist, custom quote). Auto-created by the webhook. | WH |
+| `PROPERTY_ACCESS` | How to get into a home, in the customer’s own words, set from the portal. Property-scoped so it outlives one booking. Auto-created. | WH (from the portal) |
 | `BOOKING_INSTRUCTIONS` | What the customer asked for on ONE visit, scoped to the booking, a room, or an access question. Auto-created by the webhook. | WH (from the client ticket) |
+
+### PROPERTY_ACCESS — how to get into this home (r14)
+
+Auto-created on first save, like `BOOKING_INSTRUCTIONS`. No setup step.
+
+`property_id · occupancy_choice · occupancy_detail · entry_choice ·
+entry_detail · entry_code · entry_code_set_at · parking_choice ·
+parking_detail · pet_notes · updated_at`
+
+**PROPERTY-scoped, not booking-scoped.** The lockbox is in the same place next
+month, and asking again every visit is exactly what "Serve remembers your home"
+exists to stop. Set once in the portal, it applies to every future booking.
+
+Answers are **choices plus an optional detail**, not free text. One taxonomy
+(`ACCESS_QUESTIONS` in webhook.gs) drives the bullets the portal renders, the
+validation on write, and which column each answer lands in — three separate
+lists would be three chances to disagree about what `KEY` means.
+
+| field | choices |
+|---|---|
+| `occupancy` | `YES` · `NO` · `OTHER` |
+| `entry` | `LET_IN` · `KEY` · `CODE` · `UNLOCKED` · `OTHER` |
+| `parking` | `FREE_STREET` · `PAID_STREET` · `GARAGE` · `NONE` · `OTHER` |
+| `pets` | free text, optional — the booking form already screens for pets |
+
+> **`entry_code` IS WRITE-ONLY.** No view model returns it — not the portal,
+> not the client ticket, not the partner ticket — and nothing logs it. The
+> portal reports only whether one is saved and the date. Choosing a different
+> entry method clears it, so a home whose access reads "I will let you in" is
+> never left with a live code sitting in the sheet.
+>
+> This does put codes in Leads MASTER, where the older policy kept them in a
+> separate Access MASTER file. If Leads MASTER is ever shared outside the
+> business, hide that column. Moving the tab to Access MASTER later is a
+> spreadsheet-id change, not a redesign.
+
+**Not `PROPERTY_MEMORY`.** That tab is the crew's curated record and sits on
+`PROTECTED_TABS` — a form submission knows nothing about a sticky gate latch.
+This one is the customer's own answers. The partner ticket shows both, as
+`standing` and `fromCustomer`, and never merges them.
+
+### LEADS.contact_id — required for the portal (r14)
+
+`upsertLead` writes `contact_id` only when the column exists, so it was a no-op
+from r9 until the column was added. **The portal cannot work without it**:
+`/h?id=CON-nnnn` is the permanent customer link, and `getContact` returns null
+when the column is absent.
+
+It **self-backfills** — any existing row without one gets a `CON-nnnn` on that
+customer's next booking. Fill the column down by hand once for immediate
+history; `nextSeqId` continues from the highest existing value.
+
+**No JOBS column is needed.** The portal resolves
+`contact_id` → LEADS row → `lead_id` → every JOBS row with that `lead_id`, and
+`lead_id` is already column 2 of the live JOBS header. That deliberately avoids
+depending on `JOBS.property_id` or `JOBS.contact_id`.
+
+Until the column exists, the booking email falls back to the old per-job client
+link, so a customer is never left with no link at all.
 
 ### BOOKING_INSTRUCTIONS — what was asked for on this visit
 
