@@ -104,6 +104,7 @@ export default {
     if (url.pathname === "/api/job")    return handleJob(request, env);
     if (url.pathname === "/api/address")  return handleAddressSuggest(request, env);
     if (url.pathname === "/api/portal")   return handlePortal(request, env);
+    if (url.pathname === "/api/vendor")   return handleVendor(request, env);
     if (url.pathname === "/api/health")   return handleHealth(env);
 
     /* Not an API route — hand back to the static asset server. */
@@ -368,6 +369,61 @@ function portalResponse(text) {
       "Cache-Control": "no-store, private",
     },
   });
+}
+
+
+/* ============================================================
+   /api/vendor  ->  one partner company's portal
+   ============================================================
+
+   GET reads it; POST saves a profile field, a service, or a team member.
+
+   Thin, like every other relay here. Apps Script owns the token check, the
+   ownership check and the field whitelist — a second opinion on authorisation
+   is a second place for the two to disagree.
+
+   NEVER CACHED, and the token travels in the BODY on writes. */
+async function handleVendor(request, env) {
+  if (!env.WEBHOOK_URL) return json({ ok: false, error: "not_configured" }, 500);
+
+  if (request.method === "POST") {
+    let body;
+    try {
+      body = await request.text();
+    } catch (_) {
+      return json({ ok: false, error: "unreadable_body" }, 400);
+    }
+    if (!body || body.length > 8000) return json({ ok: false, error: "bad_body" }, 400);
+
+    const up = await relay(env.WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body,
+    }, UPSTREAM_TIMEOUT_MS.submit);
+    if (!up.ok) {
+      console.error("vendor write relay failed: " + up.error);
+      return json({ ok: false, error: "upstream_unreachable" }, 502);
+    }
+    return portalResponse(up.text);
+  }
+
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return json({ ok: false, error: "method_not_allowed" }, 405);
+  }
+
+  const url = new URL(request.url);
+  const id  = url.searchParams.get("id") || "";
+  const tok = url.searchParams.get("t")  || "";
+  if (!id || !tok || tok.length < 16) return json({ ok: false, error: "not_found" }, 404);
+
+  const up = await relay(
+    env.WEBHOOK_URL + "?vendor=" + encodeURIComponent(id) + "&t=" + encodeURIComponent(tok),
+    { method: "GET" }, UPSTREAM_TIMEOUT_MS.slots);
+  if (!up.ok) {
+    console.error("vendor relay failed: " + up.error);
+    return json({ ok: false, error: "upstream_unreachable" }, 502);
+  }
+  return portalResponse(up.text);
 }
 
 

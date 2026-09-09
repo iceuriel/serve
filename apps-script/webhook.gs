@@ -1,7 +1,32 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-08  ·  master  ·  r14 — the client portal
+ * VERSION STAMP:  2026-09-08  ·  master  ·  r15 — the vendor portal
+ *
+ * r15 = PARTNER COMPANIES GET A PORTAL, and three tabs in the OPS workbook:
+ *      VENDORS, VENDOR_SERVICES, OPERATORS. Ops rather than Leads MASTER so
+ *      customer support can be given Leads without seeing payout terms.
+ *      Created by hand, not auto-created: a vendor is a relationship somebody
+ *      agreed to, not a row a form conjures.
+ *
+ *      /v is a fourth token scope. Client ticket, partner ticket, customer
+ *      portal, vendor portal — none opens another.
+ *
+ *      A VENDOR MAY DESCRIBE THEMSELVES, NOT PROMOTE THEMSELVES. Writes are a
+ *      WHITELIST (VENDOR_EDITABLE, OPERATOR_EDITABLE): display name, blurb,
+ *      areas, capabilities, their services and their own team. Rating,
+ *      review count, insurance_verified, client_visible, status,
+ *      partner_since, the logo and everything internal are Serve's. A
+ *      denylist would fail open into exactly the wrong place.
+ *
+ *      ASSIGNMENT IS TWO COLUMNS ON JOBS — vendor_id and operator_id, beside
+ *      cleaner, both ops-owned. A join tab would duplicate a row that already
+ *      exists one-per-booking.
+ *
+ *      THE CUSTOMER STILL SEES A COMPANY, NEVER A PERSON. show_to_customer
+ *      exists on OPERATORS and is read by nothing — the §148B position of
+ *      2026-09-08 stands, and reversing it is a deliberate act rather than a
+ *      config change.
  *
  * r14 = ONE PERMANENT LINK PER CUSTOMER, keyed on contact_id.
  *      A ticket was per booking, which is wrong for how people behave: they
@@ -275,7 +300,7 @@ const PROTECTED_TABS = [
     `partner_payout` joins them in r13: what the crew is paid for this job, set
     by hand at dispatch. A booking form cannot know it and must never guess. */
 const OPS_OWNED_COLUMNS = ["completed_date", "cleaner", "duration_min", "photos_passed",
-                           "payment_status", "partner_payout"];
+                           "payment_status", "partner_payout", "vendor_id", "operator_id"];
 
 const NEW_JOB_STATUS = "new";
 
@@ -592,6 +617,11 @@ function doPost(e) {
        rather than by a per-job ticket token — see handlePortalWrite. */
     if (eventType === "portal_write") return handlePortalWrite(ss, data);
 
+    /* Vendor portal writes. Authorised by a vendor token, and every field
+       checked against a whitelist — a partner may describe themselves, not
+       promote themselves. */
+    if (eventType === "vendor_write") return handleVendorWrite(data);
+
     if (!isReservation) return handleEvent(ss, data, eventType);
 
     const jobs = requireTab(ss, JOBS_TAB);
@@ -791,9 +821,10 @@ function doGet(e) {
   var p = (e && e.parameter) || {};
   if (p.job) return handleTicket(p);
   if (p.portal) return handlePortal(p);
+  if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-08 r14" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-08 r15" });
 }
 
 
@@ -1149,6 +1180,11 @@ function getBooking(ss, jobId) {
     petsFlag:      f("pets_flag") === true || String(f("pets_flag")).toUpperCase() === "TRUE",
     customerNotes: String(f("customer_notes") || ""),
     cleanerCell:   String(f("cleaner") || ""),
+    /* Assignment, r15. Two ops-owned columns filled at dispatch beside the
+       cleaner cell. Absent columns read as blank, which is the unassigned
+       state and a legitimate one. */
+    vendorId:      String(f("vendor_id") || ""),
+    operatorId:    String(f("operator_id") || ""),
   };
 }
 
@@ -1242,62 +1278,26 @@ function getBookingInstructions(ss, jobId) {
  * unassigned state honestly today and needs no change the day VENDORS exists.
  */
 function getAssignment(ss, booking) {
-  var label = String(booking.cleanerCell || "").trim();
+  var label    = String(booking.cleanerCell || "").trim();
+  var vendorId = String(booking.vendorId || "").trim();
   return {
     bookingId:  booking.bookingId,
-    vendorId:   null,
-    operatorId: null,
+    /* Real as of r15: two columns on the JOBS row, filled at dispatch beside
+       the `cleaner` cell. Blank until then, and blank is a legitimate state —
+       the client ticket says the professional will be confirmed rather than
+       inventing one. */
+    vendorId:   vendorId || null,
+    operatorId: String(booking.operatorId || "").trim() || null,
     /* Internal. A view model may use it to decide "assigned or not"; it may
        never be sent to a browser, because it is a person's name typed into a
        spreadsheet, not a vetted public display name. */
     internalLabel: label,
-    status:     label ? "assigned" : "pending",
+    status:     (vendorId || label) ? "assigned" : "pending",
     assignedAt: null,
   };
 }
 
-/** No VENDORS tab exists. Returns null rather than inventing a company. */
-function getVendor(ss, vendorId) {
-  if (!vendorId) return null;
-  var t = ss.getSheetByName("VENDORS");
-  if (!t) return null;
-  var h = sheetHeaders(t);
-  var i = h.indexOf("vendor_id");
-  var last = t.getLastRow();
-  if (i === -1 || last < 2) return null;
-  var rows = t.getRange(2, 1, last - 1, h.length).getValues();
-  for (var r = 0; r < rows.length; r++) {
-    if (String(rows[r][i]).trim() !== String(vendorId).trim()) continue;
-    var v = {};
-    h.forEach(function (name, idx) { v[name] = rows[r][idx]; });
-    return {
-      vendorId:         String(v.vendor_id || ""),
-      status:           String(v.status || ""),
-      legalName:        String(v.legal_name || ""),
-      displayName:      String(v.display_name || ""),
-      internalPhone:    String(v.internal_phone || ""),
-      internalEmail:    String(v.internal_email || ""),
-      logoUrl:          String(v.logo_url || ""),
-      publicDescription:String(v.public_description || ""),
-      partnerSince:     String(v.partner_since || ""),
-      insuranceVerified: v.insurance_verified === true ||
-                         String(v.insurance_verified).toUpperCase() === "TRUE",
-      serviceArea:      String(v.service_area || ""),
-      publicRating:     v.public_rating === "" ? null : Number(v.public_rating),
-      publicReviewCount: v.public_review_count === "" ? null : Number(v.public_review_count),
-      ratingSource:     String(v.rating_source || ""),
-      clientVisible:    v.client_visible === true ||
-                        String(v.client_visible).toUpperCase() === "TRUE",
-    };
-  }
-  return null;
-}
 
-/** No OPERATORS tab exists. Reserved so the shape is settled. */
-function getOperator(ss, operatorId) {
-  if (!operatorId) return null;
-  return null;
-}
 
 /* ---------- view models: explicit whitelists ---------- */
 
@@ -1991,6 +1991,502 @@ function writeInstruction(ss, booking, data) {
   sheet.appendRow(row);
   return json({ ok: true, created: true, scope_key: scopeKey });
 }
+
+
+/* ============================================================
+   THE VENDOR SIDE  —  companies, their services, their teams
+   ============================================================
+   Added r15.
+
+   THESE TABS LIVE IN THE OPS WORKBOOK, NOT LEADS MASTER. Leads MASTER is the
+   customer side; Ops is supply. The split means someone helping with customer
+   support can be given Leads MASTER without ever seeing payout terms, and it
+   matches where CLEANERS, SCHEDULE and AVAILABILITY already sit.
+
+   The cost is one extra openById when a client ticket renders a vendor
+   profile. webhook.gs already opens that workbook in three places for
+   availability write-back, so this is a proven path rather than a new one.
+
+   THE ASSIGNMENT IS TWO COLUMNS ON JOBS, not a fourth tab. JOBS is already one
+   row per booking and getBooking already reads it; a join table would
+   duplicate that for nothing. A dispatcher fills vendor_id and operator_id
+   where they fill `cleaner` today. */
+
+const VENDORS_TAB          = "VENDORS";
+const VENDOR_SERVICES_TAB  = "VENDOR_SERVICES";
+const OPERATORS_TAB        = "OPERATORS";
+
+/** The Ops workbook. Never the active spreadsheet — this code runs bound to Leads. */
+function opsBook() {
+  return SpreadsheetApp.openById(OPS_SPREADSHEET_ID);
+}
+
+/**
+ * WHAT A VENDOR MAY EDIT ABOUT THEMSELVES. Everything else on the row is
+ * Serve's.
+ *
+ * A WHITELIST, NOT A DENYLIST, and that direction is the whole point. A column
+ * added to VENDORS next month — a payout rate, a dispatch score, a strike
+ * count — is not editable by a vendor unless somebody adds it here on purpose.
+ * The reverse fails open, and it fails open into the one place it must not:
+ * a partner rewriting what Serve says about them.
+ */
+var VENDOR_EDITABLE = ["display_name", "public_description", "service_area", "capabilities"];
+
+/**
+ * Serve-controlled, listed so the reason is written down rather than implied:
+ *   status, client_visible      whether they are live at all
+ *   legal_name, partner_since   facts of the relationship
+ *   insurance_verified          a claim only Serve can make
+ *   public_rating, review_count, rating_source, serve_*   earned, not set
+ *   logo_url                    Serve places the file (see SCHEMA.md)
+ *   internal_*, default_payout_rate   never leave the business
+ */
+var OPERATOR_EDITABLE = ["public_display_name", "first_name", "last_initial",
+                         "photo_url", "role", "years_experience", "specialties",
+                         "active", "show_to_customer"];
+
+/** One row from a tab in the Ops workbook, as an object keyed by header. */
+function opsRow(sheetName, idColumn, wantedId) {
+  var want = String(wantedId || "").trim();
+  if (!want) return null;
+  var sheet = opsBook().getSheetByName(sheetName);
+  if (!sheet) return null;
+  var h = sheetHeaders(sheet);
+  var i = h.indexOf(idColumn);
+  var last = sheet.getLastRow();
+  if (i === -1 || last < 2) return null;
+  var rows = sheet.getRange(2, 1, last - 1, h.length).getValues();
+  for (var r = 0; r < rows.length; r++) {
+    if (String(rows[r][i]).trim() !== want) continue;
+    var o = { __row: r + 2, __headers: h };
+    h.forEach(function (n, idx) { o[n] = rows[r][idx]; });
+    return o;
+  }
+  return null;
+}
+
+/** Every row of a tab whose `idColumn` matches. */
+function opsRows(sheetName, idColumn, wantedId) {
+  var want = String(wantedId || "").trim();
+  var out = [];
+  if (!want) return out;
+  var sheet = opsBook().getSheetByName(sheetName);
+  if (!sheet) return out;
+  var h = sheetHeaders(sheet);
+  var i = h.indexOf(idColumn);
+  var last = sheet.getLastRow();
+  if (i === -1 || last < 2) return out;
+  var rows = sheet.getRange(2, 1, last - 1, h.length).getValues();
+  for (var r = 0; r < rows.length; r++) {
+    if (String(rows[r][i]).trim() !== want) continue;
+    var o = { __row: r + 2 };
+    h.forEach(function (n, idx) { o[n] = rows[r][idx]; });
+    out.push(o);
+  }
+  return out;
+}
+
+var truthy = function (v) { return v === true || String(v).toUpperCase() === "TRUE"; };
+
+/**
+ * One vendor company.
+ *
+ * `ss` is accepted and ignored so the signature matches the r13 version that
+ * read Leads MASTER — every caller kept working when the tab moved.
+ */
+function getVendor(ss, vendorId) {
+  var v = opsRow(VENDORS_TAB, "vendor_id", vendorId);
+  if (!v) return null;
+  return {
+    vendorId:          String(v.vendor_id || ""),
+    status:            String(v.status || ""),
+    legalName:         String(v.legal_name || ""),
+    displayName:       String(v.display_name || ""),
+    internalContact:   String(v.internal_contact_name || ""),
+    internalPhone:     String(v.internal_phone || ""),
+    internalEmail:     String(v.internal_email || ""),
+    logoUrl:           String(v.logo_url || ""),
+    publicDescription: String(v.public_description || ""),
+    partnerSince:      String(v.partner_since || ""),
+    insuranceVerified: truthy(v.insurance_verified),
+    serviceArea:       String(v.service_area || ""),
+    /* Not a service code. "Luxury", "pet-safe", "post-construction" describe
+       what a company is good at; the three SERVICE_CODES are what a customer
+       can actually book and what the calculator prices. Mixing them would put
+       something unbookable in the service catalogue. */
+    capabilities:      String(v.capabilities || ""),
+    publicRating:      v.public_rating === "" || v.public_rating === undefined
+                         ? null : Number(v.public_rating),
+    publicReviewCount: v.public_review_count === "" || v.public_review_count === undefined
+                         ? null : Number(v.public_review_count),
+    ratingSource:      String(v.rating_source || ""),
+    clientVisible:     truthy(v.client_visible),
+  };
+}
+
+/** What this vendor offers, against Serve's own three codes. */
+function getVendorServices(vendorId) {
+  return opsRows(VENDOR_SERVICES_TAB, "vendor_id", vendorId)
+    .filter(function (r) { return SERVICE_CODES[String(r.service_code || "").toUpperCase()]; })
+    .map(function (r) {
+      var code = String(r.service_code).toUpperCase();
+      return {
+        serviceCode: code,
+        serviceLabel: SERVICE_CODES[code],
+        offers:      truthy(r.offers),
+        preference:  String(r.preference || "neutral").toLowerCase(),
+        active:      truthy(r.active),
+      };
+    });
+}
+
+/** The vendor's team. Serve-controlled numbers ride along for their own view. */
+function getOperators(vendorId) {
+  return opsRows(OPERATORS_TAB, "vendor_id", vendorId).map(function (r) {
+    return {
+      operatorId:      String(r.operator_id || ""),
+      publicName:      String(r.public_display_name || ""),
+      firstName:       String(r.first_name || ""),
+      lastInitial:     String(r.last_initial || ""),
+      photoUrl:        String(r.photo_url || ""),
+      role:            String(r.role || ""),
+      yearsExperience: String(r.years_experience || ""),
+      specialties:     String(r.specialties || ""),
+      active:          truthy(r.active),
+      showToCustomer:  truthy(r.show_to_customer),
+      serveRating:     r.serve_rating === "" || r.serve_rating === undefined
+                         ? null : Number(r.serve_rating),
+      serveJobs:       r.serve_jobs_completed === "" || r.serve_jobs_completed === undefined
+                         ? null : Number(r.serve_jobs_completed),
+    };
+  });
+}
+
+function getOperator(ss, operatorId) {
+  var o = opsRow(OPERATORS_TAB, "operator_id", operatorId);
+  if (!o) return null;
+  return {
+    operatorId:     String(o.operator_id || ""),
+    vendorId:       String(o.vendor_id || ""),
+    publicName:     String(o.public_display_name || ""),
+    role:           String(o.role || ""),
+    active:         truthy(o.active),
+    showToCustomer: truthy(o.show_to_customer),
+  };
+}
+
+/** Every booking assigned to this vendor, newest first. */
+function getVendorBookings(ss, vendorId) {
+  var want = String(vendorId || "").trim();
+  if (!want) return [];
+  var jobs = requireTab(ss, JOBS_TAB);
+  var h = sheetHeaders(jobs);
+  var vi = h.indexOf("vendor_id");
+  var idc = h.indexOf("job_id");
+  /* No column means no assignments have ever been recorded — an empty list,
+     not an error. The portal says so rather than looking broken. */
+  if (vi === -1 || idc === -1) return [];
+
+  var last = jobs.getLastRow();
+  if (last < 2) return [];
+  var rows = jobs.getRange(2, 1, last - 1, h.length).getValues();
+
+  var out = [];
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i][vi]).trim() !== want) continue;
+    var b = getBooking(ss, String(rows[i][idc]).trim());
+    if (b) out.push(b);
+  }
+  out.sort(function (a, z) {
+    var av = a.scheduledDate || "9999-99-99";
+    var zv = z.scheduledDate || "9999-99-99";
+    return av < zv ? 1 : av > zv ? -1 : 0;
+  });
+  return out;
+}
+
+
+/**
+ * The vendor portal's token. A fourth audience, a fourth scope, one secret.
+ *
+ * Client ticket, partner ticket, customer portal, vendor portal — four scopes
+ * inside the same HMAC. None of them opens another.
+ */
+function vendorToken(vendorId) {
+  var raw = Utilities.computeHmacSha256Signature(String(vendorId) + "|vendor", ticketSecret());
+  var hex = raw.map(function (b) {
+    return ("0" + (b < 0 ? b + 256 : b).toString(16)).slice(-2);
+  }).join("");
+  return hex.slice(0, 20);
+}
+
+/** The one link a partner company keeps. */
+function vendorUrl(vendorId) {
+  return "https://servecleaning.com/v?id=" + encodeURIComponent(vendorId) +
+         "&t=" + vendorToken(vendorId);
+}
+
+/**
+ * THE VENDOR PORTAL VIEW MODEL.
+ *
+ * A vendor sees their own company, their own team, and their own jobs. Never
+ * another vendor's anything, and never a customer's price — `payout` is what
+ * this company is paid, and the retail price stays in the client view where it
+ * belongs.
+ *
+ * `serveControlled` is sent so the page can render those fields as facts
+ * rather than as inputs. It is a courtesy to the UI, not a security control —
+ * the write path has its own whitelist and does not trust this.
+ */
+function buildVendorPortalModel(ss, vendor) {
+  var bookings = getVendorBookings(ss, vendor.vendorId);
+  var offered = {};
+  getVendorServices(vendor.vendorId).forEach(function (s) { offered[s.serviceCode] = s; });
+
+  return {
+    ok: true,
+    view: "vendor",
+    vendorId: vendor.vendorId,
+
+    company: {
+      displayName:       vendor.displayName,
+      legalName:         vendor.legalName,
+      publicDescription: vendor.publicDescription,
+      serviceArea:       vendor.serviceArea,
+      capabilities:      vendor.capabilities,
+      logoUrl:           vendor.logoUrl,
+      /* Shown, never editable here. Each is either a fact of the relationship
+         or something earned. */
+      status:            vendor.status,
+      partnerSince:      vendor.partnerSince,
+      insuranceVerified: vendor.insuranceVerified,
+      publicRating:      vendor.publicRating,
+      publicReviewCount: vendor.publicReviewCount,
+      clientVisible:     vendor.clientVisible,
+    },
+    editableFields: VENDOR_EDITABLE,
+
+    /* Every Serve service, with this vendor's answer against it — so the form
+       shows all three rather than only the rows that happen to exist. */
+    services: Object.keys(SERVICE_CODES).map(function (code) {
+      var s = offered[code];
+      return {
+        serviceCode:  code,
+        serviceLabel: SERVICE_CODES[code],
+        offers:       s ? s.offers : false,
+        preference:   s ? s.preference : "neutral",
+        active:       s ? s.active : false,
+      };
+    }),
+
+    team: getOperators(vendor.vendorId).map(function (o) {
+      return {
+        operatorId: o.operatorId,
+        publicName: o.publicName,
+        firstName:  o.firstName,
+        lastInitial: o.lastInitial,
+        photoUrl:   o.photoUrl,
+        role:       o.role,
+        yearsExperience: o.yearsExperience,
+        specialties: o.specialties,
+        active:     o.active,
+        showToCustomer: o.showToCustomer,
+        /* Serve's numbers about this person. Read-only, and a vendor sees
+           their own team's — nobody else's. */
+        serveRating: o.serveRating,
+        serveJobs:   o.serveJobs,
+      };
+    }),
+    /* The customer never sees a named individual, by decision. The roster is
+       for the vendor and for dispatch. show_to_customer exists on the row and
+       is deliberately not read by any client view model. */
+    teamNote: "Your team is used for scheduling and appears on job tickets. " +
+              "Serve introduces your company to customers, not individuals.",
+
+    bookings: bookings.map(function (b) {
+      return {
+        bookingId:    b.bookingId,
+        serviceCode:  b.serviceCode,
+        serviceLabel: SERVICE_CODES[b.serviceCode] || b.serviceLabel,
+        condition:    b.condition,
+        date:         b.scheduledDate,
+        time:         b.startTime,
+        when:         b.scheduleSummary,
+        status:       b.status,
+        completed:    b.completedDate,
+        /* Their payout. NOT b.price — what Serve charges is not a partner's
+           business, and the margin is the model. */
+        payout:       b.partnerPayout,
+        home:         [b.beds === 0 ? "Studio" : b.beds + " BR",
+                       b.baths + " BA"].filter(Boolean).join(" / "),
+        /* Address only. No customer name, email or phone — contact routes
+           through Serve. */
+        address:      [b.address, b.unit].filter(Boolean).join(", "),
+        zip:          b.zip,
+        ticketUrl:    ticketUrl(b.bookingId, "partner"),
+      };
+    }),
+  };
+}
+
+/** GET the vendor portal. */
+function handleVendorPortal(p) {
+  var vendorId = String(p.vendor || "").trim();
+  if (!vendorId || vendorToken(vendorId) !== String(p.t || "").trim()) {
+    return json({ ok: false, error: "not_found" });
+  }
+  try {
+    var ss = SPREADSHEET_ID ? SpreadsheetApp.openById(SPREADSHEET_ID)
+                            : SpreadsheetApp.getActiveSpreadsheet();
+    var vendor = getVendor(ss, vendorId);
+    /* Refused identically to a bad token — confirming an id exists is still
+       telling a caller something. */
+    if (!vendor) return json({ ok: false, error: "not_found" });
+    return json(buildVendorPortalModel(ss, vendor));
+  } catch (err) {
+    console.error("handleVendorPortal failed: " + (err && err.stack ? err.stack : err));
+    return json({ ok: false, error: "lookup_failed" });
+  }
+}
+
+/**
+ * POST from the vendor portal: profile, one service, or one team member.
+ *
+ * EVERY WRITE IS WHITELISTED BY FIELD NAME. A vendor may describe themselves;
+ * they may not promote themselves. Rating, review count, insurance verified,
+ * partner_since, client_visible, status, the logo and anything internal are
+ * Serve's, and a field arriving in the payload that is not on the list is
+ * dropped rather than written.
+ *
+ * Never throws. A profile edit that fails must say so, not 500.
+ */
+function handleVendorWrite(data) {
+  var vendorId = String(data.vendor_id || "").trim();
+  if (!vendorId || vendorToken(vendorId) !== String(data.t || "").trim()) {
+    return json({ ok: false, error: "not_found" });
+  }
+
+  try {
+    var vendor = opsRow(VENDORS_TAB, "vendor_id", vendorId);
+    if (!vendor) return json({ ok: false, error: "not_found" });
+
+    var kind = String(data.kind || "").toLowerCase();
+    if (kind === "profile") return writeVendorProfile(vendorId, vendor, data);
+    if (kind === "service") return writeVendorService(vendorId, data);
+    if (kind === "operator") return writeOperator(vendorId, data);
+    return json({ ok: false, error: "unknown_kind" });
+
+  } catch (err) {
+    console.error("handleVendorWrite failed: " + (err && err.stack ? err.stack : err));
+    return json({ ok: false, error: "save_failed" });
+  }
+}
+
+function writeVendorProfile(vendorId, row, data) {
+  var field = String(data.field || "").toLowerCase();
+  if (VENDOR_EDITABLE.indexOf(field) === -1) {
+    return json({ ok: false, error: "not_editable", field: field });
+  }
+  var sheet = opsBook().getSheetByName(VENDORS_TAB);
+  var h = sheetHeaders(sheet);
+  var c = h.indexOf(field);
+  if (c === -1) return json({ ok: false, error: "no_column", field: field });
+
+  sheet.getRange(row.__row, c + 1).setValue(String(data.value || "").trim().slice(0, 1000));
+  var u = h.indexOf("updated_at");
+  if (u !== -1) sheet.getRange(row.__row, u + 1).setValue(new Date());
+  return json({ ok: true, field: field });
+}
+
+function writeVendorService(vendorId, data) {
+  var code = String(data.service_code || "").toUpperCase();
+  /* Only Serve's own codes. A vendor cannot invent a service the calculator
+     has no price for and the booking flow has no path to. */
+  if (!SERVICE_CODES[code]) return json({ ok: false, error: "unknown_service" });
+
+  var pref = String(data.preference || "neutral").toLowerCase();
+  if (["preferred", "neutral", "avoid"].indexOf(pref) === -1) pref = "neutral";
+
+  var sheet = opsBook().getSheetByName(VENDOR_SERVICES_TAB);
+  if (!sheet) return json({ ok: false, error: "no_tab" });
+  var h = sheetHeaders(sheet);
+  var col = function (n) { return h.indexOf(n); };
+  var last = sheet.getLastRow();
+
+  if (last > 1) {
+    var rows = sheet.getRange(2, 1, last - 1, h.length).getValues();
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i][col("vendor_id")]).trim() !== vendorId) continue;
+      if (String(rows[i][col("service_code")]).toUpperCase() !== code) continue;
+      sheet.getRange(i + 2, col("offers") + 1).setValue(!!data.offers);
+      sheet.getRange(i + 2, col("preference") + 1).setValue(pref);
+      if (col("active") !== -1) sheet.getRange(i + 2, col("active") + 1).setValue(!!data.offers);
+      return json({ ok: true, updated: true, service_code: code });
+    }
+  }
+
+  var row = new Array(h.length).fill("");
+  row[col("vendor_id")]    = vendorId;
+  row[col("service_code")] = code;
+  row[col("offers")]       = !!data.offers;
+  row[col("preference")]   = pref;
+  if (col("active") !== -1) row[col("active")] = !!data.offers;
+  sheet.appendRow(row);
+  return json({ ok: true, created: true, service_code: code });
+}
+
+function writeOperator(vendorId, data) {
+  var sheet = opsBook().getSheetByName(OPERATORS_TAB);
+  if (!sheet) return json({ ok: false, error: "no_tab" });
+  var h = sheetHeaders(sheet);
+  var col = function (n) { return h.indexOf(n); };
+
+  var operatorId = String(data.operator_id || "").trim();
+  var rowIndex = -1;
+  var last = sheet.getLastRow();
+
+  if (operatorId && last > 1) {
+    var rows = sheet.getRange(2, 1, last - 1, h.length).getValues();
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i][col("operator_id")]).trim() !== operatorId) continue;
+      /* THE OWNERSHIP CHECK. A vendor token authorises that company's team,
+         not the roster. Without it a valid token could rewrite a competitor's
+         people. */
+      if (String(rows[i][col("vendor_id")]).trim() !== vendorId) {
+        return json({ ok: false, error: "not_found" });
+      }
+      rowIndex = i + 2;
+      break;
+    }
+    if (rowIndex === -1) return json({ ok: false, error: "not_found" });
+  }
+
+  if (rowIndex === -1) {
+    var existing = last > 1 ? sheet.getRange(2, col("operator_id") + 1, last - 1, 1).getValues() : [];
+    var fresh = new Array(h.length).fill("");
+    fresh[col("operator_id")] = nextSeqId(existing.map(function (r) { return r; }),
+                                          0, "OPR");
+    fresh[col("vendor_id")] = vendorId;
+    sheet.appendRow(fresh);
+    rowIndex = sheet.getLastRow();
+  }
+
+  var written = [];
+  OPERATOR_EDITABLE.forEach(function (f) {
+    if (!(f in data)) return;
+    var c = col(f);
+    if (c === -1) return;
+    var v = data[f];
+    if (f === "active" || f === "show_to_customer") v = !!v;
+    else v = String(v || "").trim().slice(0, 300);
+    sheet.getRange(rowIndex, c + 1).setValue(v);
+    written.push(f);
+  });
+
+  return json({ ok: true, operator_row: rowIndex, fields: written });
+}
+
 
 /* ============================================================
    JOB TICKET — one row, two audiences

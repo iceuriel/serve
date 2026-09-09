@@ -66,6 +66,11 @@ cp j.html ticket.js "$OUT"/
 # /j in _headers, plus Referrer-Policy: no-referrer, because the token in the
 # URL is the only thing between that link and a customer account.
 cp h.html portal.js "$OUT"/
+
+# v.html is served at /v and is the VENDOR PORTAL — one partner company,
+# their jobs and their profile. Same noindex + no-store + no-referrer as the
+# other two token-bearing pages.
+cp v.html vendor.js "$OUT"/
 cp sitemap.xml "$OUT"/
 cp -r images "$OUT"/
 

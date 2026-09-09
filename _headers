@@ -142,6 +142,23 @@
   Cache-Control: no-store, private
   Referrer-Policy: no-referrer
 
+# The vendor portal. Both path forms; same reasoning as /h.
+/v
+  Content-Type: text/html; charset=utf-8
+  X-Robots-Tag: noindex, nofollow, noarchive
+  Cache-Control: no-store, private
+  Referrer-Policy: no-referrer
+
+/v.html
+  Content-Type: text/html; charset=utf-8
+  X-Robots-Tag: noindex, nofollow, noarchive
+  Cache-Control: no-store, private
+  Referrer-Policy: no-referrer
+
+/vendor.js
+  Content-Type: text/javascript; charset=utf-8
+  Cache-Control: public, max-age=0, must-revalidate
+
 /portal.js
   Content-Type: text/javascript; charset=utf-8
   Cache-Control: public, max-age=0, must-revalidate

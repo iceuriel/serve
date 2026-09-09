@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<!--
+    VENDOR PORTAL — one partner company: their jobs and their company profile.
+
+        /v?id=VEN-0001&t=<token>
+
+    A fourth audience, with its own token scope. A client ticket, a partner job
+    ticket, a customer portal and this are four separate keys — none opens
+    another.
+
+    WHAT A VENDOR MAY EDIT IS DECIDED ON THE SERVER, not here. The response
+    carries an editableFields list so the page can render Serve-controlled
+    facts as text rather than inputs, but that is a courtesy to the layout: the
+    write path has its own whitelist and does not trust anything this page
+    sends.
+
+    NO CUSTOMER NAMES, EMAILS OR PHONE NUMBERS reach this page, and no retail
+    price — a vendor sees their payout. Contact routes through Serve.
+
+    NOINDEX in the markup and as X-Robots-Tag on /v in _headers, plus
+    Referrer-Policy: no-referrer, because the token is in the URL.
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow, noarchive">
+    <meta name="referrer" content="no-referrer">
+    <title>Serve Partners</title>
+    <link rel="icon" type="image/x-icon" href="images/favicon.ico">
+    <link rel="icon" type="image/svg+xml" href="images/favicon.svg">
+    <link rel="apple-touch-icon" href="images/apple-touch-icon.png">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="ticket-body">
+
+    <main class="portal" id="portal">
+        <header class="ticket__bar">
+            <a href="/" class="ticket__brand">Serve</a>
+            <span class="portal__for" id="v-for"></span>
+        </header>
+
+        <p class="ticket__state" id="v-state">Loading&hellip;</p>
+
+        <nav class="portal__nav" id="v-nav" hidden aria-label="Sections"></nav>
+
+        <div class="portal__body" id="v-body" hidden></div>
+
+        <footer class="ticket__foot" id="v-foot" hidden>
+            <a href="tel:+16178047201">(617) 804-7201</a>
+            &middot;
+            <a href="mailto:management@servecos.com">management@servecos.com</a>
+        </footer>
+    </main>
+
+    <script src="vendor.js"></script>
+</body>
+</html>
