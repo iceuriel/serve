@@ -1,7 +1,23 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-08  ·  master  ·  r15 — the vendor portal
+ * VERSION STAMP:  2026-09-08  ·  master  ·  r16 — availability decides dispatch
+ *
+ * r16 = THE SCHEDULE IS THE ASSIGNMENT. The AVAILABILITY row a booking
+ *      consumes already knows whose capacity it was, so dispatch is
+ *      decided at booking time instead of copied across by hand.
+ *
+ *      The column is read as `vendor_id` OR `cleaner_id`, so the Ops sheet
+ *      can be renamed before or after this deploys and neither order
+ *      breaks a booking.
+ *
+ *      ABSENCE OF DATA IS NOT REFUSAL. A vendor who has declared no
+ *      services ranks as ordinary, not disqualified — so an empty
+ *      VENDOR_SERVICES tab leaves booking behaviour exactly as it was.
+ *      Only a vendor who declared their services and left this one out is
+ *      pushed last, and even then the booking is taken and flagged rather
+ *      than refused: a conflict shown to a customer for a slot the feed
+ *      had just published is our data problem charged to them.
  *
  * r15 = PARTNER COMPANIES GET A PORTAL, and three tabs in the OPS workbook:
  *      VENDORS, VENDOR_SERVICES, OPERATORS. Ops rather than Leads MASTER so
@@ -665,13 +681,28 @@ function doPost(e) {
       contact_id:  leadResult.contact_id || "",
     });
     const write  = writeRow(jobs, record);
+    const jobRow = jobs.getLastRow();
 
     /* Everything below happens AFTER the booking is safely recorded. None of it
        can fail the booking; each failure is reported in the notification. */
 
     /* Ops AVAILABILITY — stop the slot being sold twice. Reads at write time,
        inside the script lock doPost already holds. Never throws. */
-    const slotResult = bookAvailabilitySlot(sched, record.job_id);
+    const slotResult = bookAvailabilitySlot(
+      sched, record.job_id, serviceCodeOf(serviceLabel(data), data.frequency_selected));
+
+    /* r16. The consumed slot knows whose capacity it was, so write that onto
+       the JOBS row rather than making somebody copy it across by hand.
+
+       INTO A BLANK CELL ONLY. vendor_id is on OPS_OWNED_COLUMNS; a
+       dispatcher's own entry outranks an inference from the schedule. And
+       it is wrapped, because nothing after the JOBS write may fail a
+       booking. */
+    try {
+      stampJobVendor(jobs, jobRow, slotResult.vendorId);
+    } catch (stampErr) {
+      console.error("vendor_id stamp failed (booking stands): " + stampErr);
+    }
 
     try {
       sendReservationEmail(data, sched, leadId, leadResult, propertyResult, slotResult);
@@ -824,7 +855,7 @@ function doGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-08 r15" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-08 r16" });
 }
 
 
@@ -3123,6 +3154,65 @@ function ensurePropertyMemoryRow(ss, propertyId) {
    5c. AVAILABILITY WRITE-BACK  (Ops workbook)
    ============================================================ */
 
+/* How well a partner fits the service being booked. Higher wins.
+
+   ABSENCE OF DATA IS NOT REFUSAL. A vendor with no VENDOR_SERVICES rows has
+   told us nothing, so they rank ORDINARY rather than disqualified. That is
+   what makes an empty VENDOR_SERVICES tab a no-op: booking behaves exactly
+   as it did before r16 until somebody actually declares a service. Only a
+   vendor who declared their services and left this one out drops to last. */
+const SLOT_RANK_PREFERRED    = 4;
+const SLOT_RANK_ORDINARY     = 3;
+const SLOT_RANK_AVOID        = 2;
+const SLOT_RANK_DISQUALIFIED = 1;
+
+function slotRank(vendorId, serviceCode, memo) {
+  if (!vendorId || !serviceCode) return SLOT_RANK_ORDINARY;
+  var key = vendorId + "|" + serviceCode;
+  if (memo && memo[key] !== undefined) return memo[key];
+
+  var rank = SLOT_RANK_ORDINARY;
+  try {
+    var declared = getVendorServices(vendorId);
+    if (declared.length) {
+      var match = null;
+      for (var i = 0; i < declared.length; i++) {
+        if (declared[i].serviceCode === serviceCode && declared[i].active) {
+          match = declared[i];
+          break;
+        }
+      }
+      if (!match || !match.offers)               rank = SLOT_RANK_DISQUALIFIED;
+      else if (match.preference === "preferred") rank = SLOT_RANK_PREFERRED;
+      else if (match.preference === "avoid")     rank = SLOT_RANK_AVOID;
+    }
+  } catch (err) {
+    /* A missing VENDOR_SERVICES tab must never stop a booking. */
+    rank = SLOT_RANK_ORDINARY;
+  }
+  if (memo) memo[key] = rank;
+  return rank;
+}
+
+/**
+ * Record which partner the consumed availability row belonged to.
+ *
+ * INTO A BLANK CELL ONLY. `vendor_id` is on OPS_OWNED_COLUMNS — a human's
+ * dispatch decision outranks an inference from the schedule, so this fills
+ * the gap and never argues with it. A JOBS tab without the column is a
+ * no-op, which is the state every JOBS tab is in until it is added.
+ */
+function stampJobVendor(jobs, rowNumber, vendorId) {
+  var want = String(vendorId || "").trim();
+  if (!want || !rowNumber || rowNumber < 2) return false;
+  var i = sheetHeaders(jobs).indexOf("vendor_id");
+  if (i === -1) return false;
+  var cell = jobs.getRange(rowNumber, i + 1);
+  if (isSet(cell.getValue())) return false;
+  cell.setValue(want);
+  return true;
+}
+
 /**
  * Mark the booked slot as taken so the next visitor cannot buy it twice.
  *
@@ -3139,7 +3229,7 @@ function ensurePropertyMemoryRow(ss, propertyId) {
  *
  * Returns { ok, action: booked|conflict|skipped|failed, ... }. Never throws.
  */
-function bookAvailabilitySlot(sched, jobId) {
+function bookAvailabilitySlot(sched, jobId, serviceCode) {
   if (sched.shape !== "slot") {
     return { ok: true, action: "skipped", reason: "not a specific slot (" + sched.shape + ")" };
   }
@@ -3156,6 +3246,13 @@ function bookAvailabilitySlot(sched, jobId) {
           iStat = headers.indexOf("status"),
           iJob  = headers.indexOf("job_id");
 
+    /* r16. Whose capacity this row is. Accept either name: `vendor_id` is
+       what the column becomes, `cleaner_id` is what it is called today.
+       Reading both means the rename is not a flag day. */
+    const iVen = headers.indexOf("vendor_id") !== -1
+                   ? headers.indexOf("vendor_id")
+                   : headers.indexOf("cleaner_id");
+
     const missing = [];
     if (iDate === -1) missing.push("date");
     if (iTime === -1) missing.push("start_time");
@@ -3171,23 +3268,45 @@ function bookAvailabilitySlot(sched, jobId) {
     /* Read at write time, not from the customer's cached view. */
     const rows = av.getRange(2, 1, lastRow - 1, headers.length).getValues();
 
+    /* r16. Collect every open row for this date and time, not merely the
+       first. With one row this is identical to the old behaviour; with
+       several it is a choice, and a choice belongs in the open rather than
+       in loop order. Ties keep sheet order, so the first row still wins
+       among equals. */
+    const memo = {};
+    const candidates = [];
     for (let r = 0; r < rows.length; r++) {
       const row = rows[r];
       if (String(row[iStat]).trim().toLowerCase() !== SLOT_OPEN) continue;   // never touch `held`
       if (slotDateKey(row[iDate]) !== sched.date) continue;
       if (slotTimeLabel(row[iTime]) !== sched.time) continue;
-
-      const sheetRow = r + 2;
-      av.getRange(sheetRow, iStat + 1).setValue(SLOT_BOOKED);
-      if (iJob !== -1 && isSet(jobId)) av.getRange(sheetRow, iJob + 1).setValue(jobId);
-
-      return { ok: true, action: "booked", row: sheetRow,
-               cleaner: headers.indexOf("cleaner_id") !== -1 ? row[headers.indexOf("cleaner_id")] : "" };
+      const vendorId = iVen === -1 ? "" : String(row[iVen] || "").trim();
+      candidates.push({ sheetRow: r + 2, vendorId: vendorId,
+                        rank: slotRank(vendorId, serviceCode, memo) });
     }
 
-    return { ok: true, action: "conflict",
-             reason: 'no open row for ' + sched.date + ' ' + sched.time +
-                     ' — taken inside the 5-minute feed cache, or removed' };
+    if (!candidates.length) {
+      return { ok: true, action: "conflict",
+               reason: 'no open row for ' + sched.date + ' ' + sched.time +
+                       ' — taken inside the 5-minute feed cache, or removed' };
+    }
+
+    let pick = candidates[0];
+    for (let c = 1; c < candidates.length; c++) {
+      if (candidates[c].rank > pick.rank) pick = candidates[c];
+    }
+
+    av.getRange(pick.sheetRow, iStat + 1).setValue(SLOT_BOOKED);
+    if (iJob !== -1 && isSet(jobId)) av.getRange(pick.sheetRow, iJob + 1).setValue(jobId);
+
+    return { ok: true, action: "booked", row: pick.sheetRow,
+             /* `cleaner` is kept so the existing notification line and the
+                self-test keep working through the rename. */
+             cleaner: pick.vendorId, vendorId: pick.vendorId,
+             warning: pick.rank === SLOT_RANK_DISQUALIFIED
+                        ? 'vendor ' + pick.vendorId + ' does not offer ' +
+                          serviceCode + ' — reassign by hand'
+                        : "" };
 
   } catch (err) {
     console.error("AVAILABILITY write-back failed: " + err);
@@ -3569,7 +3688,8 @@ function sendReservationEmail(data, sched, leadId, leadResult, propertyResult, s
     "slot:       " + slotResult.action +
       (slotResult.action === "booked"
         ? " — AVAILABILITY row " + slotResult.row +
-          (isSet(slotResult.cleaner) ? ", cleaner " + slotResult.cleaner : "")
+          (isSet(slotResult.vendorId) ? ", vendor " + slotResult.vendorId : "") +
+          (isSet(slotResult.warning)  ? "\n            NEEDS A HUMAN: " + slotResult.warning : "")
         : (slotResult.reason ? " — " + slotResult.reason : "")) + "\n\n" +
     "— SERVICE —\n" +
     "Service:    " + serviceLabel(data) + "\n" +

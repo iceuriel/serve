@@ -406,12 +406,19 @@ that is not in `OPERATOR_EDITABLE` is dropped rather than written.
 
 Add **`vendor_id`** and **`operator_id`** to `JOBS`, beside the existing
 `cleaner` column. JOBS is already one row per booking and `getBooking` already
-reads it; a join table would duplicate that for nothing. Both are on
-`OPS_OWNED_COLUMNS`, so the webhook never writes or blank-fills them — a
-dispatcher fills them where they fill `cleaner` today.
+reads it; a join table would duplicate that for nothing.
 
 Blank is a legitimate state: the client ticket says the professional will be
 confirmed rather than inventing one.
+
+**`vendor_id` is filled automatically as of r16** — see *The slot decides the
+assignment* under AVAILABILITY. It is still on `OPS_OWNED_COLUMNS`: the webhook
+writes it only into a blank cell and never blank-fills it, so a dispatcher's
+own entry always wins.
+
+**`operator_id` is never written by the webhook.** Which of their people comes
+is the vendor's call, not Serve's — that is the §148B line, not a missing
+feature.
 
 ### What a vendor may change about themselves
 
@@ -462,15 +469,52 @@ Observed `status` values: `open`, `booked`, `held`.
 
 #### `status` and `job_id` are now written by the webhook
 
-On a slot booking the webhook opens the Ops workbook by id, finds the first row
-matching date + time with `status = open`, sets it to `booked`, and writes the
-`job_id` — which is what links a JOBS row to the AVAILABILITY row that satisfied
-it. **`held` is never touched**; it is the operator's hold and only `open` is
-eligible.
+On a slot booking the webhook opens the Ops workbook by id, finds an open row
+matching date + time, sets it to `booked`, and writes the `job_id` — which is
+what links a JOBS row to the AVAILABILITY row that satisfied it. **`held` is
+never touched**; it is the operator's hold and only `open` is eligible.
+
+*Which* open row, when several match, is decided by the ranking below. With a
+single match it is the same row it has always been.
 
 The read happens at write time, inside the script lock `doPost` already holds —
 never from the customer's view, which the five-minute feed cache makes stale by
 construction.
+
+#### The slot decides the assignment (r16)
+
+The AVAILABILITY row a booking consumes already knows whose capacity it was, so
+dispatch is settled at booking time instead of copied across by hand. The vendor
+column is read as **`vendor_id`** or, failing that, **`cleaner_id`** — so the
+sheet can be renamed before or after the script is deployed and neither order
+breaks a booking.
+
+When more than one row is open at that date and time, they are ranked against
+the booked service (`serviceCodeOf` → `CLEAN_DEEP` / `CLEAN_STANDARD` /
+`CLEAN_MOVEOUT`) using `VENDOR_SERVICES`:
+
+| Rank | Meaning |
+|---|---|
+| 4 | declared, offers it, `preference = preferred` |
+| 3 | **declared nothing at all**, or declared it `neutral` |
+| 2 | declared it `avoid` |
+| 1 | declared their services and left this one out |
+
+Ties keep sheet order, so the first matching row still wins among equals.
+
+**Absence of data is not refusal.** A vendor with no `VENDOR_SERVICES` rows has
+told us nothing, so they rank 3 rather than 1. That is what makes an empty
+`VENDOR_SERVICES` tab a no-op — booking behaves exactly as it did before r16
+until somebody actually declares a service. The same applies to a row with no
+vendor in it at all, which is what most rows are before the sheet is migrated.
+
+**A rank-1 pick is still booked.** Refusing would show the customer a conflict
+on a slot the feed had just published as open — our data problem charged to
+them. The notification carries a `NEEDS A HUMAN:` line instead.
+
+The chosen vendor is then written onto the JOBS row's `vendor_id`, **into a
+blank cell only**. A JOBS tab without that column is a silent no-op, which is
+the state every JOBS tab is in until it is added.
 
 **A conflict is not an error.** If no open row matches, someone took the slot
 inside the cache window. The booking is still written and the notification
