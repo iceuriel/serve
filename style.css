@@ -1872,13 +1872,13 @@ a {
        numbered order; only the painting is rearranged.
 
        COLUMNS ARE CAPPED, NOT 1fr. With 1fr the two outer columns swallowed
-       every spare pixel, so on a wide screen 01 and 03 grew wide, drifted away
-       from the handset, and sat at a different width from 02 — three steps that
-       should read as siblings looked like three unrelated blocks. Capping them
-       and centring the whole grid keeps the group tight at any width. */
+       every spare pixel and kept growing with the viewport, so the group never
+       had a settled shape. Capped and centred, 01 and 03 are the same width as
+       each other at every screen size and the gap alone decides how far they
+       sit from the handset. */
     .steps {
         display: grid;
-        grid-template-columns: minmax(0, 18rem) auto minmax(0, 18rem);
+        grid-template-columns: minmax(0, 26rem) auto minmax(0, 26rem);
         grid-template-areas:
             "two  two   two"
             "one  ring  three";
@@ -1888,7 +1888,9 @@ a {
            the two headings drift apart whenever the copy below ran to a
            different number of lines. The handset opts back out below. */
         align-items: start;
-        gap: 1.5rem 2rem;
+        /* The column gap is what sets 01 and 03 back from the handset. It is
+           one value for both sides, so the two distances cannot drift apart. */
+        gap: 1.75rem 4rem;
         text-align: center;
     }
     /* The handset stays vertically centred against the steps beside it. */
@@ -1898,15 +1900,14 @@ a {
        the copy instead of leaving them hard against the left edge. */
     .step { align-items: center; }
 
-    /* The BODY sets flush left while the heading stays centred. Centred body
-       copy starts each line at a different x, which is what made these read as
-       ragged. Flush left, not justified: at 18rem these lines carry about 35
-       characters, and justification at that measure opens rivers of white
-       space between words that look worse than the ragged right edge does. */
+    /* Headings and body both centre. width:100% so each line is centred
+       against the full column rather than against the paragraph's own
+       shrink-to-fit box — otherwise a short step and a long one sit on
+       different axes and the row looks lopsided. */
     .step p,
     .step__link {
         width: 100%;
-        text-align: left;
+        text-align: center;
     }
     .step:nth-of-type(1) { grid-area: one; }
     /* 02 spans all three columns rather than being confined to the middle one
