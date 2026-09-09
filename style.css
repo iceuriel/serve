@@ -2310,6 +2310,10 @@ a {
     font-size: 1.1rem;
     font-weight: 700;
     color: var(--color-dark);
+    /* Logo and name centre as a masthead; the description and facts below
+       stay left, because centring a paragraph that wraps costs more in
+       readability than it gains in symmetry. */
+    text-align: center;
 }
 .tk-partner__desc {
     font-size: 0.9rem;
@@ -2335,7 +2339,7 @@ a {
     width: auto;
     height: auto;
     object-fit: contain;
-    margin: 0 0 0.6rem;
+    margin: 0 auto 0.6rem;
 }
 
 /* ---- No partner assigned yet -------------------------------------------
