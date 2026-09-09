@@ -405,8 +405,15 @@ t('the existing "see how the day runs" link survived', /href="#after-you-book"/.
 /* ---------- 7a. the hero ------------------------------------------------ */
 console.log('\n=== 7a. the hero says what Serve is ===');
 
-t('the headline is the one-less-thing line',
-  INDEX.includes('<h1 class="hero__headline">A clean home. One less thing to manage.</h1>'));
+/* Two lines, deliberately broken rather than left to wrap: the break is the
+   lockup, and where it lands must not depend on the viewport. */
+t('the headline is the two-line lockup',
+  INDEX.includes('<h1 class="hero__headline">A Clean Home<br>One Less Thing to Manage</h1>'));
+/* Read the headline's own text and check it, rather than pattern-matching
+   around it — the previous attempt lost its backslashes to the shell, and an
+   unescaped dot matches every character, so it failed on correct markup. */
+const headline = (INDEX.match(/<h1 class="hero__headline">([\s\S]*?)<\/h1>/) || [])[1] || '';
+t('the headline carries no full stops', headline.indexOf('.') === -1, headline);
 t('the sub leads with manages',
   /hero__sub">Serve manages, coordinates, and books your service through partnerships/.test(INDEX));
 
