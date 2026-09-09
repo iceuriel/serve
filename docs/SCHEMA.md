@@ -193,6 +193,46 @@ Every booking also carries its own consent snapshot in the JOBS `quote_meta` JSO
 | `OUTREACH_LOG` | Sends, opens, replies per lead. | MAN |
 | `DASHBOARD` | Channel spend → cost-per-booked-job. Spend entered by hand. | FX + OPS |
 | `EVENTS` | Non-reservation site events (quote viewed, waitlist, custom quote). Auto-created by the webhook. | WH |
+| `BOOKING_INSTRUCTIONS` | What the customer asked for on ONE visit, scoped to the booking, a room, or an access question. Auto-created by the webhook. | WH (from the client ticket) |
+
+### BOOKING_INSTRUCTIONS — what was asked for on this visit
+
+Added r13. Auto-created on first write, like `EVENTS`, so there is no setup step.
+
+`instruction_id · job_id · scope_type · scope_key · instruction · created_at · updated_at · source`
+
+**One row per `(job_id, scope_type, scope_key)`.** A second write to the same
+scope updates that row rather than appending, so a ticket shows one current
+instruction per room instead of a growing list of edits. Blanking the text keeps
+the row and empties it; the read side skips empties.
+
+`scope_type` is one of three, and `scope_key` is validated against the booking:
+
+| scope_type | scope_key | comes from |
+|---|---|---|
+| `BOOKING` | always `GENERAL` | the "anything else" box |
+| `ROOM` | `BEDROOM_1`, `BATHROOM_2`, `KITCHEN`, `LIVING_ROOM`, `STUDIO_MAIN`, `BATHROOM_HALF` | the room accordion |
+| `ACCESS` | `OCCUPANCY`, `METHOD`, `NOTES`, `PARKING`, `PETS` | the arrival & access section |
+
+Room keys are **derived from the booking's own bed and bath counts**
+(`deriveRooms`), so a 2BR/1.5BA booking accepts `BEDROOM_1`, `BEDROOM_2`,
+`BATHROOM_1`, `BATHROOM_HALF`, `KITCHEN`, `LIVING_ROOM` and refuses anything
+else with `unknown_room`. Without that check the tab becomes a free-text store
+keyed on whatever a caller sends, and the note silently never appears on a
+ticket because it was filed under a room that does not exist.
+
+**This is NOT `PROPERTY_MEMORY`, and the split is deliberate.** `PROPERTY_MEMORY`
+holds what is true of the house every visit — the lockbox is round the back, the
+gate latch sticks. `BOOKING_INSTRUCTIONS` holds what is true of Tuesday — fresh
+sheets are in the closet, we'll be away this time. Merging them means either
+re-typing the house every visit or carrying a one-off note forward forever. The
+partner ticket shows both, labelled, and never merges them.
+
+**Writes are authorised by the CLIENT ticket token**, not by `submission_id`:
+this is the customer editing their own booking rather than the site reporting
+one. A partner token is refused — a partner may read a job, never rewrite what
+was asked for. A completed job refuses edits entirely (`closed`); at that point
+the ticket is a record, not a form.
 
 ### PROPERTIES — one row per address
 

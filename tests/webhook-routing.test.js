@@ -408,47 +408,175 @@ T.post(tJob);
 const tRow   = T.tabs.JOBS._rows[1];
 const jobId  = tRow[JOBS_HEADERS.indexOf('job_id')];
 const tokenOf = T.sandbox.ticketToken;
-const good   = tokenOf(jobId);
+const clientTok  = tokenOf(jobId, 'client');
+const partnerTok = tokenOf(jobId, 'partner');
 const get    = (q) => JSON.parse(T.sandbox.doGet({ parameter: q }).getContent());
 
-t('a ticket token is produced', typeof good === 'string' && good.length === 20, good);
-t('it is stable across calls', tokenOf(jobId) === good);
-t('a different job gets a different token', tokenOf('SRV-20260101-AAAAAA') !== good);
+t('a ticket token is produced', typeof clientTok === 'string' && clientTok.length === 20, clientTok);
+t('it is stable across calls', tokenOf(jobId, 'client') === clientTok);
+t('a different job gets a different token', tokenOf('SRV-20260101-AAAAAA', 'client') !== clientTok);
+
+/* TWO AUDIENCES, TWO SECRETS.
+   Until r13 the token was an HMAC of the job_id alone, so ONE token opened
+   both views and `&view=` merely chose which. A partner holding their own link
+   could flip it to `view=client` and read the customer's name, the price they
+   paid and their private notes; a customer could flip the other way into the
+   crew's access notes. The price leak is the serious one — what Serve charges
+   versus what a partner is paid is the whole model.
+
+   These four assertions are the fix. The old test used one token for both
+   views, which is exactly the shape of the bug. */
+t('the two views get different tokens', clientTok !== partnerTok);
+t('a CLIENT token does not open the partner view',
+  get({ job: jobId, t: clientTok, view: 'partner' }).ok === false);
+t('a PARTNER token does not open the client view',
+  get({ job: jobId, t: partnerTok, view: 'client' }).ok === false);
+t('and a refusal looks identical either way',
+  get({ job: jobId, t: clientTok, view: 'partner' }).error ===
+  get({ job: jobId, t: 'f'.repeat(20), view: 'partner' }).error);
 
 /* Without this the id alone is the key, and ids are guessable by date. */
 t('the id alone opens nothing', get({ job: jobId }).ok === false);
 t('a wrong token opens nothing', get({ job: jobId, t: 'f'.repeat(20) }).ok === false);
 t('a wrong token and a real one look the same to the caller',
-  get({ job: jobId, t: 'f'.repeat(20) }).error === get({ job: 'SRV-19990101-ZZZZZZ', t: good }).error);
+  get({ job: jobId, t: 'f'.repeat(20) }).error ===
+  get({ job: 'SRV-19990101-ZZZZZZ', t: clientTok }).error);
 
-const client  = get({ job: jobId, t: good, view: 'client' });
-const partner = get({ job: jobId, t: good, view: 'partner' });
+const client  = get({ job: jobId, t: clientTok,  view: 'client' });
+const partner = get({ job: jobId, t: partnerTok, view: 'partner' });
 
 t('the client view opens', client.ok === true, client.error);
 t('the partner view opens', partner.ok === true, partner.error);
 
-/* THE PRIVACY SPLIT. Asserted as absence, because a leak here is a field that
-   was sent and simply not displayed. */
-t('client is told the price', Number(client.price) > 0, client.price);
-t('client is NOT given the street address', !('address' in client), Object.keys(client));
-t('client is NOT given the access notes', !('access_notes' in client));
+/* THE PRIVACY SPLIT. Asserted as absence over the WHOLE serialized object, not
+   as a missing top-level key — the r13 view models are nested, and
+   `!('address' in client)` would pass while `client.property.address` sat one
+   level down. */
+const clientJson  = JSON.stringify(client);
+const partnerJson = JSON.stringify(partner);
 
-t('partner is given the address', !!partner.address, partner.address);
-t('partner is NOT given the customer email', !('email' in partner), Object.keys(partner));
-t('partner is NOT given the customer phone', !('phone' in partner));
-t('partner is NOT given the price', !('price' in partner));
+t('client is told the price', Number(client.booking.price) > 0, client.booking.price);
+t('client is told whether it is paid', typeof client.booking.paid === 'boolean');
+t('client is NOT given the street address anywhere in the payload',
+  !clientJson.includes(tJob.address), clientJson.slice(0, 200));
+t('client is NOT given the crew access notes',
+  !/access_notes|priority_rooms|skip_areas|product_notes/.test(clientJson));
+
+t('partner is given the address', partner.property.address === tJob.address, partner.property.address);
+t('partner is NOT given the customer email anywhere',
+  !partnerJson.includes(tJob.email), partnerJson.slice(0, 200));
+t('partner is NOT given the customer phone anywhere',
+  !partnerJson.includes(String(tJob.phone)));
+t('partner is NOT given any price',
+  !/"price"|quoted|final_price|add_on_rev/.test(partnerJson), partnerJson.slice(0, 200));
 
 /* Door codes live in a separate workbook and must never reach either view. */
 t('no view carries anything named like a code',
-  !/access_secret|door_code|lockbox/i.test(JSON.stringify(client) + JSON.stringify(partner)));
+  !/access_secret|door_code|lockbox/i.test(clientJson + partnerJson));
+
+/* The rooms a booking implies, which is what instructions attach to. */
+t('the client ticket lists rooms derived from the booking',
+  Array.isArray(client.home.rooms) && client.home.rooms.length > 0,
+  (client.home.rooms || []).map(r => r.key));
+t('and the partner sees the same room keys',
+  JSON.stringify(partner.scope.map(r => r.key)) ===
+  JSON.stringify(client.home.rooms.map(r => r.key)));
 
 /* The partner link is for doing the job; the client link is their record. */
 const done = T.tabs.JOBS._rows[1];
 done[JOBS_HEADERS.indexOf('completed_date')] = '2026-09-11';
 t('partner link closes once the job is complete',
-  get({ job: jobId, t: good, view: 'partner' }).error === 'expired');
+  get({ job: jobId, t: partnerTok, view: 'partner' }).error === 'expired');
 t('client link still opens after completion',
-  get({ job: jobId, t: good, view: 'client' }).ok === true);
+  get({ job: jobId, t: clientTok, view: 'client' }).ok === true);
+
+/* ============================================================
+   BOOKING_INSTRUCTIONS — the customer editing their own ticket
+   ============================================================ */
+console.log('\n=== instructions: the write path ===');
+{
+  /* A fresh job, because the one above was marked complete and a finished
+     ticket is a record rather than a form. */
+  const iJob = Object.assign({}, BASE, { submission_id: 'uuid-ins-1',
+    slot_date: '2026-09-12', slot_time: '9-11 AM' });
+  T.post(iJob);
+  const iRow = T.tabs.JOBS._rows[T.tabs.JOBS._rows.length - 1];
+  const iId  = iRow[JOBS_HEADERS.indexOf('job_id')];
+  const iTok = tokenOf(iId, 'client');
+  const pTok = tokenOf(iId, 'partner');
+
+  const write = (o) => JSON.parse(T.sandbox.doPost({ postData: { contents: JSON.stringify(
+    Object.assign({ event_type: 'booking_instruction', job_id: iId, t: iTok }, o)) } }).getContent());
+
+  /* THE TAB IS AUTO-CREATED, like EVENTS. No setup step for the founder. */
+  t('the first write creates BOOKING_INSTRUCTIONS',
+    write({ scope_type: 'ROOM', scope_key: 'BEDROOM_1',
+            instruction: 'Fresh sheets are in the closet.' }).ok === true);
+  t('and the tab now exists', !!T.tabs.BOOKING_INSTRUCTIONS);
+
+  /* AUTHORISATION. A partner may read a job; they may not rewrite what the
+     customer asked for. */
+  t('a partner token cannot write an instruction',
+    JSON.parse(T.sandbox.doPost({ postData: { contents: JSON.stringify({
+      event_type: 'booking_instruction', job_id: iId, t: pTok,
+      scope_type: 'BOOKING', scope_key: 'GENERAL', instruction: 'x' }) } }).getContent()).ok === false);
+  t('nor can a wrong token',
+    JSON.parse(T.sandbox.doPost({ postData: { contents: JSON.stringify({
+      event_type: 'booking_instruction', job_id: iId, t: 'f'.repeat(20),
+      scope_type: 'BOOKING', scope_key: 'GENERAL', instruction: 'x' }) } }).getContent()).ok === false);
+
+  /* SCOPE VALIDATION. Without it the tab becomes a free-text store keyed on
+     whatever a caller sends, and the note silently never appears on a ticket
+     because it was filed under a room that does not exist. */
+  t('a room this booking does not have is refused',
+    write({ scope_type: 'ROOM', scope_key: 'BEDROOM_9', instruction: 'x' }).error === 'unknown_room');
+  t('an invented access field is refused',
+    write({ scope_type: 'ACCESS', scope_key: 'DOOR_CODE', instruction: '1234' })
+      .error === 'unknown_access_field');
+
+  /* ONE ROW PER SCOPE. A second write to the same room updates rather than
+     appending, so the ticket shows one current instruction per room instead of
+     an ever-growing list of edits. */
+  const rowsBefore = T.tabs.BOOKING_INSTRUCTIONS._rows.length;
+  t('re-writing the same room updates in place',
+    write({ scope_type: 'ROOM', scope_key: 'BEDROOM_1',
+            instruction: 'Sheets are in the hall cupboard now.' }).updated === true);
+  t('and adds no row', T.tabs.BOOKING_INSTRUCTIONS._rows.length === rowsBefore);
+
+  t('a general note is accepted',
+    write({ scope_type: 'BOOKING', scope_key: 'GENERAL',
+            instruction: 'Dog is friendly.' }).ok === true);
+  t('so is an access answer',
+    write({ scope_type: 'ACCESS', scope_key: 'PARKING',
+            instruction: 'Resident permit, use the driveway.' }).ok === true);
+
+  /* AND IT REACHES BOTH TICKETS, from the same root data. */
+  const c = get({ job: iId, t: iTok, view: 'client' });
+  const p = get({ job: iId, t: pTok, view: 'partner' });
+
+  const bed1 = (c.home.rooms || []).filter(r => r.key === 'BEDROOM_1')[0] || {};
+  t('the client ticket shows the updated room instruction',
+    bed1.instruction === 'Sheets are in the hall cupboard now.', bed1.instruction);
+  t('the client ticket shows the general note',
+    c.instructions.general === 'Dog is friendly.', c.instructions.general);
+  const park = (c.access.fields || []).filter(f => f.key === 'PARKING')[0] || {};
+  t('the client reads back their own access answer',
+    park.value === 'Resident permit, use the driveway.', park.value);
+
+  const pBed1 = (p.scope || []).filter(r => r.key === 'BEDROOM_1')[0] || {};
+  t('the PARTNER sees the same room instruction',
+    pBed1.instruction === 'Sheets are in the hall cupboard now.', pBed1.instruction);
+  t('the partner sees the general note',
+    p.instructions.general === 'Dog is friendly.');
+  t('and the customer access answer, marked as this visit',
+    (p.access.fromCustomer || []).some(f => f.key === 'PARKING'),
+    p.access.fromCustomer);
+
+  /* A finished job is a record, not a worksheet. */
+  T.tabs.JOBS._rows[T.tabs.JOBS._rows.length - 1][JOBS_HEADERS.indexOf('completed_date')] = '2026-09-13';
+  t('a completed job refuses further edits',
+    write({ scope_type: 'BOOKING', scope_key: 'GENERAL', instruction: 'late' }).error === 'closed');
+}
 
 /* The health check must survive gaining a second job.
    The revision is read from the file's own VERSION STAMP rather than pinned to

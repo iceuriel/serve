@@ -217,6 +217,11 @@ async function handleSlots(request, env) {
    NEVER CACHED. A ticket carries a home address and when the house is empty;
    an intermediary holding a copy is exactly what must not happen. */
 async function handleJob(request, env) {
+  /* POST is the customer editing an instruction on their own ticket. Same
+     route because it is the same resource; the token in the body is what
+     authorises it, and Apps Script checks that a client token was used. */
+  if (request.method === "POST") return handleJobWrite(request, env);
+
   if (request.method !== "GET" && request.method !== "HEAD") {
     return json({ ok: false, error: "method_not_allowed" }, 405);
   }
@@ -239,6 +244,49 @@ async function handleJob(request, env) {
   const upstream = await relay(target, { method: "GET" }, UPSTREAM_TIMEOUT_MS.slots);
   if (!upstream.ok) {
     console.error("job relay failed: " + upstream.error);
+    return json({ ok: false, error: "upstream_unreachable" }, 502);
+  }
+
+  return new Response(upstream.text, {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store, private",
+    },
+  });
+}
+
+/**
+ * POST /api/job — one instruction, from the customer's own ticket.
+ *
+ * This layer stays deliberately thin, exactly like the GET above: it does not
+ * validate the token, does not decide which rooms exist, and does not know
+ * what a scope key is. Apps Script owns all of that, because a second opinion
+ * on authorisation is a second place for the two to disagree.
+ *
+ * THE TOKEN TRAVELS IN THE BODY, NOT THE QUERY STRING. A query string lands in
+ * proxy logs, browser history and referrer headers; this token is the only
+ * thing standing between a URL and someone's home.
+ */
+async function handleJobWrite(request, env) {
+  if (!env.WEBHOOK_URL) return json({ ok: false, error: "not_configured" }, 500);
+
+  let body;
+  try {
+    body = await request.text();
+  } catch (_) {
+    return json({ ok: false, error: "unreadable_body" }, 400);
+  }
+  if (!body || body.length > 8000) return json({ ok: false, error: "bad_body" }, 400);
+
+  const upstream = await relay(env.WEBHOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body,
+  }, UPSTREAM_TIMEOUT_MS.submit);
+
+  if (!upstream.ok) {
+    console.error("instruction relay failed: " + upstream.error);
     return json({ ok: false, error: "upstream_unreachable" }, 502);
   }
 

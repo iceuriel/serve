@@ -1,7 +1,34 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-06  ·  master  ·  r12 — custom-quote scope
+ * VERSION STAMP:  2026-09-08  ·  master  ·  r13 — the domain layer
+ *
+ * r13 = A DATA LAYER BETWEEN THE SHEET AND THE TICKET, plus two fixes to r11
+ *      found while building on it.
+ *
+ *      Nothing above the repositories knows a column name any more:
+ *          get*()                sheet row  ->  normalized object
+ *          build*TicketModel()   object     ->  what ONE audience may see
+ *      A view model is a WHITELIST, built up field by field. Filtering a row
+ *      down fails open — a column added to JOBS next month would arrive in a
+ *      browser because nobody remembered to exclude it.
+ *
+ *      THE TICKET TOKEN IS NOW SCOPED TO THE VIEW. It was an HMAC of the
+ *      job_id alone, so ONE token opened both views and `&view=` merely chose
+ *      which. A partner holding their own link could read the customer's name,
+ *      the price they paid and their private notes; a customer could read the
+ *      crew's access notes. Two audiences, two secrets.
+ *
+ *      BOOKING_INSTRUCTIONS is new and auto-created, one row per
+ *      (job_id, scope_type, scope_key). BOOKING/GENERAL, ROOM/<room key> and
+ *      ACCESS/<one of five fixed fields>. Deliberately separate from
+ *      PROPERTY_MEMORY, which holds what is true of the house every visit —
+ *      "fresh sheets are in the closet" is about Tuesday, the lockbox is not.
+ *
+ *      NO VENDORS, OPERATORS OR ASSIGNMENTS TAB IS CREATED. Serve has no
+ *      partner companies yet. getAssignment reads the one real thing — the
+ *      `cleaner` cell — and reports `pending` when blank, so the ticket says
+ *      "confirmed before your appointment" rather than inventing a partner.
  *
  * r12 = the custom-quote email carries the customer's NAME and their SCOPE.
  *      The request form now asks what they actually need done, because that
@@ -408,6 +435,25 @@ const PROPERTIES_TAB = "PROPERTIES";
    them. */
 const PROPERTY_MEMORY_TAB = "PROPERTY_MEMORY";
 
+/* BOOKING_INSTRUCTIONS — what the customer wants done on THIS visit.
+   -------------------------------------------------------------------
+   Auto-created like EVENTS, so no setup step. Deliberately separate from
+   PROPERTY_MEMORY above, which holds durable facts about the house: the
+   lockbox is round the back every time, "fresh sheets are in the closet" is
+   about Tuesday. Storing both in one place means either re-typing the house
+   every visit or carrying a one-off note forward forever.
+
+   One row per (job_id, scope_type, scope_key). Re-writing the same scope
+   updates the row rather than appending, so the ticket shows one current
+   instruction per room instead of an ever-growing list of edits. Blanking the
+   text keeps the row and empties it — the read side skips empties, and the
+   row is the audit trail of the change. */
+const INSTRUCTIONS_TAB = "BOOKING_INSTRUCTIONS";
+const INSTRUCTIONS_HEADERS = [
+  "instruction_id", "job_id", "scope_type", "scope_key",
+  "instruction", "created_at", "updated_at", "source",
+];
+
 /** Payload keys the webhook may write to PROPERTIES. Nothing else. */
 const PROPERTIES_FIELDS = ["property_key", "address", "unit", "zip", "bedrooms", "bathrooms"];
 
@@ -478,6 +524,13 @@ function doPost(e) {
        EVENTS one — and EVENTS has no customer_notes column, so falling through
        would silently drop the whole message. */
     if (eventType === "job_notes") return handleJobNotes(ss, data);
+
+    /* Room and general instructions edited from a client ticket. Routed here
+       for the same reason as job_notes — it writes its own tab rather than
+       appending an EVENTS row — and it authorises on the ticket token rather
+       than on submission_id, because it is the customer editing their own
+       booking rather than the site reporting one. */
+    if (eventType === "booking_instruction") return handleInstruction(ss, data);
 
     if (!isReservation) return handleEvent(ss, data, eventType);
 
@@ -679,7 +732,637 @@ function doGet(e) {
   if (p.job) return handleTicket(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-06 r12" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-08 r13" });
+}
+
+
+/**
+ * POST an instruction from a client ticket.
+ *
+ * THE TICKET TOKEN IS THE AUTHORIZATION, and it must be the CLIENT token —
+ * a partner may read a job, never rewrite what the customer asked for.
+ *
+ * `scope_key` is validated against the rooms this booking actually implies.
+ * Without that check the tab becomes a free-text store keyed on whatever a
+ * caller sends, and the ticket quietly stops showing instructions because they
+ * were filed under a room that does not exist.
+ *
+ * NEVER FATAL, like handleJobNotes. The booking is already made; a failure to
+ * save a note must return an error the page can show, not throw.
+ */
+function handleInstruction(ss, data) {
+  var jobId = String(data.job_id || "").trim();
+  var token = String(data.t || "").trim();
+  if (!jobId || ticketToken(jobId, "client") !== token) {
+    return json({ ok: false, error: "not_found" });
+  }
+
+  try {
+    var booking = getBooking(ss, jobId);
+    if (!booking) return json({ ok: false, error: "not_found" });
+    /* A finished job is a record, not a worksheet. */
+    if (booking.completedDate) return json({ ok: false, error: "closed" });
+
+    var raw = String(data.scope_type || "BOOKING").toUpperCase();
+    var scopeType = (raw === "ROOM" || raw === "ACCESS") ? raw : "BOOKING";
+    var scopeKey  = String(data.scope_key || "GENERAL").toUpperCase();
+    if (scopeType === "BOOKING") scopeKey = "GENERAL";
+    if (scopeType === "ACCESS" && !ACCESS_KEYS[scopeKey]) {
+      return json({ ok: false, error: "unknown_access_field" });
+    }
+
+    var allowed = validScopeKeys(booking.beds, booking.baths);
+    if (!allowed[scopeKey]) return json({ ok: false, error: "unknown_room" });
+
+    var text = String(data.instruction || "").trim().slice(0, 2000);
+
+    var sheet = ensureInstructionsTab(ss);
+    var h = sheetHeaders(sheet);
+    var col = function (n) { return h.indexOf(n); };
+    var now = new Date();
+
+    /* Update in place when this scope already has a row. */
+    var last = sheet.getLastRow();
+    if (last > 1) {
+      var rows = sheet.getRange(2, 1, last - 1, h.length).getValues();
+      for (var i = 0; i < rows.length; i++) {
+        if (String(rows[i][col("job_id")]).trim() !== jobId) continue;
+        if (String(rows[i][col("scope_type")]).toUpperCase() !== scopeType) continue;
+        if (String(rows[i][col("scope_key")]).toUpperCase() !== scopeKey) continue;
+        sheet.getRange(i + 2, col("instruction") + 1).setValue(text);
+        sheet.getRange(i + 2, col("updated_at") + 1).setValue(now);
+        return json({ ok: true, updated: true, scope_key: scopeKey });
+      }
+    }
+
+    if (!text) return json({ ok: true, updated: false, scope_key: scopeKey });
+
+    var row = new Array(h.length).fill("");
+    row[col("instruction_id")] = "INS-" + Utilities.getUuid().slice(0, 8).toUpperCase();
+    row[col("job_id")]      = jobId;
+    row[col("scope_type")]  = scopeType;
+    row[col("scope_key")]   = scopeKey;
+    row[col("instruction")] = text;
+    row[col("created_at")]  = now;
+    row[col("updated_at")]  = now;
+    row[col("source")]      = "client";
+    sheet.appendRow(row);
+    return json({ ok: true, created: true, scope_key: scopeKey });
+
+  } catch (err) {
+    console.error("handleInstruction failed: " + (err && err.stack ? err.stack : err));
+    return json({ ok: false, error: "save_failed" });
+  }
+}
+
+/** Auto-created on first use, exactly like EVENTS. No setup step. */
+function ensureInstructionsTab(ss) {
+  assertWritable(INSTRUCTIONS_TAB);
+  var sheet = ss.getSheetByName(INSTRUCTIONS_TAB);
+  if (!sheet) {
+    sheet = ss.insertSheet(INSTRUCTIONS_TAB);
+    sheet.appendRow(INSTRUCTIONS_HEADERS);
+    sheet.setFrozenRows(1);
+    console.log('Created the "' + INSTRUCTIONS_TAB + '" tab.');
+  }
+  return sheet;
+}
+
+
+/* ============================================================
+   SERVE DOMAIN LAYER  —  sheet rows in, normalized objects out
+   ============================================================
+   Added r13.
+
+   THE POINT: nothing above the repositories may know a sheet column name.
+   The tabs get renamed, columns get inserted, a tab moves to a database — and
+   the only things that have to change are the four `get*` functions below.
+   Everything downstream speaks Serve's own vocabulary.
+
+   THREE LAYERS, and the order matters:
+
+     get*()                sheet row  ->  normalized domain object
+     build*TicketModel()   domain object -> what one audience may see
+     the page              renders a view model and asks no questions
+
+   A VIEW MODEL IS A WHITELIST, NEVER A FILTER. Every field a browser receives
+   is named explicitly in the builder. The alternative — take the row and
+   delete the private parts — fails open: a column added to JOBS next month
+   arrives in the browser because nobody remembered to exclude it. Building up
+   fails closed, which is the direction a mistake should go.
+
+   WHAT DOES NOT EXIST YET, and is not invented here: there is no VENDORS tab,
+   no OPERATORS tab and no ASSIGNMENTS tab. Serve has no partner companies.
+   `getAssignment` therefore reads the one thing that is real — the `cleaner`
+   cell on the JOBS row — and reports `pending` when it is blank. The shapes
+   are right so a registry can be added without touching the ticket; the data
+   is not faked so the ticket cannot claim a partner that does not exist. */
+
+/** The service taxonomy. Serve's codes, not the sheet's labels. */
+var SERVICE_CODES = {
+  CLEAN_STANDARD: "Recurring clean",
+  CLEAN_DEEP:     "First clean",
+  CLEAN_MOVEOUT:  "Move in / move out",
+};
+
+/**
+ * JOBS stores a human label in `service_type` and the cadence in `frequency`.
+ * Neither alone is the service: a First Clean on a biweekly plan is the start
+ * of a recurring relationship, and a First Clean on its own is a deep clean.
+ */
+function serviceCodeOf(label, frequency) {
+  var s = String(label || "").toLowerCase();
+  var f = String(frequency || "once").toLowerCase();
+  if (s.indexOf("move") !== -1) return "CLEAN_MOVEOUT";
+  if (f && f !== "once")        return "CLEAN_STANDARD";
+  return "CLEAN_DEEP";
+}
+
+/**
+ * The rooms a booking implies, as stable keys plus display labels.
+ *
+ * V1 IS A LIST, NOT A FLOORPLAN. The booking already knows the bed and bath
+ * count, which is enough to give someone a place to attach "fresh sheets are
+ * in the closet" to. A drawn plan would need data nobody has collected.
+ *
+ * The KEY is what gets stored and must never be re-worded; the LABEL is what a
+ * person reads and may change freely.
+ */
+function deriveRooms(beds, baths) {
+  var rooms = [];
+  var b = Math.max(0, Math.round(Number(beds) || 0));
+  var t = Math.max(0, Number(baths) || 0);
+
+  if (b === 0) rooms.push({ key: "STUDIO_MAIN", label: "Main room" });
+  for (var i = 1; i <= b; i++) rooms.push({ key: "BEDROOM_" + i, label: "Bedroom " + i });
+
+  var full = Math.floor(t);
+  for (var j = 1; j <= full; j++) rooms.push({ key: "BATHROOM_" + j, label: "Bathroom " + j });
+  /* Half baths are a real category in Boston listings and the calculator
+     already prices them at 0.5 — so they get their own room, not a rounding. */
+  if (t - full >= 0.5) rooms.push({ key: "BATHROOM_HALF", label: "Half bath" });
+
+  rooms.push({ key: "KITCHEN",     label: "Kitchen" });
+  rooms.push({ key: "LIVING_ROOM", label: "Living room" });
+  return rooms;
+}
+
+/* The five things a customer can tell us about getting in. A FIXED SET, not
+   free text keys: the partner ticket renders them under known headings, and a
+   sixth key invented by a caller would be stored and then never shown.
+
+   DOOR CODE IS NOT ONE OF THEM, deliberately. Codes live in Access MASTER and
+   reach the cleaner by direct message; a field here would put one behind a URL
+   token, which is the separation this whole design exists to keep. */
+var ACCESS_KEYS = {
+  OCCUPANCY: "Will someone be home?",
+  METHOD:    "How to get in",
+  NOTES:     "Access notes",
+  PARKING:   "Parking",
+  PETS:      "Pets",
+};
+
+/**
+ * Every scope key this booking may legitimately carry.
+ *
+ * Validated on write. Without it the tab becomes a free-text store keyed on
+ * whatever a caller sends, and instructions silently vanish from the ticket
+ * because they were filed under a room that does not exist.
+ */
+function validScopeKeys(beds, baths) {
+  var keys = { GENERAL: true };
+  deriveRooms(beds, baths).forEach(function (r) { keys[r.key] = true; });
+  Object.keys(ACCESS_KEYS).forEach(function (k) { keys[k] = true; });
+  return keys;
+}
+
+/* ---------- repositories: one sheet row -> one domain object ---------- */
+
+/**
+ * The booking, by id. Returns null when there is no such row — never a partial
+ * object, because a caller that has to check each field for emptiness is a
+ * caller that will forget to.
+ */
+function getBooking(ss, jobId) {
+  var jobs = requireTab(ss, JOBS_TAB);
+  var h = sheetHeaders(jobs);
+  var idCol = h.indexOf("job_id");
+  if (idCol === -1) return null;
+
+  var last = jobs.getLastRow();
+  if (last < 2) return null;
+
+  var ids = jobs.getRange(2, idCol + 1, last - 1, 1).getValues();
+  var row = -1;
+  for (var i = 0; i < ids.length; i++) {
+    if (String(ids[i][0]).trim() === String(jobId).trim()) { row = i + 2; break; }
+  }
+  if (row === -1) return null;
+
+  var values = jobs.getRange(row, 1, 1, h.length).getValues()[0];
+  var f = function (name) { var c = h.indexOf(name); return c === -1 ? "" : values[c]; };
+
+  var beds  = Number(f("beds"));
+  var baths = Number(f("baths"));
+  var meta  = {};
+  try { meta = JSON.parse(f("quote_meta") || "{}") || {}; } catch (_) { meta = {}; }
+
+  return {
+    /* identity */
+    bookingId:    String(f("job_id")),
+    customerId:   String(f("lead_id") || ""),
+    propertyId:   String(f("property_id") || ""),
+    propertyKey:  String(f("property_key") || ""),
+    submissionId: String(f("submission_id") || ""),
+
+    /* what was bought */
+    serviceCode:  serviceCodeOf(f("service_type"), f("frequency")),
+    serviceLabel: String(f("service_type") || ""),
+    frequency:    String(f("frequency") || ""),
+    condition:    String(f("condition") || ""),
+    addOns:       String(f("add_ons") || ""),
+
+    /* the home, as priced */
+    beds:   isNaN(beds) ? null : beds,
+    baths:  isNaN(baths) ? null : baths,
+    levels: Number(meta.levels) || 1,
+
+    /* when */
+    scheduledDate:   String(f("scheduled_date") || ""),
+    startTime:       String(f("start_time") || ""),
+    scheduleSummary: String(f("notes") || ""),
+    completedDate:   String(f("completed_date") || "").trim(),
+    status:          String(f("job_status") || ""),
+
+    /* money — INTERNAL. No view model may pass `quoted` to a partner. */
+    price: {
+      quoted: f("quoted_price"),
+      final:  f("final_price"),
+      addOnRevenue: f("add_on_rev"),
+    },
+    payment: {
+      status: String(f("payment_status") || ""),
+      paid:   String(f("payment_status") || "").toLowerCase() === "paid",
+    },
+
+    /* people — INTERNAL */
+    customerName:  String(f("name") || ""),
+    customerEmail: String(f("email") || ""),
+    customerPhone: String(f("phone") || ""),
+
+    /* where — INTERNAL, partner-only */
+    address: String(f("address") || ""),
+    unit:    String(f("unit") || ""),
+    zip:     String(f("zip") || ""),
+
+    petsFlag:      f("pets_flag") === true || String(f("pets_flag")).toUpperCase() === "TRUE",
+    customerNotes: String(f("customer_notes") || ""),
+    cleanerCell:   String(f("cleaner") || ""),
+  };
+}
+
+/**
+ * Durable knowledge about the home, from PROPERTY_MEMORY. This is deliberately
+ * PROPERTY-scoped rather than booking-scoped: the door is in the same place
+ * next month, and re-asking every visit is what "Serve remembers your home"
+ * exists to stop.
+ *
+ * Never fatal. A missing tab or row means an empty access record, and the job
+ * still runs — the crew simply learns it on the day, as they always did.
+ */
+function getBookingAccess(ss, propertyId) {
+  var empty = { accessMethod: "", accessNotes: "", parkingNotes: "", petNotes: "",
+                priorityRooms: "", skipAreas: "", productNotes: "", timingNotes: "" };
+  if (!propertyId) return empty;
+  try {
+    var mt = ss.getSheetByName(PROPERTY_MEMORY_TAB);
+    if (!mt) return empty;
+    var mh = sheetHeaders(mt);
+    var mi = mh.indexOf("property_id");
+    var ml = mt.getLastRow();
+    if (mi === -1 || ml < 2) return empty;
+
+    var rows = mt.getRange(2, 1, ml - 1, mh.length).getValues();
+    for (var k = 0; k < rows.length; k++) {
+      if (String(rows[k][mi]).trim() !== String(propertyId).trim()) continue;
+      var m = {};
+      mh.forEach(function (name, idx) { m[name] = rows[k][idx]; });
+      return {
+        accessMethod:  String(m.access_method  || ""),
+        accessNotes:   String(m.access_notes   || ""),
+        parkingNotes:  String(m.parking_notes  || ""),
+        petNotes:      String(m.pets           || ""),
+        priorityRooms: String(m.priority_rooms || ""),
+        skipAreas:     String(m.skip_areas     || ""),
+        productNotes:  String(m.product_notes  || ""),
+        timingNotes:   String(m.timing_notes   || ""),
+      };
+    }
+  } catch (err) {
+    console.warn("PROPERTY_MEMORY lookup failed: " + err);
+  }
+  return empty;
+}
+
+/**
+ * Per-booking instructions, scoped to the whole job or to one room.
+ *
+ * BOOKING-scoped on purpose, unlike access. "Fresh sheets are in the closet"
+ * is about this visit; "the lockbox is round the back" is about the house.
+ * Mixing them means either re-typing the house every time or carrying a
+ * one-off note forward forever.
+ */
+function getBookingInstructions(ss, jobId) {
+  var out = [];
+  try {
+    var t = ss.getSheetByName(INSTRUCTIONS_TAB);
+    if (!t) return out;
+    var h = sheetHeaders(t);
+    var last = t.getLastRow();
+    if (last < 2) return out;
+    var idx = function (n) { return h.indexOf(n); };
+    if (idx("job_id") === -1) return out;
+
+    var rows = t.getRange(2, 1, last - 1, h.length).getValues();
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i][idx("job_id")]).trim() !== String(jobId).trim()) continue;
+      var text = String(rows[i][idx("instruction")] || "").trim();
+      if (!text) continue;                       // blanked by an edit; not a note
+      out.push({
+        instructionId: String(rows[i][idx("instruction_id")] || ""),
+        scopeType:     String(rows[i][idx("scope_type")] || "BOOKING").toUpperCase(),
+        scopeKey:      String(rows[i][idx("scope_key")] || "GENERAL").toUpperCase(),
+        instruction:   text,
+        updatedAt:     String(rows[i][idx("updated_at")] || ""),
+      });
+    }
+  } catch (err) {
+    console.warn("BOOKING_INSTRUCTIONS read failed: " + err);
+  }
+  return out;
+}
+
+/**
+ * Who is doing this job.
+ *
+ * THERE IS NO VENDOR REGISTRY YET, so this reads the only thing that exists:
+ * the `cleaner` cell an operator types on the JOBS row. It reports the shape a
+ * real assignment will have, with `vendorId` null, so the ticket renders the
+ * unassigned state honestly today and needs no change the day VENDORS exists.
+ */
+function getAssignment(ss, booking) {
+  var label = String(booking.cleanerCell || "").trim();
+  return {
+    bookingId:  booking.bookingId,
+    vendorId:   null,
+    operatorId: null,
+    /* Internal. A view model may use it to decide "assigned or not"; it may
+       never be sent to a browser, because it is a person's name typed into a
+       spreadsheet, not a vetted public display name. */
+    internalLabel: label,
+    status:     label ? "assigned" : "pending",
+    assignedAt: null,
+  };
+}
+
+/** No VENDORS tab exists. Returns null rather than inventing a company. */
+function getVendor(ss, vendorId) {
+  if (!vendorId) return null;
+  var t = ss.getSheetByName("VENDORS");
+  if (!t) return null;
+  var h = sheetHeaders(t);
+  var i = h.indexOf("vendor_id");
+  var last = t.getLastRow();
+  if (i === -1 || last < 2) return null;
+  var rows = t.getRange(2, 1, last - 1, h.length).getValues();
+  for (var r = 0; r < rows.length; r++) {
+    if (String(rows[r][i]).trim() !== String(vendorId).trim()) continue;
+    var v = {};
+    h.forEach(function (name, idx) { v[name] = rows[r][idx]; });
+    return {
+      vendorId:         String(v.vendor_id || ""),
+      status:           String(v.status || ""),
+      legalName:        String(v.legal_name || ""),
+      displayName:      String(v.display_name || ""),
+      internalPhone:    String(v.internal_phone || ""),
+      internalEmail:    String(v.internal_email || ""),
+      logoUrl:          String(v.logo_url || ""),
+      publicDescription:String(v.public_description || ""),
+      partnerSince:     String(v.partner_since || ""),
+      insuranceVerified: v.insurance_verified === true ||
+                         String(v.insurance_verified).toUpperCase() === "TRUE",
+      serviceArea:      String(v.service_area || ""),
+      publicRating:     v.public_rating === "" ? null : Number(v.public_rating),
+      publicReviewCount: v.public_review_count === "" ? null : Number(v.public_review_count),
+      ratingSource:     String(v.rating_source || ""),
+      clientVisible:    v.client_visible === true ||
+                        String(v.client_visible).toUpperCase() === "TRUE",
+    };
+  }
+  return null;
+}
+
+/** No OPERATORS tab exists. Reserved so the shape is settled. */
+function getOperator(ss, operatorId) {
+  if (!operatorId) return null;
+  return null;
+}
+
+/* ---------- view models: explicit whitelists ---------- */
+
+/**
+ * The only vendor shape a customer may ever receive.
+ *
+ * BUILT UP, NOT FILTERED DOWN. Naming each field means a column added to
+ * VENDORS later — payout rate, dispatch score, margin — cannot reach a browser
+ * by default. It has to be added here on purpose.
+ *
+ * Returns null when there is nothing legitimate to show, which the ticket
+ * renders as "your service professional will be confirmed". An empty card
+ * would be worse than no card.
+ */
+function buildClientVendorProfile(vendor) {
+  if (!vendor || !vendor.clientVisible) return null;
+  if (!vendor.displayName) return null;
+  return {
+    displayName:       vendor.displayName,
+    logoUrl:           vendor.logoUrl || "",
+    publicDescription: vendor.publicDescription || "",
+    partnerSince:      vendor.partnerSince || "",
+    insuranceVerified: vendor.insuranceVerified === true,
+    serviceArea:       vendor.serviceArea || "",
+    rating:            typeof vendor.publicRating === "number" && vendor.publicRating > 0
+                         ? vendor.publicRating : null,
+    reviewCount:       typeof vendor.publicReviewCount === "number" && vendor.publicReviewCount > 0
+                         ? vendor.publicReviewCount : null,
+    ratingSource:      vendor.ratingSource || "",
+  };
+}
+
+/**
+ * What the customer sees. Their booking, their home, their words.
+ *
+ * NO ADDRESS, NO ACCESS NOTES, NO INDIVIDUAL NAMED. The address they already
+ * know; the access notes are the crew's working copy and a leaked client link
+ * should not carry how to get into the house. The person is not named because
+ * Serve routes to a company — see the joint-employer note on the network
+ * section of the site.
+ */
+function buildClientTicketModel(ss, booking) {
+  var rooms = deriveRooms(booking.beds, booking.baths);
+  var instructions = getBookingInstructions(ss, booking.bookingId);
+  var assignment = getAssignment(ss, booking);
+  var vendor = buildClientVendorProfile(getVendor(ss, assignment.vendorId));
+
+  var sorted = sortInstructions(instructions);
+
+  return {
+    ok: true,
+    view: "client",
+    bookingId: booking.bookingId,
+
+    booking: {
+      serviceCode:  booking.serviceCode,
+      serviceLabel: SERVICE_CODES[booking.serviceCode] || booking.serviceLabel,
+      frequency:    booking.frequency,
+      date:         booking.scheduledDate,
+      time:         booking.startTime,
+      when:         booking.scheduleSummary,
+      status:       booking.status,
+      completed:    booking.completedDate,
+      addOns:       booking.addOns,
+      /* The price the customer agreed to. `final` once an operator sets it,
+         otherwise the quote. Never both, so there is nothing to reconcile. */
+      price:        booking.price.final || booking.price.quoted,
+      /* Real column, filled by hand. There is no Stripe integration, so there
+         is no payment link and this must not pretend otherwise. */
+      paid:         booking.payment.paid,
+      paymentNote:  booking.payment.paid ? "Paid" : "Due at service",
+    },
+
+    home: {
+      beds:   booking.beds,
+      baths:  booking.baths,
+      levels: booking.levels,
+      /* Each room carries any instruction already attached to it, so the page
+         renders the current state without a second request. */
+      rooms: rooms.map(function (r) {
+        return { key: r.key, label: r.label, instruction: sorted.rooms[r.key] || "" };
+      }),
+    },
+
+    instructions: {
+      general: sorted.general,
+      /* Their own words from booking, read back. Kept separate from anything
+         they add later so an edit cannot overwrite what they first told us. */
+      atBooking: booking.customerNotes,
+    },
+
+    /* WHAT THE CUSTOMER TOLD US, read back to the customer — never Serve's own
+       PROPERTY_MEMORY, which is the crew's working record of the home and is
+       not the customer's to see. Reading back only their own words means a
+       leaked client link exposes nothing the holder did not already write. */
+    access: {
+      fields: accessFieldList(sorted.access),
+    },
+
+    firstName: booking.customerName.split(" ")[0] || "",
+    partner: vendor,
+    partnerPending: !vendor,
+  };
+}
+
+/** Split a flat instruction list into the three shapes a ticket renders. */
+function sortInstructions(list) {
+  var out = { general: "", rooms: {}, access: {} };
+  list.forEach(function (ins) {
+    if (ins.scopeType === "ROOM")        out.rooms[ins.scopeKey]  = ins.instruction;
+    else if (ins.scopeType === "ACCESS") out.access[ins.scopeKey] = ins.instruction;
+    else                                 out.general = ins.instruction;
+  });
+  return out;
+}
+
+/** The access questions in a fixed order, with whatever has been answered. */
+function accessFieldList(answered) {
+  return Object.keys(ACCESS_KEYS).map(function (k) {
+    return { key: k, label: ACCESS_KEYS[k], value: answered[k] || "" };
+  });
+}
+
+/**
+ * What the partner sees. Enough to do the job and nothing else.
+ *
+ * NO PRICE. Not the quote, not the final, not the add-on revenue. What Serve
+ * charges is not a partner's business and the margin is the model.
+ * NO CUSTOMER EMAIL OR PHONE — contact routes through Serve.
+ */
+function buildVendorTicketModel(ss, booking) {
+  var rooms = deriveRooms(booking.beds, booking.baths);
+  var instructions = getBookingInstructions(ss, booking.bookingId);
+  var access = getBookingAccess(ss, booking.propertyId);
+
+  var sorted = sortInstructions(instructions);
+
+  return {
+    ok: true,
+    view: "partner",
+    bookingId: booking.bookingId,
+
+    booking: {
+      serviceCode:  booking.serviceCode,
+      serviceLabel: SERVICE_CODES[booking.serviceCode] || booking.serviceLabel,
+      condition:    booking.condition,
+      date:         booking.scheduledDate,
+      time:         booking.startTime,
+      when:         booking.scheduleSummary,
+      status:       booking.status,
+      completed:    booking.completedDate,
+      addOns:       booking.addOns,
+    },
+
+    property: {
+      address: booking.address,
+      unit:    booking.unit,
+      zip:     booking.zip,
+      beds:    booking.beds,
+      baths:   booking.baths,
+      levels:  booking.levels,
+    },
+
+    scope: rooms.map(function (r) {
+      return { key: r.key, label: r.label, instruction: sorted.rooms[r.key] || "" };
+    }),
+
+    instructions: {
+      general: sorted.general,
+      atBooking: booking.customerNotes,
+    },
+
+    /* TWO SOURCES, KEPT APART ON PURPOSE.
+       `standing` is PROPERTY_MEMORY: what the crew learned about this home and
+       expects to be true every visit. `fromCustomer` is what the customer said
+       for THIS booking. Merging them would let a one-off ("we'll be away, use
+       the lockbox") silently become the permanent record of the house.
+
+       DOOR CODES ARE IN NEITHER AND MUST NOT BE ADDED. They live in Access
+       MASTER, owner-only, and reach the cleaner by direct message at dispatch.
+       A URL token is not the place for them. */
+    access: {
+      standing: {
+        method:        access.accessMethod,
+        notes:         access.accessNotes,
+        parking:       access.parkingNotes,
+        pets:          access.petNotes,
+        priorityRooms: access.priorityRooms,
+        skipAreas:     access.skipAreas,
+        productNotes:  access.productNotes,
+        timingNotes:   access.timingNotes,
+      },
+      fromCustomer: accessFieldList(sorted.access).filter(function (f) { return f.value; }),
+      petsFlagged:  booking.petsFlag,
+    },
+  };
 }
 
 
@@ -694,14 +1377,21 @@ function doGet(e) {
    it is `SRV-` + a fully known date + six characters, it appears in every
    notification email, and one leaked id exposes the pattern.
 
-   So the token is an HMAC of the job_id under a secret that never leaves this
-   script. It cannot be derived from the id, it is stable for a given job, and
-   it needs no new column — nothing to add by hand, nothing to keep in sync.
+   So the token is an HMAC under a secret that never leaves this script. It
+   cannot be derived from the id, it is stable for a given job, and it needs no
+   new column — nothing to add by hand, nothing to keep in sync.
 
-   WHAT EACH VIEW MAY SEE is decided here, on the server, not by the page.
-   A partner never receives the customer's email or phone. A client never
-   receives the crew's access notes. Filtering in the browser would mean
-   shipping both and trusting the page not to render one.
+   THE TOKEN IS SCOPED TO THE VIEW, as of r13. It was an HMAC of the job_id
+   alone, which meant ONE token opened both views and `&view=` merely chose
+   which. A partner holding their own link could flip it to `view=client` and
+   read the customer's name, the price they paid and their private notes; a
+   customer could flip the other way into the crew's access notes. The price
+   leak is the serious one — what Serve charges versus what a partner is paid
+   is the entire model. Two audiences means two secrets, so the view is now
+   inside the HMAC and a partner link is not a client link.
+
+   WHAT EACH VIEW MAY SEE is decided by the view models above, on the server.
+   Filtering in the browser would mean shipping both and trusting the page.
 
    DOOR CODES ARE NOT HERE AND MUST NOT BE ADDED. They live in a separate
    Access MASTER file, owner-only, and reach the cleaner by direct message at
@@ -792,138 +1482,60 @@ function ticketSecret() {
 }
 
 /** Stable per job, underivable from the id. 20 hex chars ~ 80 bits. */
-function ticketToken(jobId) {
-  var raw = Utilities.computeHmacSha256Signature(String(jobId), ticketSecret());
+/**
+ * One token per (job, audience).
+ *
+ * THE VIEW IS INSIDE THE HMAC, and that is the whole point. Signing the job_id
+ * alone produced a single token for both audiences with `&view=` choosing
+ * between them — so anyone holding either link held both. A partner could read
+ * the customer's price; a customer could read the crew's notes. Two audiences,
+ * two secrets.
+ */
+function ticketToken(jobId, view) {
+  var scope = String(jobId) + "|" + (view === "partner" ? "partner" : "client");
+  var raw = Utilities.computeHmacSha256Signature(scope, ticketSecret());
   var hex = raw.map(function (b) {
     return ("0" + (b < 0 ? b + 256 : b).toString(16)).slice(-2);
   }).join("");
   return hex.slice(0, 20);
 }
 
-/** The link to hand a customer or a cleaner. */
+/** The link to hand a customer or a cleaner. Different links, necessarily. */
 function ticketUrl(jobId, view) {
+  var v = view === "partner" ? "partner" : "client";
   return "https://servecleaning.com/j?id=" + encodeURIComponent(jobId) +
-         "&t=" + ticketToken(jobId) +
-         "&view=" + (view === "partner" ? "partner" : "client");
+         "&t=" + ticketToken(jobId, v) +
+         "&view=" + v;
 }
 
 function handleTicket(p) {
   var jobId = String(p.job || "").trim();
   var view  = p.view === "partner" ? "partner" : "client";
 
-  /* Compared as whole strings. A wrong token is refused before any lookup, so
-     a guessed id cannot even confirm a job exists. */
-  if (ticketToken(jobId) !== String(p.t || "").trim()) {
+  /* Compared as whole strings, and against a token scoped to THIS view. A
+     wrong token is refused before any lookup, so a guessed id cannot even
+     confirm a job exists — and a partner's link is not a client's. */
+  if (ticketToken(jobId, view) !== String(p.t || "").trim()) {
     return json({ ok: false, error: "not_found" });
   }
 
   try {
-    var ss   = SPREADSHEET_ID ? SpreadsheetApp.openById(SPREADSHEET_ID)
-                              : SpreadsheetApp.getActiveSpreadsheet();
-    var jobs = requireTab(ss, JOBS_TAB);
-    var h    = sheetHeaders(jobs);
-    var col  = function (n) { return h.indexOf(n); };
+    var ss = SPREADSHEET_ID ? SpreadsheetApp.openById(SPREADSHEET_ID)
+                            : SpreadsheetApp.getActiveSpreadsheet();
 
-    var idCol = col("job_id");
-    if (idCol === -1) return json({ ok: false, error: "no job_id column" });
-
-    var last = jobs.getLastRow();
-    if (last < 2) return json({ ok: false, error: "not_found" });
-
-    var ids = jobs.getRange(2, idCol + 1, last - 1, 1).getValues();
-    var row = -1;
-    for (var i = 0; i < ids.length; i++) {
-      if (String(ids[i][0]).trim() === jobId) { row = i + 2; break; }
-    }
-    if (row === -1) return json({ ok: false, error: "not_found" });
-
-    var values = jobs.getRange(row, 1, 1, h.length).getValues()[0];
-    var f = function (name) {
-      var c = col(name);
-      return c === -1 ? "" : values[c];
-    };
+    var booking = getBooking(ss, jobId);
+    if (!booking) return json({ ok: false, error: "not_found" });
 
     /* The partner view is for doing the job, so it stops being useful once the
        job is done. The client view is their record — the photos and the price
        live there — so it persists. */
-    var completed = String(f("completed_date") || "").trim();
-    if (view === "partner" && completed) {
+    if (view === "partner" && booking.completedDate) {
       return json({ ok: false, error: "expired", note: "this job is complete" });
     }
 
-    var beds  = f("beds"), baths = f("baths");
-    var home  = (Number(beds) === 0 ? "Studio" : beds + " BR") + " / " + baths + " BA";
-    var lv    = Number(f("levels"));
-    if (lv > 1) home += " / " + lv + " floors";
-
-    var base = {
-      ok:        true,
-      view:      view,
-      job_id:    jobId,
-      service:   f("service_type"),
-      condition: f("condition"),
-      home:      home,
-      date:      String(f("scheduled_date") || ""),
-      time:      f("start_time"),
-      when:      f("notes"),                 // the human schedule summary
-      status:    f("job_status"),
-      completed: completed,
-    };
-
-    if (view === "client") {
-      return json(Object.assign(base, {
-        first_name: String(f("name") || "").split(" ")[0],
-        price:      f("final_price") || f("quoted_price"),
-        add_ons:    f("add_ons"),
-        frequency:  f("frequency"),
-        /* Their own words, read back — proof they were heard. */
-        notes:      f("customer_notes"),
-        cleaner:    String(f("cleaner") || ""),
-        paid:       String(f("payment_status") || "").toLowerCase() === "paid",
-      }));
-    }
-
-    /* PARTNER. Address and the crew notes, no customer contact details. */
-    var mem = {};
-    try {
-      var pid = f("property_id");
-      if (pid) {
-        var mt = ss.getSheetByName(PROPERTY_MEMORY_TAB);
-        if (mt) {
-          var mh = sheetHeaders(mt);
-          var mi = mh.indexOf("property_id");
-          var ml = mt.getLastRow();
-          if (mi !== -1 && ml > 1) {
-            var mrows = mt.getRange(2, 1, ml - 1, mh.length).getValues();
-            for (var k = 0; k < mrows.length; k++) {
-              if (String(mrows[k][mi]).trim() === String(pid).trim()) {
-                mh.forEach(function (name, idx) { mem[name] = mrows[k][idx]; });
-                break;
-              }
-            }
-          }
-        }
-      }
-    } catch (memErr) {
-      console.warn("PROPERTY_MEMORY lookup failed for the ticket: " + memErr);
-    }
-
-    return json(Object.assign(base, {
-      address:  f("address"),
-      unit:     f("unit"),
-      zip:      f("zip"),
-      cleaner:  String(f("cleaner") || ""),
-      pets:     f("pets_flag") === true || String(f("pets_flag")).toUpperCase() === "TRUE",
-      customer_notes: f("customer_notes"),
-      access_method:  mem.access_method  || "",
-      access_notes:   mem.access_notes   || "",
-      parking_notes:  mem.parking_notes  || "",
-      memory_pets:    mem.pets           || "",
-      priority_rooms: mem.priority_rooms || "",
-      skip_areas:     mem.skip_areas     || "",
-      product_notes:  mem.product_notes  || "",
-      timing_notes:   mem.timing_notes   || "",
-    }));
+    return json(view === "partner"
+      ? buildVendorTicketModel(ss, booking)
+      : buildClientTicketModel(ss, booking));
 
   } catch (err) {
     console.error("handleTicket failed: " + (err && err.stack ? err.stack : err));

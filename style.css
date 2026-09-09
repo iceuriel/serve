@@ -2182,6 +2182,169 @@ a {
 }
 .tk-blk--flag { border-top-color: #d97706; }
 
+/* --- Ticket sections (r13) --------------------------------------------
+   The client ticket became five sections rather than one list: booking, the
+   home, instructions, access, partner. A section is a heading and a rule; the
+   blocks inside it keep the styling they already had. */
+.tk-sec {
+    margin-top: 1.75rem;
+    padding-top: 1.25rem;
+    border-top: 2px solid var(--color-dark);
+}
+.tk-sec__h {
+    font-family: var(--flow-serif);
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--color-dark);
+    margin: 0 0 0.25rem;
+}
+.tk-sec__sub {
+    font-size: 0.85rem;
+    color: var(--color-text-muted);
+    line-height: 1.5;
+    margin: 0 0 0.9rem;
+}
+
+/* Rooms. <details> rather than a JS accordion: keyboard-operable and
+   screen-reader-announced for free, and it still opens if the script that
+   renders the save button somehow fails. */
+.tk-room {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    margin-bottom: 0.5rem;
+    background: #fff;
+}
+.tk-room[open] { border-color: var(--color-accent); }
+.tk-room__sum {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.7rem 0.85rem;
+    cursor: pointer;
+    list-style: none;
+}
+.tk-room__sum::-webkit-details-marker { display: none; }
+.tk-room__name {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--color-dark);
+}
+.tk-room__flag {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+}
+
+/* The editable box. Present on every instruction the customer owns. */
+.tk-edit { padding: 0 0.85rem 0.85rem; }
+.tk-sec > .tk-edit { padding-left: 0; padding-right: 0; }
+.tk-edit__lbl {
+    display: block;
+    font-size: 0.63rem;
+    font-weight: 700;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    margin-bottom: 0.35rem;
+}
+.tk-edit__box {
+    width: 100%;
+    font-family: var(--flow-sans);
+    font-size: 0.95rem;
+    line-height: 1.5;
+    color: var(--color-text);
+    padding: 0.6rem 0.7rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    resize: vertical;
+}
+.tk-edit__box:focus {
+    outline: none;
+    border-color: var(--color-dark);
+    box-shadow: 0 0 0 3px rgba(31, 41, 55, 0.12);
+}
+.tk-edit__row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-top: 0.5rem;
+}
+.tk-edit__save {
+    font-family: var(--flow-sans);
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #fff;
+    background: var(--color-dark);
+    border: none;
+    border-radius: var(--radius);
+    padding: 0.45rem 1rem;
+    cursor: pointer;
+}
+.tk-edit__save:hover:not(:disabled) { background: var(--color-accent); }
+.tk-edit__save:disabled { opacity: 0.55; cursor: default; }
+
+/* Save state. Three of them, because "not saved yet" is the one that matters:
+   a note typed and abandoned is the common failure, and silence would let the
+   customer believe it was kept. */
+.tk-save {
+    font-size: 0.78rem;
+    color: var(--color-text-muted);
+}
+.tk-save.is-ok    { color: #166534; font-weight: 600; }
+.tk-save.is-bad   { color: #b91c1c; font-weight: 600; }
+.tk-save.is-dirty { color: #b45309; }
+
+/* Partner card, client side. Company only — no individual is named here; see
+   the joint-employer note in webhook.gs. */
+.tk-partner {
+    background: var(--color-bg-light);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 0.9rem 1rem;
+}
+.tk-partner__name {
+    font-family: var(--flow-serif);
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--color-dark);
+}
+.tk-partner__desc {
+    font-size: 0.9rem;
+    line-height: 1.55;
+    color: var(--color-text);
+    margin: 0.35rem 0 0;
+}
+.tk-partner__facts {
+    font-size: 0.8rem;
+    color: var(--color-text-muted);
+    margin-top: 0.5rem;
+}
+
+/* Scope list, partner side. Read-only: the crew does the work, the customer
+   decides what the work is. */
+.tk-scope {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.55rem 0;
+    border-bottom: 1px solid var(--color-border);
+}
+.tk-scope:last-child { border-bottom: none; }
+.tk-scope__name {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--color-dark);
+}
+.tk-scope__ins {
+    font-size: 0.88rem;
+    line-height: 1.5;
+    color: var(--color-text);
+    white-space: pre-line;
+}
+
 .tk-lbl {
     font-size: 0.63rem;
     font-weight: 700;
