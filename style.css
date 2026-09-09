@@ -1882,16 +1882,36 @@ a {
         grid-template-areas:
             "two  two   two"
             "one  ring  three";
-        /* centre the group in the section, and line 01/03 up with the handset
-           rather than with its top edge */
         justify-content: center;
-        align-items: center;
+        /* START, not center: 01 and 03 begin at the same y, so their number
+           badges and headings sit on one horizontal line. Centring them made
+           the two headings drift apart whenever the copy below ran to a
+           different number of lines. The handset opts back out below. */
+        align-items: start;
         gap: 1.5rem 2rem;
         text-align: center;
     }
+    /* The handset stays vertically centred against the steps beside it. */
+    .steps__ring { align-self: center; }
+
     /* .step is a flex column; this centres the number badge and heading with
        the copy instead of leaving them hard against the left edge. */
     .step { align-items: center; }
+
+    /* Two lines' worth, so a one-line heading and a two-line heading still
+       hand off to their paragraphs at the same y. */
+    .step h3 { min-height: 2.8em; }
+
+    /* The BODY sets flush left while the heading stays centred. Centred body
+       copy starts each line at a different x, which is what made these read as
+       ragged. Flush left, not justified: at 18rem these lines carry about 35
+       characters, and justification at that measure opens rivers of white
+       space between words that look worse than the ragged right edge does. */
+    .step p,
+    .step__link {
+        width: 100%;
+        text-align: left;
+    }
     .step:nth-of-type(1) { grid-area: one; }
     /* 02 spans all three columns rather than being confined to the middle one
        and overflowing it — same centring, without relying on overflow. */
