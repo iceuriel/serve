@@ -44,7 +44,9 @@ const REQUIRED = {
   Boston: ['02108','02109','02110','02111','02113','02114','02115','02116','02118',
            '02119','02120','02121','02122','02124','02125','02126','02127','02128',
            '02129','02130','02131','02132','02134','02135','02136','02163','02199',
-           '02210','02215'],
+           '02210','02215',
+           /* PO-box ZIP, deliberately served — see the note in ZIP_TIERS. */
+           '02117'],
   Cambridge:  ['02138','02139','02140','02141','02142'],
   Somerville: ['02143','02144','02145'],
   Brookline:  ['02445','02446','02447'],
@@ -76,7 +78,8 @@ console.log('\n=== 2. the ZIPs that regressed ===');
 
 console.log('\n=== 3. Boston proper is never charged the travel fee ===');
 const outOfCoreBoston = REQUIRED.Boston.filter(z => zipTier(z) !== 'core');
-t('all 29 Boston ZIPs are core', outOfCoreBoston.length === 0, outOfCoreBoston);
+t('all ' + REQUIRED.Boston.length + ' Boston ZIPs are core',
+  outOfCoreBoston.length === 0, outOfCoreBoston);
 ['02138','02139','02140','02141','02142','02143','02144','02145','02445','02446','02447']
   .forEach(z => t(z + ' core', zipTier(z) === 'core', zipTier(z)));
 

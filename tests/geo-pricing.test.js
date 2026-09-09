@@ -318,13 +318,34 @@ const sold = ZIP_TIERS.CORE.concat(ZIP_TIERS.EXTENDED);
 const inert = zips.filter(z => sold.indexOf(z) === -1);
 t('every mapped ZIP is one we actually sell to', inert.length === 0, inert);
 
-/* The reverse is allowed — the nine EXTENDED towns and Brookline Village have
-   no parcel data — but it must stay a KNOWN list, not a silent drift. */
+/* The reverse is allowed — the nine EXTENDED towns, Brookline Village and the
+   02117 PO box have no parcel data — but it must stay a KNOWN list, not a
+   silent drift. Naming them one by one rather than counting them means adding
+   a served ZIP without pricing data has to be a decision somebody wrote down. */
 const unmappedSold = sold.filter(z => !ZIP_GEO[z]);
-t('the served-but-unmapped list is exactly the 10 known ZIPs',
-  unmappedSold.length === 10, unmappedSold);
-t('02447 Brookline Village is the only CORE ZIP without parcel data',
-  unmappedSold.filter(z => ZIP_TIERS.CORE.indexOf(z) !== -1).join() === '02447', unmappedSold);
+const KNOWN_UNMAPPED = [
+  '02117',                                       // PO box — no residents, so no parcels
+  '02447',                                       // Brookline Village
+  '02148','02149','02150','02151','02152','02155',
+  '02472','02474','02476',
+].sort();
+t('the served-but-unmapped list is exactly the known ones',
+  unmappedSold.slice().sort().join() === KNOWN_UNMAPPED.join(), unmappedSold);
+
+/* 02117 is a PO-box ZIP: nobody lives there, so there are no homes to have
+   measured and NEUTRAL_GEO is the honest answer rather than a gap. It is sold
+   to anyway because Geoapify returns it for real Back Bay addresses and a
+   missing ZIP is a lost lead. The consequence is priced-as-neutral: no parking
+   adder and no area factor, i.e. BELOW what 02116 next door pays. */
+const coreUnmapped = unmappedSold.filter(z => ZIP_TIERS.CORE.indexOf(z) !== -1).sort();
+t('the only CORE ZIPs without parcel data are 02117 and 02447',
+  coreUnmapped.join() === '02117,02447', coreUnmapped);
+t('02117 therefore prices neutral, with no parking adder',
+  lookupGeo('02117').factor === 1 && PARK_ADDER[lookupGeo('02117').parkTier] === 0,
+  lookupGeo('02117'));
+t('and 02116 next door does carry both', factorOf('02116') > 1 &&
+  PARK_ADDER[ZIP_GEO['02116'][1]] > 0,
+  [factorOf('02116'), PARK_ADDER[ZIP_GEO['02116'][1]]]);
 
 /* ============================================================
    6. lookupGeo input handling
