@@ -329,23 +329,7 @@
 
         /* 5. SERVICE PARTNER */
         var psec = section('Your service partner');
-        if (d.partner) {
-            var v = d.partner;
-            var card = el('div', 'tk-partner');
-            card.appendChild(el('div', 'tk-partner__name', v.displayName));
-            if (v.publicDescription) card.appendChild(el('p', 'tk-partner__desc', v.publicDescription));
-            var facts = [];
-            if (v.partnerSince) facts.push('With Serve since ' + v.partnerSince);
-            if (v.insuranceVerified) facts.push('Bonded & insured');
-            if (v.rating) {
-                facts.push(v.rating + '★' + (v.reviewCount ? ' (' + v.reviewCount + ')' : ''));
-            }
-            if (facts.length) card.appendChild(el('div', 'tk-partner__facts', facts.join(' · ')));
-            psec.appendChild(card);
-        } else {
-            psec.appendChild(el('p', 'tk-val',
-                'Your service professional will be confirmed before your appointment.'));
-        }
+        psec.appendChild(d.partner ? partnerCard(d.partner) : seekingCard());
         bodyEl.appendChild(psec);
 
         /* The guarantee, unchanged. */
@@ -354,6 +338,80 @@
         g.appendChild(el('div', 'tk-val',
             'Tell us within 7 days. You choose — we re-clean it or we refund it.'));
         bodyEl.appendChild(g);
+    }
+
+    /* The partner block. COMPANY ONLY — no individual is named here; see the
+       joint-employer note in webhook.gs. */
+    function partnerCard(v) {
+        var card = el('div', 'tk-partner');
+        /* The logo is a file an operator placed in images/ — a vendor cannot
+           write to the repo, so this URL is one of ours. alt is the company
+           name, so a broken image still says who is coming. */
+        if (v.logoUrl) {
+            var lg = el('img', 'tk-partner__logo');
+            lg.src = v.logoUrl;
+            lg.alt = v.displayName;
+            lg.loading = 'lazy';
+            card.appendChild(lg);
+        }
+        card.appendChild(el('div', 'tk-partner__name', v.displayName));
+        if (v.publicDescription) card.appendChild(el('p', 'tk-partner__desc', v.publicDescription));
+        var facts = [];
+        if (v.partnerSince) facts.push('With Serve since ' + v.partnerSince);
+        if (v.insuranceVerified) facts.push('Bonded & insured');
+        if (v.rating) {
+            facts.push(v.rating + '★' + (v.reviewCount ? ' (' + v.reviewCount + ')' : ''));
+        }
+        if (facts.length) card.appendChild(el('div', 'tk-partner__facts', facts.join(' · ')));
+        return card;
+    }
+
+    /* No partner yet. This is EVERY preference booking, not an edge case: a
+       booking with no specific time has no availability row to consume, so
+       there is nobody to consume it and dispatch stays manual.
+
+       The old copy — "will be confirmed before your appointment" — was a
+       passive sentence a customer reads as nothing happening. This says what
+       Serve is actually doing, which is the product.
+
+       Everything that moves is decorative and aria-hidden, and all of it
+       stops under prefers-reduced-motion. */
+    function seekingCard() {
+        var wrap  = el('div', 'tk-seek');
+        var stage = el('div', 'tk-seek__stage');
+
+        var phone  = el('div', 'tk-seek__phone');
+        var screen = el('div', 'tk-seek__screen');
+        var mark   = el('img', 'tk-seek__mark');
+        mark.src = '/images/favicon.svg';
+        mark.alt = '';                       /* decorative — the copy carries it */
+        screen.appendChild(mark);
+        phone.appendChild(screen);
+        stage.appendChild(phone);
+
+        /* Two arcs a side, staggered. One ring reads as a pulse rather than
+           as sound leaving the handset. */
+        ['l', 'r'].forEach(function (side) {
+            for (var i = 1; i <= 2; i++) {
+                var w = el('span', 'tk-seek__wave tk-seek__wave--' + side + ' is-' + i);
+                w.setAttribute('aria-hidden', 'true');
+                stage.appendChild(w);
+            }
+        });
+
+        for (var c = 1; c <= 3; c++) {
+            var coin = el('span', 'tk-seek__coin is-' + c, '$');
+            coin.setAttribute('aria-hidden', 'true');
+            stage.appendChild(coin);
+        }
+
+        wrap.appendChild(stage);
+        wrap.appendChild(el('div', 'tk-seek__title',
+            'Coordinating with our vendor network'));
+        wrap.appendChild(el('p', 'tk-seek__msg',
+            'We\u2019re negotiating with trusted local partners to find the best fit ' +
+            'for your home. Their details will appear here before your visit.'));
+        return wrap;
     }
 
     function homeLine(home) {

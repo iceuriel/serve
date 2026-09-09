@@ -76,6 +76,32 @@ NEW_CLASSES.forEach(c => {
 });
 ok('all ' + NEW_CLASSES.length + ' new classes used and styled');
 
+/* 5b. Classes the ticket builds in JS must be styled too.
+
+   index.html is checked above, but ticket.js, portal.js and vendor.js build
+   their markup in JavaScript — a class named there and never styled ships a
+   naked block that no HTML check can see. Fragments ending in - or -- are
+   concatenation prefixes (`'tk-seek__wave--' + side`), not real classes. */
+head('Classes built in JS are styled');
+['ticket.js', 'portal.js', 'vendor.js'].forEach(function (file) {
+  const js = fs.readFileSync(path.join(ROOT, file), 'utf8');
+  const used = new Set();
+  const re = /\bel\(\s*'[a-z0-9]+'\s*,\s*'([^']+)'/g;
+  let m;
+  while ((m = re.exec(js))) {
+    m[1].split(/\s+/).forEach(function (c) {
+      if (c && !/-$/.test(c)) used.add(c);
+    });
+  }
+  const orphans = [...used].filter(function (c) {
+    const esc = c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return !new RegExp('\\.' + esc + '(?![\\w-])').test(css);
+  });
+  orphans.length
+    ? fail(file + ' builds unstyled class(es): ' + orphans.join(', '))
+    : ok(file + ' — all ' + used.size + ' classes styled');
+});
+
 /* 6. The new section must sit OUTSIDE the step-switching machinery. */
 head('after-you-book is outside the quote flow');
 const quoteStart = html.indexOf('<section class="quote-section" id="quote">');

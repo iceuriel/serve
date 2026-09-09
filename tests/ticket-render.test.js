@@ -43,15 +43,21 @@ const src =
 
 function node(tag) {
   return {
-    tagName: tag, className: '', children: [], _text: '',
+    tagName: tag, className: '', children: [], _text: '', attrs: {},
     set textContent(v) { this._text = v; },
     get textContent() { return this._text; },
     appendChild(c) { this.children.push(c); return c; },
+    setAttribute(k, v) { this.attrs[k] = String(v); },
+    getAttribute(k) { return this.attrs[k]; },
   };
 }
 const box = { document: { createElement: node }, console };
 vm.createContext(box);
-vm.runInContext(src + '\nglobalThis.h = scheduleHead;', box);
+vm.runInContext(
+  src + cut('function partnerCard(v)', 'function homeLine(') +
+  '\nglobalThis.h = scheduleHead;' +
+  '\nglobalThis.partnerCard = partnerCard;' +
+  '\nglobalThis.seekingCard = seekingCard;', box);
 
 /** The rendered header as [class, text] pairs — what a person would see. */
 const lines = (b, sub) => box.h(b, sub).children.map(n => [n.className, n._text]);
@@ -106,6 +112,89 @@ t('scheduleHead is defined once and called by both views', calls, 3);
 /\bvar head = el\('div', 'tk-when'\)/.test(JS.replace(/function scheduleHead[\s\S]*?\n    }/, ''))
   ? fail('a renderer still builds its own header inline')
   : ok('neither renderer builds a header of its own');
+
+
+/* ------------------------------------------------------------------
+   The partner block: the logo, and what shows when there is no partner
+   ------------------------------------------------------------------ */
+const walk = (n, fn) => { fn(n); n.children.forEach(c => walk(c, fn)); };
+const byClass = (n, cls) => {
+  const out = [];
+  walk(n, x => { if (String(x.className).split(' ').indexOf(cls) !== -1) out.push(x); });
+  return out;
+};
+const allText = n => {
+  let s = '';
+  walk(n, x => { if (x._text) s += x._text + ' '; });
+  return s;
+};
+
+head('D. The partner card carries the company logo');
+
+const VEN = {
+  displayName: 'Serve', logoUrl: '/images/serve-wordmark.svg',
+  publicDescription: 'Our own cleaning team.', partnerSince: '2026-07-01',
+  insuranceVerified: true, rating: null, reviewCount: null,
+};
+const withLogo = box.partnerCard(VEN);
+const imgs = byClass(withLogo, 'tk-partner__logo');
+
+imgs.length === 1 ? ok('one logo element') : fail('expected one logo, got ' + imgs.length);
+t('it is an <img>', imgs.length ? imgs[0].tagName : null, 'img');
+t('pointing at the vendor logo_url', imgs.length ? imgs[0].src : null,
+  '/images/serve-wordmark.svg');
+/* A broken image must still say who is coming. */
+t('alt is the company name', imgs.length ? imgs[0].alt : null, 'Serve');
+t('and it is lazy', imgs.length ? imgs[0].loading : null, 'lazy');
+
+const noLogo = box.partnerCard(Object.assign({}, VEN, { logoUrl: '' }));
+byClass(noLogo, 'tk-partner__logo').length === 0
+  ? ok('no logo element when the vendor has no logo_url')
+  : fail('an empty logo_url still rendered an <img>');
+t('the name still renders', byClass(noLogo, 'tk-partner__name').length, 1);
+
+/* Serve has one completed job. A rating of 0 must not print as 0 stars. */
+const unrated = box.partnerCard(Object.assign({}, VEN, { rating: 0, reviewCount: 0 }));
+/\u2605/.test(allText(unrated))
+  ? fail('a zero rating printed a star')
+  : ok('no star when there is no rating');
+
+head('E. No partner yet — the coordinating state');
+
+const seek = box.seekingCard();
+const seekText = allText(seek);
+
+/Coordinating with our vendor network/.test(seekText)
+  ? ok('it says what Serve is doing')
+  : fail('missing the headline: ' + seekText.slice(0, 90));
+/negotiating with trusted local partners/.test(seekText)
+  ? ok('and why the wait exists')
+  : fail('missing the explanation');
+/confirmed before your appointment/.test(seekText)
+  ? fail('the old passive copy is still here')
+  : ok('the old passive sentence is gone');
+
+const marks = byClass(seek, 'tk-seek__mark');
+t('the phone screen wears the Serve mark', marks.length ? marks[0].src : null,
+  '/images/favicon.svg');
+/* Decorative: the copy already carries the meaning, so a screen reader
+   announcing "Serve logo" here would only add noise. */
+t('the mark is decorative', marks.length ? marks[0].alt : null, '');
+
+t('four arcs — two a side', byClass(seek, 'tk-seek__wave').length, 4);
+t('three coins', byClass(seek, 'tk-seek__coin').length, 3);
+
+const decor = byClass(seek, 'tk-seek__wave').concat(byClass(seek, 'tk-seek__coin'));
+decor.every(n => n.attrs['aria-hidden'] === 'true')
+  ? ok('every moving part is aria-hidden')
+  : fail('a decorative element is exposed to screen readers');
+
+/* The animation is CSS. A render that needed a timer would keep running on a
+   backgrounded phone tab. */
+/setInterval|requestAnimationFrame|setTimeout/.test(
+  JS.slice(JS.indexOf('function seekingCard()'), JS.indexOf('function homeLine('))
+) ? fail('seekingCard drives its own animation loop')
+  : ok('the animation is left to CSS');
 
 console.log('\n' + (bad ? bad + ' FAILURES' : 'all ticket-render checks passed'));
 process.exit(bad ? 1 : 0);

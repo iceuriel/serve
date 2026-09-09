@@ -2323,6 +2323,145 @@ a {
     margin-top: 0.5rem;
 }
 
+/* The partner's own logo. Contain, never cover: a cropped logo is a worse
+   look than a small one, and it is somebody else's brand. */
+.tk-partner__logo {
+    display: block;
+    max-width: 140px;
+    max-height: 44px;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    margin: 0 0 0.6rem;
+}
+
+/* ---- No partner assigned yet -------------------------------------------
+   Every preference booking lands here, not just the odd one: a booking with
+   no specific time has no availability row to consume, so there is nobody to
+   consume it. The old copy was a passive sentence; this shows the work.
+
+   Everything animated is decorative and aria-hidden in the markup, and all
+   of it stops under prefers-reduced-motion. */
+.tk-seek {
+    background: var(--color-bg-light);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 1.5rem 1rem 1.2rem;
+    text-align: center;
+}
+.tk-seek__stage {
+    position: relative;
+    height: 108px;
+    margin-bottom: 0.95rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* A rounded rect is enough. A drawn handset at this size reads as clip art. */
+.tk-seek__phone {
+    position: relative;
+    z-index: 1;
+    width: 54px;
+    height: 94px;
+    padding: 6px 5px;
+    border-radius: 12px;
+    background: var(--color-dark);
+    box-shadow: 0 6px 18px rgba(31, 41, 55, 0.24);
+    transform-origin: 50% 88%;
+    animation: tk-ring 2.6s ease-in-out infinite;
+}
+.tk-seek__screen {
+    width: 100%;
+    height: 100%;
+    border-radius: 7px;
+    background: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+.tk-seek__mark {
+    display: block;
+    width: 32px;
+    height: 32px;
+}
+
+/* Sound leaving the handset: an arc each side, twice, staggered. */
+.tk-seek__wave {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 46px;
+    height: 46px;
+    margin: -23px 0 0 -23px;
+    border: 2px solid transparent;
+    border-radius: 50%;
+    opacity: 0;
+    animation: tk-wave 2.6s ease-out infinite;
+}
+.tk-seek__wave--l { border-left-color:  var(--color-dark); }
+.tk-seek__wave--r { border-right-color: var(--color-dark); }
+.tk-seek__wave.is-2 { animation-delay: 0.3s; }
+
+/* The negotiation, made visible. Green because it is money moving, and it is
+   Serve paying the partner — not the customer paying again. */
+.tk-seek__coin {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    font-family: var(--flow-sans);
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #15803d;
+    opacity: 0;
+    animation: tk-coin 3.2s ease-out infinite;
+}
+.tk-seek__coin.is-1 { margin-left:  30px; animation-delay: 0.25s; }
+.tk-seek__coin.is-2 { margin-left: -38px; animation-delay: 1.35s; }
+.tk-seek__coin.is-3 { margin-left:  12px; animation-delay: 2.25s; }
+
+.tk-seek__title {
+    font-family: var(--flow-serif);
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--color-dark);
+}
+.tk-seek__msg {
+    font-size: 0.88rem;
+    line-height: 1.55;
+    color: var(--color-text);
+    margin: 0.4rem auto 0;
+    max-width: 30rem;
+}
+
+@keyframes tk-ring {
+    0%, 60%, 90%, 100% { transform: rotate(0deg); }
+    63% { transform: rotate(-8deg); }
+    67% { transform: rotate(7deg); }
+    71% { transform: rotate(-6deg); }
+    75% { transform: rotate(5deg); }
+    79% { transform: rotate(-3deg); }
+    84% { transform: rotate(2deg); }
+}
+@keyframes tk-wave {
+    0%, 58%   { transform: scale(0.55); opacity: 0; }
+    66%       { opacity: 0.5; }
+    92%, 100% { transform: scale(2.1);  opacity: 0; }
+}
+@keyframes tk-coin {
+    0%        { transform: translateY(4px)   scale(0.8); opacity: 0; }
+    18%       { opacity: 0.95; }
+    100%      { transform: translateY(-52px) scale(1.05); opacity: 0; }
+}
+
+/* Static, not merely slower. A paused ring frame is not a design. */
+@media (prefers-reduced-motion: reduce) {
+    .tk-seek__phone { animation: none; }
+    .tk-seek__wave,
+    .tk-seek__coin  { display: none; }
+}
+
 /* Scope list, partner side. Read-only: the crew does the work, the customer
    decides what the work is. */
 .tk-scope {
