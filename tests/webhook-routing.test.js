@@ -578,6 +578,53 @@ console.log('\n=== instructions: the write path ===');
     write({ scope_type: 'BOOKING', scope_key: 'GENERAL', instruction: 'late' }).error === 'closed');
 }
 
+/* ============================================================
+   THE TWO LINKS IN THE BOOKING EMAIL
+   ============================================================
+   The notification is where both tickets are actually handed out, so it is
+   where the view-scoped token has to hold. Before r13 one link opened both
+   views: forwarding the cleaner's link to a customer, or the reverse, showed
+   the other view rather than nothing. */
+console.log('\n=== the booking email carries two different links ===');
+{
+  /* Its OWN booking, deliberately. The jobs above were marked complete to test
+     link expiry, and a completed partner link is correctly refused — reusing
+     one here would report that correct behaviour as a failure. */
+  T.post(Object.assign({}, BASE, { submission_id: 'uuid-mail-1',
+    slot_date: '2026-09-14', slot_time: '9-11 AM' }));
+  const mail = T.mails.filter(m => /TICKETS/.test(m.body)).pop();
+  t('a booking notification carries a TICKETS block', !!mail);
+
+  const links = (mail.body.match(/https:\/\/servecleaning\.com\/j\?[^\s]+/g) || []);
+  t('it carries exactly two links', links.length === 2, links.length);
+
+  const client  = links.filter(l => /view=client/.test(l))[0]  || '';
+  const partner = links.filter(l => /view=partner/.test(l))[0] || '';
+  t('one for each audience', !!client && !!partner, links);
+
+  const tokOf = (u) => (u.match(/[?&]t=([^&]+)/) || [])[1] || '';
+  t('THE TWO TOKENS DIFFER — a forwarded link is not the other view',
+    tokOf(client) !== tokOf(partner), [tokOf(client), tokOf(partner)]);
+
+  /* And each really only opens its own view, driven through doGet rather than
+     inferred from the strings. */
+  const idOf = (u) => decodeURIComponent((u.match(/[?&]id=([^&]+)/) || [])[1] || '');
+  const mailedId = idOf(client);
+  t('the link ids match the job it is about', mailedId === idOf(partner) && !!mailedId, mailedId);
+  t('the emailed client link opens the client view',
+    get({ job: mailedId, t: tokOf(client), view: 'client' }).ok === true);
+  t('the emailed partner link opens the partner view',
+    get({ job: mailedId, t: tokOf(partner), view: 'partner' }).ok === true);
+  t('the emailed client link does NOT open the partner view',
+    get({ job: mailedId, t: tokOf(client), view: 'partner' }).ok === false);
+  t('the emailed partner link does NOT open the client view',
+    get({ job: mailedId, t: tokOf(partner), view: 'client' }).ok === false);
+
+  /* A token in an email is a token in an inbox. It must not also be in a log. */
+  t('no ticket token is written to a log line',
+    !T.logs.some(l => tokOf(client) && String(l).includes(tokOf(client))));
+}
+
 /* The health check must survive gaining a second job.
    The revision is read from the file's own VERSION STAMP rather than pinned to
    a literal. Pinning made every routine bump fail this file for no reason, and

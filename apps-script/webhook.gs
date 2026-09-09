@@ -2466,8 +2466,15 @@ function sendReservationEmail(data, sched, leadId, leadResult, propertyResult, s
       ? "Recurring/visit:   " + money(data.steady_state_price) +
         " (" + (data.frequency_selected || "") + ")\n" : "") +
     attributionBlock(data) +
-    /* The two links to hand out. Generated rather than stored: the token is an
-       HMAC of the job_id, so it is the same every time and needs no column.
+    /* The two links to hand out. Generated rather than stored: each token is
+       an HMAC of the job_id AND the audience, so both are stable for a given
+       job and neither needs a column.
+
+       THEY ARE NOT INTERCHANGEABLE, as of r13. Sending the cleaner's link to a
+       customer shows them nothing — it is refused, not downgraded — and
+       sending the customer's link to a cleaner is equally inert. Before r13
+       one link opened both views and the price travelled with it.
+
        Wrapped because a ticket must never be the reason a booking email fails
        to send. */
     ticketBlock(makeJobId(data, sched)) +
@@ -2586,6 +2593,31 @@ function serviceLabel(data) {
 }
 
 /**
+ * The two links to hand out, one per audience.
+ *
+ * DIFFERENT LINKS, NOT ONE LINK WITH A SWITCH. Each token is an HMAC of the
+ * job_id and the audience, so the customer's link opens only the customer's
+ * view and the cleaner's opens only the cleaner's. Forwarding one to the wrong
+ * person shows them nothing rather than showing them the other view — which is
+ * what happened before r13, when a single token opened both and the price rode
+ * along to whoever held it.
+ *
+ * Never throws. A ticket link is not worth failing a booking notification for.
+ */
+function ticketBlock(jobId) {
+  try {
+    return "\n— TICKETS —\n" +
+           "Send to the customer:\n" + ticketUrl(jobId, "client") + "\n\n" +
+           "Send to the cleaner:\n"  + ticketUrl(jobId, "partner") + "\n" +
+           "(these are different links — the cleaner's stops working once\n" +
+           " completed_date is filled; the customer's is their record and stays)\n";
+  } catch (err) {
+    console.error("ticket links unavailable: " + err);
+    return "";
+  }
+}
+
+/**
  * Levels ride along here so they reach the subject line and the SERVICE block
  * from one place.
  *
@@ -2595,18 +2627,6 @@ function serviceLabel(data) {
  * the reader unable to tell a one-floor condo from a field that never
  * arrived — which is the exact doubt this line exists to remove.
  */
-/** Never throws — a ticket link is not worth failing a booking notification. */
-function ticketBlock(jobId) {
-  try {
-    return "\n— TICKETS —\n" +
-           "Send to the customer:\n" + ticketUrl(jobId, "client") + "\n\n" +
-           "Send to the cleaner:\n"  + ticketUrl(jobId, "partner") + "\n" +
-           "(the cleaner's link stops working once completed_date is filled)\n";
-  } catch (err) {
-    console.error("ticket links unavailable: " + err);
-    return "";
-  }
-}
 
 function homeSummary(data) {
   const bd = (Number(data.bedrooms) === 0) ? "Studio" : (valOrBlank(data.bedrooms) + " BR");
