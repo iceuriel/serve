@@ -420,6 +420,20 @@ own entry always wins.
 is the vendor's call, not Serve's — that is the §148B line, not a missing
 feature.
 
+### The portal carries the partner (r18)
+
+Each **upcoming** booking in the portal payload carries a `partner` object
+built by the same `buildClientVendorProfile` whitelist the per-job ticket
+uses — one definition of what a customer may learn about a company, not two
+to keep in step. `null` is a legitimate value and is what renders the
+"coordinating with our vendor network" state; it is **every preference
+booking**, since those consume no availability row.
+
+Completed bookings carry no `partner` field at all. A finished job is a
+receipt, and offering to go find someone for it would be nonsense.
+
+A missing `VENDORS` tab costs the card, never the booking list.
+
 ### Getting a partner their link (r17)
 
 **A booking is not required and never was.** A token is a pure HMAC of the id, so
@@ -459,6 +473,21 @@ place it must not: a partner rewriting what Serve says about them.
 they email the file, you add it to `images/vendors/` and set the column. The
 portal shows the current logo and says how to change it. A real upload needs
 somewhere to put bytes and is separate work.
+
+**Push the file BEFORE setting the column.** The sheet and the repo are not
+the same system: a path can be typed in seconds, the file only exists after a
+deploy. In that order the logo is never broken, even briefly.
+
+> **THE LOGO MUST READ ON A LIGHT BACKGROUND.** Both surfaces that show one
+> are light — the partner card sits on `--color-bg-light`, the vendor portal on
+> `#fff`. `images/serve-wordmark.svg` is `#ffffff`, drawn for the dark hero,
+> and rendered perfectly and invisibly on both for a day. Serve's own row uses
+> **`/images/serve-wordmark-dark.svg`** (`#1a2744`). Nothing detects this
+> automatically: a white-on-transparent PNG loads fine and shows nothing.
+
+Sizing: capped at 140 × 56, `object-fit: contain`. A wide wordmark is bound by
+the width and looks right; a square mark is bound by the height and looks
+small. Ask partners for a horizontal lockup.
 
 
 ### The Ops sheet — a separate workbook

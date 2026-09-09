@@ -5,6 +5,44 @@ Serve is a startup home cleaning business serving the Greater Boston area. The w
 
 The immediate goal is not to build a full software platform. The immediate goal is to generate leads and validate demand.
 
+## Where the project actually is (updated 2026-09-09)
+
+**Read `/docs/HANDOFF.md` first, then `/docs/SCHEMA.md`.** Those are
+authoritative and current. Everything below this section is still the right
+*philosophy* — simple, lightweight, conversion-focused — but it was written
+when the site was only a landing page, and it is no longer a complete
+description of the system.
+
+What exists beyond the landing page and the quote form:
+
+- **Three signed-link surfaces.** `/h` customer portal (permanent, one per
+  contact), `/j` per-job ticket (the cleaner's; dies when `completed_date` is
+  filled), `/v` vendor portal (permanent, one per partner company). Four HMAC
+  token audiences under one `TICKET_SECRET` — **none opens another**.
+- **Two Google Sheets workbooks.** Leads MASTER is the customer side and is
+  what the Apps Script is bound to. Ops MASTER is supply: `AVAILABILITY`,
+  `VENDORS`, `VENDOR_SERVICES`, `OPERATORS`.
+- **`apps-script/webhook.gs` is at r19** and deploys by hand — paste into Leads
+  MASTER → Extensions → Apps Script. **When a change spans both, deploy the
+  script BEFORE pushing the site.** The reverse order has caused a live
+  outage and a day of broken tickets.
+- **23 test files**, `node tests/run-all.js`. All must pass before committing.
+
+Non-negotiables that are easy to break without noticing:
+
+- **View models are whitelists built up field by field, never filtered down.**
+  A column added to a sheet next month must not be able to reach a browser by
+  default; somebody has to add it on purpose.
+- **Door and entry codes are write-only.** Returned by no view model, present
+  in no log line, ever.
+- **Route to the vendor COMPANY, never a named individual** (Massachusetts
+  §148B). `OPERATORS.show_to_customer` exists and is deliberately read by
+  nothing.
+- **Nothing personal in URLs or logs.** Addresses are never logged — ZIP plus a
+  short hash only.
+- **A green suite proves consistency, not correctness.** Break the code on
+  purpose and confirm the test fails before trusting a new assertion.
+
 ## Current Business Stage
 - Startup
 - No clients yet

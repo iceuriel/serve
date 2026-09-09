@@ -6,10 +6,165 @@ assistant with no access to this repo. Self-contained on purpose.
 **Companion doc:** `/docs/SCHEMA.md` — authoritative for every column's meaning
 and who writes it. This file is the narrative; that file is the contract.
 
-**Latest session: 2026-09-02.** Jump to
-[what changed on 2026-09-02](#session-2026-09-02) for the current state. The
-sections below it describe earlier builds and remain accurate except where a
-later section supersedes them.
+**Latest session: 2026-09-09.** Jump to
+[what changed on 2026-09-08 / 09](#session-2026-09-08--09) for the current
+state. The sections below it describe earlier builds and remain accurate
+except where a later section supersedes them.
+
+---
+
+## Session 2026-09-08 / 09
+
+**webhook.gs went r12 → r19.** This session built the entire portal and
+partner layer: two new customer-facing surfaces, a vendor-facing one, a
+supply-side data model in the Ops workbook, and automatic dispatch. None of
+it existed before this session and none of it was in this document.
+
+`/docs/SCHEMA.md` is authoritative for every column. This is the narrative.
+
+### What now exists
+
+| Surface | URL | Who opens it | Lifetime |
+|---|---|---|---|
+| Customer portal | `/h?id=CON-…&t=…` | the customer | permanent |
+| Per-job ticket | `/j?id=SRV-…&t=…&view=client\|partner` | the cleaner | dies when `completed_date` is filled |
+| Vendor portal | `/v?id=VEN-…&t=…` | the partner company | permanent |
+
+**Four token audiences under one `TICKET_SECRET`**, each an HMAC of a
+different scope string: `jobId|client`, `jobId|partner`, `contactId|portal`,
+`vendorId|vendor`. **None opens another.** In r11 a single `ticketToken(jobId)`
+opened both job views, so a cleaner's link showed the customer's price. Any
+new surface gets a fifth scope, never a reused one.
+
+### The revisions, and why each exists
+
+**r13 — a domain layer.** `getBooking`, `getBookingAccess`, `getAssignment`,
+`getVendor`, plus view models that are **whitelists built up field by field,
+never filtered down**. Naming each field means a column added to a sheet next
+month cannot reach a browser by accident; it has to be added on purpose. This
+is the single most important rule in the vendor code.
+
+**r14 — the customer portal.** Keyed on `contact_id`, the PERSON, not the
+property: a portal tied to one home cannot serve someone with several, and
+`contact_id` is the seam a real login attaches to later. Added the
+`PROPERTY_ACCESS` tab (auto-created) and required `contact_id` on `LEADS`.
+
+> **r14 also redirected the booking confirmation to the PORTAL link.** Whenever
+> a customer has a `contact_id` — and they all do now — the email sends `/h`,
+> not `/j`. **The portal is the customer-facing surface. The per-job ticket is
+> the cleaner's.** Forgetting this caused the r18 bug below.
+
+**Door and entry codes are write-only.** `entry_code` is typed once and never
+rendered back; the portal shows "Code saved · Replace". No view model returns
+it, nothing logs it, and tests assert both.
+
+**r15 — the vendor portal and the supply model.** Three tabs in the **Ops**
+workbook, created by hand: `VENDORS`, `VENDOR_SERVICES`, `OPERATORS`. Ops
+rather than Leads MASTER so customer support can be given Leads without ever
+seeing payout terms. Assignment is two columns on `JOBS` — `vendor_id` and
+`operator_id` — not a fourth tab, since JOBS is already one row per booking.
+
+A vendor **may describe themselves, not promote themselves**: `VENDOR_EDITABLE`
+is `display_name`, `public_description`, `service_area`, `capabilities`, and
+nothing else. Rating, review count, `insurance_verified`, `client_visible`,
+`status`, `partner_since` and `logo_url` are Serve's. A denylist would fail
+open into exactly the wrong place.
+
+**`client_visible` is the master switch.** FALSE means the customer ticket says
+"your service professional will be confirmed" rather than showing a half-filled
+company. `status` does NOT gate the portal — only the token and the row
+existing do — so a **prospect** can be given a working portal to look at
+before they have agreed to anything.
+
+**r16 — availability decides dispatch.** The `AVAILABILITY` row a booking
+consumes already knew whose capacity it was; it now becomes the assignment and
+is stamped onto `JOBS.vendor_id`, into a blank cell only. The column is read as
+`vendor_id` OR `cleaner_id` so the sheet rename was not a flag day.
+
+> **TWO GATES, and the second surprises people.** `bookAvailabilitySlot`
+> returns immediately unless `sched.shape === "slot"`. A **preference** booking
+> — "earlier in the day" / "later in the day" — consumes no availability row,
+> so it gets **no vendor**, no matter what is in the sheet. That is by design
+> and it stays manual. It is also why an empty availability feed cascades: no
+> slots → customers see the radios → every booking is a preference → nothing
+> self-assigns.
+
+**Absence of data is not refusal.** A vendor with no `VENDOR_SERVICES` rows
+ranks as ordinary, not disqualified, which is what makes an empty tab a no-op.
+A vendor who declared services and left this one out is skipped when somebody
+else is open and merely **flagged** when nobody is — the booking is never
+refused, because a conflict shown for a slot the feed just published is our
+data problem charged to the customer.
+
+**r17 — portal links minted on demand.** A booking was never required: a token
+is a pure HMAC of the id. What was missing was a caller, since the Apps Script
+Run button cannot pass arguments. `printVendorLinks()` and
+`printCustomerLinks()` are run from the editor. Two functions, not one — the
+customer list prints a working credential for every customer on the sheet.
+
+**r18 — the portal says who is coming.** `buildPortalModel` was written in r14,
+before `VENDORS` existed, and never gained a partner field. Since r14 is also
+what pointed the confirmation email at the portal, **the one page every
+customer opens was the one page that could not say who was cleaning their
+home**. Upcoming bookings only: a finished booking is a receipt.
+
+**r19 — the partner's link in every booking email**, beside the cleaner's,
+with the three lifetimes named. Unassigned says so and names the fix.
+
+### Three bugs worth remembering
+
+**The block shipped to a page nobody opens.** The "coordinating with our vendor
+network" state and the partner card were written into `ticket.js` — correct,
+tested, and on `/j`, which customers stopped receiving in r14. The fix was
+`partner-card.js`, loaded by **both** `j.html` and `h.html`, plus a test
+asserting all four of: ticket.js calls it, portal.js calls it, both pages load
+it, and the build publishes it. Any one missing is the bug.
+
+**A logo that rendered perfectly and invisibly.** `images/serve-wordmark.svg`
+is `#ffffff` — drawn for the dark hero. Both surfaces that show a vendor logo
+are light. `images/serve-wordmark-dark.svg` (`#1a2744`) exists for them. **Any
+partner logo must read on a light background**, and nothing can detect a
+white-on-transparent PNG automatically: it loads fine and shows nothing.
+
+**A test that passed against nothing.** Customer-link privacy assertions were
+written into `vendor-portal.test.js`, whose harness has no `LEADS` tab, so they
+passed against the string `"No LEADS tab."`. Moved to `portal.test.js`. Related:
+`portal.test.js`'s `t()` is `t(label, condition, extra)` — passing a **value**
+as the second argument makes any non-empty string pass.
+
+### Sheet work done this session
+
+Ops workbook: `VENDORS`, `VENDOR_SERVICES`, `OPERATORS` created and seeded with
+`VEN-0001` (Serve itself), three service rows, and two operators.
+`AVAILABILITY.cleaner_id` renamed to `vendor_id` and its `C-01`/`C-02` values
+swapped for `VEN-0001`. `CLEANERS` deleted.
+
+Leads MASTER: `LEADS.contact_id` added and backfilled `CON-0001`…`CON-0006`.
+`JOBS` gained `partner_payout`, `vendor_id` and `operator_id`; the `cleaner`
+column was removed after its values were migrated.
+
+> **Order matters, and the reverse order is silent.** A missing column reads as
+> blank everywhere in `webhook.gs` (`f()` returns `""` for `indexOf === -1`), so
+> deleting `cleaner` before filling `vendor_id` would have flipped every job to
+> "pending" with nothing reporting a fault.
+
+### Still open
+
+- **`VENDOR_SERVICES.preference` reads `preffered` on all three rows.** The code
+  matches `preferred` exactly, so they silently rank as neutral. Harmless with
+  one vendor; wrong the moment there are two.
+- **`OPS_DASHBOARD` → "Active cleaners" is `#REF!`** — it pointed at the deleted
+  `CLEANERS` tab. The per-cleaner block below it still keys on `C-01`…`C-05`
+  while `AVAILABILITY` now holds `VEN-` ids, so it measures nothing.
+- One `AVAILABILITY` row still reads `C-01` (already booked, so the picker
+  never sees it).
+- **`logo_url` is unvalidated.** An operator typo or a pasted external URL would
+  make customers' browsers fetch from a third-party host. A guard rejecting
+  anything not under `/images/` was offered and not yet built.
+- `RENTCAST_KEY` is still bound on the Worker though the property lookup was
+  removed — the subscription can be cancelled and the secret deleted.
+- Operators have blank `public_display_name`, so the vendor portal's team list
+  renders empty rows. Nothing customer-facing reads it.
 
 ---
 
