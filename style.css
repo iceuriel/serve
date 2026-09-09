@@ -2328,7 +2328,10 @@ a {
 .tk-partner__logo {
     display: block;
     max-width: 140px;
-    max-height: 44px;
+    /* 56, not 44: a wide wordmark is bound by max-width and never
+       reaches this, while a square-ish mark is bound by it and at 44 was
+       rendering as a stamp. */
+    max-height: 56px;
     width: auto;
     height: auto;
     object-fit: contain;

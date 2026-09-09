@@ -1,0 +1,11 @@
+<!-- Serve wordmark for LIGHT backgrounds.
+     serve-wordmark.svg is white — it was drawn for the dark hero, and it is
+     still the right mark there. But the partner card and the vendor portal are
+     both light surfaces, so the white one rendered perfectly and invisibly on
+     them. Same geometry, same Times setting, brand navy instead: #1a2744, the
+     colour favicon.svg already uses.
+     Pick by the ground it sits on, not by which is newer. -->
+<svg width="400" height="404" viewBox="40 12 200 202" role="img" aria-label="Serve" xmlns="http://www.w3.org/2000/svg">
+    <path d="M 88 150 L 88 78 L 145 30 L 202 78 L 202 118" fill="none" stroke="#1a2744" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"></path>
+    <text x="140" y="196" text-anchor="middle" font-family="&#39;Times New Roman&#39;, Times, serif" font-weight="400" font-size="64" letter-spacing="1" fill="#1a2744">Serve</text>
+</svg>

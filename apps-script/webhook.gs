@@ -1,7 +1,16 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-09  ·  master  ·  r18 — the portal says who is coming
+ * VERSION STAMP:  2026-09-09  ·  master  ·  r19 — the partner's link, in the email
+ *
+ * r19 = THE PARTNER'S LINK RIDES ALONG. Every booking notification now
+ *      carries the vendor's own portal link beside the cleaner's job link.
+ *      They are different things and the email now says so: the cleaner
+ *      link is ONE job and dies when completed_date is filled; the vendor
+ *      link is the company's standing portal and never changes.
+ *
+ *      Unassigned says so rather than going quiet — that is every
+ *      preference booking, and the line names the two steps to fix it.
  *
  * r18 = THE PORTAL SAYS WHO IS COMING. buildPortalModel was written in r14,
  *      a revision before VENDORS existed, and never gained a partner field.
@@ -879,7 +888,7 @@ function doGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-09 r18" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-09 r19" });
 }
 
 
@@ -3762,7 +3771,8 @@ function sendReservationEmail(data, sched, leadId, leadResult, propertyResult, s
 
        Wrapped because a ticket must never be the reason a booking email fails
        to send. */
-    ticketBlock(makeJobId(data, sched), leadResult && leadResult.contact_id) +
+    ticketBlock(makeJobId(data, sched), leadResult && leadResult.contact_id,
+                slotResult && slotResult.vendorId) +
     "\nSubmission: " + (data.submission_id || "(none)") +
     "\nSubmitted:  " + firstSet(data.submitted_at, data.timestamp, "");
 
@@ -3894,18 +3904,28 @@ function serviceLabel(data) {
  *
  * Never throws. A link is not worth failing a booking notification for.
  */
-function ticketBlock(jobId, contactId) {
+function ticketBlock(jobId, contactId, vendorId) {
   try {
     var customer = contactId
       ? "Customer portal (same link every booking):\n" + portalUrl(contactId) + "\n"
       : "Send to the customer:\n" + ticketUrl(jobId, "client") + "\n" +
         "(per-job link — add a contact_id column to LEADS for a portal link)\n";
 
+    /* r19. The COMPANY's standing portal, not this job. Unassigned is not a
+       failure worth hiding: it is every preference booking, so the line
+       names the two steps instead of going quiet. */
+    var vendor = isSet(vendorId)
+      ? "Vendor portal for " + vendorId + " (permanent):\n" + vendorUrl(vendorId) + "\n"
+      : "Vendor portal: nobody assigned — this booking consumed no\n" +
+        "availability row. Fill vendor_id on the JOBS row, then run\n" +
+        "printVendorLinks() in the editor for the link.\n";
+
     return "\n— TICKETS —\n" +
            customer + "\n" +
            "Send to the cleaner:\n" + ticketUrl(jobId, "partner") + "\n" +
            "(different links — the cleaner's stops working once\n" +
-           " completed_date is filled; the customer's is theirs to keep)\n";
+           " completed_date is filled; the customer's is theirs to keep)\n\n" +
+           vendor;
   } catch (err) {
     console.error("ticket links unavailable: " + err);
     return "";

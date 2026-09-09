@@ -433,5 +433,41 @@ t('a missing VENDORS tab still returns the bookings',
   P18c.error);
 T.tabs.VENDORS = savedVendors;
 
+/* ============================================================
+   r19 — the partner's own portal link rides along in the email
+
+   Three links, three different lifetimes, and the notification has to keep
+   them straight: the customer's portal is permanent, the cleaner's job link
+   dies when completed_date is filled, and the vendor's company portal is
+   permanent but belongs to the company rather than the booking.
+   ============================================================ */
+console.log('\n=== r19: the vendor link in the booking email ===');
+
+const withVen = S.ticketBlock('SRV-20260920-AAAAAA', 'CON-0001', 'VEN-0001');
+
+t('the vendor portal link is present', withVen.indexOf('/v?id=VEN-0001') !== -1,
+  withVen.slice(0, 200));
+t('carrying the real vendor token',
+  withVen.indexOf('/v?id=VEN-0001&t=' + S.vendorToken('VEN-0001')) !== -1);
+t('and it is named as permanent, unlike the cleaner link',
+  /permanent/.test(withVen));
+
+/* All three must still be there, and must be three DIFFERENT links. */
+t('the customer portal is still there', withVen.indexOf('/h?id=CON-0001') !== -1);
+t("the cleaner's per-job link is still there", withVen.indexOf('view=partner') !== -1);
+const links = (withVen.match(/https:\/\/[^\s]+/g) || []);
+t('three distinct links', new Set(links).size === 3, links);
+
+/* The vendor's link must not be the cleaner's: one opens a company, the other
+   opens one job, and they are separate token scopes for that reason. */
+t('the vendor link is not the cleaner link',
+  withVen.indexOf('/v?id=VEN-0001&t=' + S.ticketToken('SRV-20260920-AAAAAA', 'partner')) === -1);
+
+/* Unassigned is every preference booking. It must say so, and say what to do. */
+const noVen = S.ticketBlock('SRV-20260920-AAAAAA', 'CON-0001', '');
+t('unassigned says nobody is assigned', /nobody assigned/.test(noVen), noVen.slice(-220));
+t('and names the fix', /vendor_id/.test(noVen) && /printVendorLinks/.test(noVen));
+t('and mints no vendor link at all', noVen.indexOf('/v?id=') === -1);
+
 console.log('\n' + (bad ? bad + ' FAILURES' : 'ALL ASSERTIONS PASSED'));
 process.exit(bad ? 1 : 0);
