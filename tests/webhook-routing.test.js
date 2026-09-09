@@ -467,8 +467,16 @@ t('partner is NOT given the customer email anywhere',
   !partnerJson.includes(tJob.email), partnerJson.slice(0, 200));
 t('partner is NOT given the customer phone anywhere',
   !partnerJson.includes(String(tJob.phone)));
-t('partner is NOT given any price',
+/* THE TWO SIDES OF THE MONEY ARE NOT THE SAME NUMBER.
+   The partner sees `payout` — what they are paid. They must never see
+   `price` — what the customer paid. Serve's margin is the difference and it
+   is visible to neither. */
+t('partner is NOT given the customer price',
   !/"price"|quoted|final_price|add_on_rev/.test(partnerJson), partnerJson.slice(0, 200));
+t('partner IS given a payout field', 'payout' in partner.booking, Object.keys(partner.booking));
+t('the payout is blank until an operator sets it — never a guessed number',
+  !partner.booking.payout, partner.booking.payout);
+t('and the client is never shown the payout', !/payout/i.test(clientJson));
 
 /* Door codes live in a separate workbook and must never reach either view. */
 t('no view carries anything named like a code',

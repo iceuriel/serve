@@ -349,6 +349,20 @@
         if (sub) head.appendChild(el('div', 'tk-sub', sub));
         bodyEl.appendChild(head);
 
+        /* THE PAYOUT. What this crew is paid, which is not what the customer
+           paid — that number is in the client view and reaches no partner.
+           Blank reads as "confirmed at dispatch" rather than $0, because a
+           zero looks like a job that pays nothing. */
+        var pay = el('div', 'tk-blk');
+        pay.appendChild(el('div', 'tk-lbl', 'Your payout'));
+        var payAmount = money(b.payout);
+        if (payAmount) {
+            pay.appendChild(el('div', 'tk-money', payAmount));
+        } else {
+            pay.appendChild(el('div', 'tk-val', 'Confirmed at dispatch'));
+        }
+        bodyEl.appendChild(pay);
+
         var where = [prop.address, prop.unit].filter(Boolean).join(', ');
         if (where) {
             var w = el('div', 'tk-blk');

@@ -245,8 +245,11 @@ const PROTECTED_TABS = [
   "CLEANERS", "SCHEDULE", "OPS_DASHBOARD",
 ];
 
-/** Columns ops owns on JOBS. Never written, not even blank-filled. */
-const OPS_OWNED_COLUMNS = ["completed_date", "cleaner", "duration_min", "photos_passed", "payment_status"];
+/** Columns ops owns on JOBS. Never written, not even blank-filled.
+    `partner_payout` joins them in r13: what the crew is paid for this job, set
+    by hand at dispatch. A booking form cannot know it and must never guess. */
+const OPS_OWNED_COLUMNS = ["completed_date", "cleaner", "duration_min", "photos_passed",
+                           "payment_status", "partner_payout"];
 
 const NEW_JOB_STATUS = "new";
 
@@ -994,12 +997,19 @@ function getBooking(ss, jobId) {
     completedDate:   String(f("completed_date") || "").trim(),
     status:          String(f("job_status") || ""),
 
-    /* money — INTERNAL. No view model may pass `quoted` to a partner. */
+    /* MONEY, AND THE TWO SIDES OF IT ARE NOT THE SAME NUMBER.
+       `price` is what the customer pays and belongs only to the client view.
+       `partnerPayout` is what the crew is paid and belongs only to the partner
+       view. Serve's margin is the difference, and it stays visible to neither.
+       Keeping them in separate fields is what makes that easy to get right —
+       one `price` object passed to both would be one careless line away from
+       showing a partner the retail rate. */
     price: {
       quoted: f("quoted_price"),
       final:  f("final_price"),
       addOnRevenue: f("add_on_rev"),
     },
+    partnerPayout: f("partner_payout"),
     payment: {
       status: String(f("payment_status") || ""),
       paid:   String(f("payment_status") || "").toLowerCase() === "paid",
@@ -1313,6 +1323,10 @@ function buildVendorTicketModel(ss, booking) {
       serviceCode:  booking.serviceCode,
       serviceLabel: SERVICE_CODES[booking.serviceCode] || booking.serviceLabel,
       condition:    booking.condition,
+      /* THEIR payout, never the customer's price. Blank until an operator sets
+         it at dispatch, and the ticket says "confirmed at dispatch" rather
+         than showing a zero — a zero reads as "this job pays nothing". */
+      payout:       booking.partnerPayout,
       date:         booking.scheduledDate,
       time:         booking.startTime,
       when:         booking.scheduleSummary,
