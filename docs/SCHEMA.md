@@ -220,6 +220,16 @@ lists would be three chances to disagree about what `KEY` means.
 | `parking` | `FREE_STREET` · `PAID_STREET` · `GARAGE` · `NONE` · `OTHER` |
 | `pets` | free text, optional — the booking form already screens for pets |
 
+**Portal completion flag (2026-09-09):** the Arrival & access navigation item
+shows red `Incomplete` until all three questions have saved choices for every
+home on the account. A choice with a follow-up (Key, Access code, or Other)
+also needs that detail saved; Access code uses only `secretSet`, never the code.
+Pets remain optional. The flag becomes green `Complete` only after successful
+saves, updates without a reload, and remains incomplete for an unlinked home or
+missing question data. No homes also shows incomplete until a home is available.
+This is a completion indicator, not a new server-side restriction on saving
+partial answers; the column contract and API payload are unchanged.
+
 > **`entry_code` IS WRITE-ONLY.** No view model returns it — not the portal,
 > not the client ticket, not the partner ticket — and nothing logs it. The
 > portal reports only whether one is saved and the date. Choosing a different

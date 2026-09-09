@@ -34,6 +34,8 @@
 
     var model = null;
     var tab   = 'bookings';
+    var accessFlag = null;
+    var pendingAccessSaves = new Map();
 
     if (!id || !token) { fail('This link is incomplete.'); return; }
 
@@ -183,7 +185,13 @@
         wrap.appendChild(row);
 
         btn.addEventListener('click', function () {
-            save(opts.payload(ta.value.trim()), status, btn);
+            var text = ta.value.trim();
+            var pending = opts.save
+                ? opts.save(text, status, btn)
+                : save(opts.payload(text), status, btn);
+            pending.then(function (ok) {
+                if (ok && opts.onSaved) opts.onSaved();
+            });
         });
         /* A note typed and then abandoned is the common failure. Say so rather
            than silently keeping the old value. */
@@ -208,6 +216,13 @@
             var b = el('button', 'portal__tab', pair[1]);
             b.type = 'button';
             b.setAttribute('data-tab', pair[0]);
+            if (pair[0] === 'access') {
+                accessFlag = el('span', 'portal__access-flag');
+                accessFlag.setAttribute('role', 'status');
+                accessFlag.setAttribute('aria-live', 'polite');
+                accessFlag.setAttribute('aria-atomic', 'true');
+                b.appendChild(accessFlag);
+            }
             b.addEventListener('click', function () { tab = pair[0]; paint(); });
             navEl.appendChild(b);
         });
@@ -216,6 +231,7 @@
     }
 
     function paint() {
+        updateAccessStatus();
         navEl.querySelectorAll('.portal__tab').forEach(function (b) {
             var on = b.getAttribute('data-tab') === tab;
             b.classList.toggle('is-on', on);
@@ -330,6 +346,32 @@
        ========================================================
        Set once per home, and it applies to every visit — which is the reason
        the portal exists rather than a per-booking form. */
+    function accessComplete(homes) {
+        /* No linked home or missing question data must not look complete.
+           The server's question/choice list supplies the requirements; pets
+           are a separate optional editor. Never read or retain a door code. */
+        return !!homes && homes.length > 0 && homes.every(function (home) {
+            return !!home.propertyId && Array.isArray(home.questions) &&
+                home.questions.length > 0 && home.questions.every(function (q) {
+                    if (q.required === false) return true;
+                    var choice = (q.choices || []).filter(function (c) {
+                        return c.key === q.choice;
+                    })[0];
+                    if (!choice) return false;
+                    if (choice.secret) return q.secretSet === true;
+                    return !choice.detail || String(q.detail || '').trim().length > 0;
+                });
+        });
+    }
+
+    function updateAccessStatus() {
+        if (!accessFlag) return;
+        var complete = accessComplete(model.homes);
+        accessFlag.textContent = complete ? 'Complete' : 'Incomplete';
+        accessFlag.className = 'portal__access-flag ' +
+            (complete ? 'is-complete' : 'is-incomplete');
+    }
+
     function renderAccess() {
         var homes = model.homes || [];
         if (!homes.length) {
@@ -378,6 +420,29 @@
         var detailHost = el('div', 'pq__detail');
         var chosen = q.choice;
 
+        function saveAnswer(choice, detail, saveStatus, btn) {
+            /* Serialize this question's writes. Otherwise a delayed choice
+               save can erase a newer detail or restore an old entry method. */
+            wrap.disabled = true;
+            var pending = save({ kind: 'access', property_id: home.propertyId,
+                          field: q.field, choice: choice.key, detail: detail },
+                        saveStatus, btn).then(function (ok) {
+                wrap.disabled = false;
+                pendingAccessSaves.delete(q);
+                if (!ok) return false;
+                q.choice = choice.key;
+                q.detail = !choice.secret && choice.detail ? detail.slice(0, 500) : '';
+                if (q.field === 'entry') {
+                    q.secretSet = !!choice.secret && (!!detail || q.secretSet === true);
+                    if (detail || !q.secretSet) q.secretSetAt = '';
+                }
+                updateAccessStatus();
+                return true;
+            });
+            pendingAccessSaves.set(q, pending);
+            return pending;
+        }
+
         q.choices.forEach(function (c) {
             var row = el('label', 'pq__opt');
             var input = document.createElement('input');
@@ -395,8 +460,15 @@
                 paintDetail();
                 /* Save the choice straight away. The detail, if there is one,
                    saves with its own button once they have typed it. */
-                save({ kind: 'access', property_id: home.propertyId,
-                       field: q.field, choice: c.key, detail: '' }, status, null);
+                saveAnswer(c, '', status, null).then(function (ok) {
+                    if (!ok) {
+                        chosen = q.choice;
+                        wrap.querySelectorAll('input[type="radio"]').forEach(function (radio) {
+                            radio.checked = radio.value === chosen;
+                        });
+                    }
+                    paintDetail();
+                });
             });
         });
 
@@ -409,18 +481,19 @@
             if (c.secret) {
                 /* THE CODE IS NEVER SENT TO THIS PAGE. All we know is whether
                    one is saved and when, so that is all we show. */
-                if (q.secretSet) {
+                if (chosen === q.choice && q.secretSet) {
                     var saved = el('p', 'pq__saved',
                         'Code saved' + (q.secretSetAt ? ' · ' + prettyDate(q.secretSetAt) : ''));
                     detailHost.appendChild(saved);
                 }
                 detailHost.appendChild(editor({
                     value: '', rows: 1,
-                    placeholder: q.secretSet ? 'Enter a new code to replace it' : c.detail,
-                    payload: function (text) {
-                        return { kind: 'access', property_id: home.propertyId,
-                                 field: q.field, choice: c.key, detail: text };
+                    placeholder: chosen === q.choice && q.secretSet
+                        ? 'Enter a new code to replace it' : c.detail,
+                    save: function (text, saveStatus, btn) {
+                        return saveAnswer(c, text, saveStatus, btn);
                     },
+                    onSaved: paintDetail,
                 }));
                 detailHost.appendChild(el('p', 'tk-note',
                     'We never show this back to you, and it is not on your cleaner’s ' +
@@ -429,10 +502,9 @@
             }
 
             detailHost.appendChild(editor({
-                value: q.detail, rows: 2, placeholder: c.detail,
-                payload: function (text) {
-                    return { kind: 'access', property_id: home.propertyId,
-                             field: q.field, choice: c.key, detail: text };
+                value: chosen === q.choice ? q.detail : '', rows: 2, placeholder: c.detail,
+                save: function (text, saveStatus, btn) {
+                    return saveAnswer(c, text, saveStatus, btn);
                 },
             }));
         }
@@ -440,6 +512,23 @@
         paintDetail();
         wrap.appendChild(detailHost);
         wrap.appendChild(status);
+        /* Switching tabs while a save is in flight creates a new fieldset
+           for the same answer. Keep it locked and sync it when that write
+           finishes, so returning early cannot race the previous save. */
+        if (pendingAccessSaves.has(q)) {
+            wrap.disabled = true;
+            status.textContent = 'Saving…';
+            pendingAccessSaves.get(q).then(function (ok) {
+                wrap.disabled = false;
+                chosen = q.choice;
+                wrap.querySelectorAll('input[type="radio"]').forEach(function (radio) {
+                    radio.checked = radio.value === chosen;
+                });
+                paintDetail();
+                status.textContent = ok ? 'Saved' : 'That did not save. Please try again.';
+                status.className = 'tk-save ' + (ok ? 'is-ok' : 'is-bad');
+            });
+        }
         return wrap;
     }
 })();

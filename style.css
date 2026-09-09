@@ -4040,6 +4040,19 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
     cursor: pointer;
 }
 .portal__tab:hover { color: var(--color-dark); }
+.portal__access-flag {
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    margin-top: 0.35rem;
+    padding: 0.15rem 0.45rem;
+    border-radius: 0.25rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    line-height: 1.4;
+}
+.portal__access-flag.is-incomplete { color: #b91c1c; background: #fee2e2; }
+.portal__access-flag.is-complete { color: #166534; background: #dcfce7; }
 .portal__tab.is-on {
     color: var(--color-dark);
     border-bottom-color: var(--color-dark);

@@ -13,6 +13,106 @@ except where a later section supersedes them.
 
 ---
 
+## Session 2026-09-09 — arrival and access completion flag (Codex)
+
+**Status:** implemented and verified locally; publication pending. Codex changed
+portal.js, the portal styles, focused access tests, and these documentation notes.
+
+**Requested:** a red `Incomplete` / green `Complete` flag on the customer
+portal's Arrival & access navigation item. The founder confirmed that Key,
+Access code, and Other require the matching details to be saved as well.
+Occupancy, entry, and parking are required; pets remain optional. Completeness
+covers every home, and updates only after confirmed saves. No backend deployment
+or schema migration is needed. Other existing working-tree changes are preserved.
+
+**Verification:** all 24 test files pass. A deliberate in-memory mutation forcing
+every account to Complete was caught by the new tests. Browser checks with
+synthetic data passed for desktop/mobile layout, incomplete/complete states,
+unsaved and failed details, successful saves, changing/clearing details, saved
+code privacy, multiple homes, and tab switching during a pending save. No live
+customer answers were changed. The same question cannot receive overlapping
+writes when switching tabs, and saved answers persist in the local view model.
+
+**Remaining:** publish the frontend through the existing Git deployment and
+verify the served portal assets. No Apps Script change or deployment is required.
+
+---
+
+## Session 2026-09-09 — independent review (Codex)
+
+**Status:** read-only application review requested by the founder. Findings and
+proposals only; no fixes, deploys, sheet changes, or live submissions performed.
+Do not interpret these proposals as approved product or pricing decisions.
+
+**Evidence checked:** current source, existing tests, and private context. Latest
+observed commit `fbcbe06`. Live homepage retrieval failed, so this is a review of
+the local site source, not a visual or production audit.
+
+- `src/worker.js` / `verifyPrice`: a browser-supplied noncurrent or missing
+  pricing version bypasses mismatch rejection. A local isolated run of the real
+  verifier with the real generated engine derived $195: a $1 claim was rejected
+  with the current version, but passed as version drift with an invented version.
+  No network request or charge was made. Existing tests explicitly allow old and
+  missing versions. Before automated payment, authenticate the quoted price and
+  inputs with a server-issued quote record or signature; degraded intake may
+  remain available without treating an unverified price as chargeable.
+- `webhook.gs` can return `status: ok` with `slot_action: conflict` or `failed`;
+  `script.js` displays the scheduled state without checking that slot result.
+  Distinguish request saved, capacity secured, and partner acceptance. Persist
+  exceptions and notification failures so recovery does not rely only on email.
+- `doPost` catches a 20-second lock timeout and continues writing without the
+  lock; the Worker gives the upstream 12 seconds. Contention/retry behavior needs
+  review. No concurrent production failure was reproduced. Do not preserve lead
+  intake by bypassing the protection used for deduplication and slot assignment.
+- Customer/vendor portal credentials have no per-record revocation version;
+  partner job tickets expire on completion but do not check cancellation or
+  reassignment. Consider targeted link rotation and access revocation.
+
+**Next action:** founder considers priorities. Private strategic and positioning
+ideas are recorded in shared private memory as unapproved proposals. Application
+tests were not broadly rerun for this review; the isolated verifier check above
+is the only newly executed behavior check.
+
+---
+
+## Session 2026-09-09 — shared agent continuity (Codex)
+
+**Status:** documentation and memory setup completed locally; no application
+changes, commit, push, sheet edit, or deployment performed in this session.
+
+**Working agreement:** Codex and Claude Code both cover the full project. The
+founder switches between them for usage availability. Both must read the shared
+records on entry and update them as work progresses and before handing off.
+
+**Changed:** matching continuity instructions in AGENTS.md and CLAUDE.md; shared
+private memory at `../.agent-memory/MEMORY.md` outside the website repository;
+a pointer in Claude's existing private memory index. Private business context
+stays outside tracked files and outside the public asset allow-list.
+
+**Context correction:** the older landing-page-only introduction and "no clients
+yet" guidance are historical, not a reliable current-stage summary. The latest
+system state below and the shared private memory take precedence. The memory
+also preserves business decisions previously available only to Claude.
+
+**Existing work:** `src/engine.generated.mjs` was already modified on entry
+(eight added lines at inspection). Its owner and purpose were not established;
+it was left untouched. The latest observed commit was `6c46f9e` (02117 coverage).
+At the final check, additional edits had appeared in `index.html`, `script.js`,
+`style.css`, `tests/pricing-and-services.test.js`, and `tests/static-checks.test.js`.
+Codex did not make or validate those edits. Treat them as concurrent work and
+recheck the working tree before continuing.
+
+**Verification:** documentation diff, matching continuity sections, memory
+pointers, and private/public file placement checked. Application tests not run
+for this documentation-only change. Production and live sheet state unverified.
+
+**Next action:** take the founder's next request, re-read current changes and
+handoff, and continue the full Serve remit. No new product build was requested.
+The engineering open items under the September 8/9 entry remain recorded
+findings, not newly verified live defects.
+
+---
+
 ## Session 2026-09-08 / 09
 
 **webhook.gs went r12 → r19.** This session built the entire portal and
