@@ -80,7 +80,9 @@ ok('all ' + NEW_CLASSES.length + ' new classes used and styled');
    Naming an area in grid-template-areas but never assigning it silently drops
    the element into an implicit row instead of erroring. */
 head('How Serve Works keeps its three-up layout');
-['"one  ring  three"', 'grid-area: one', 'grid-area: two',
+/* 02 must SPAN the three columns. Confined to the middle one it overflows a
+   62px cell and only looks centred by accident. */
+['"two  two   two"', '"one  ring  three"', 'grid-area: one', 'grid-area: two',
  'grid-area: three', 'grid-area: ring'].forEach(frag =>
   css.includes(frag) ? ok(frag) : fail('style.css is missing ' + frag));
 

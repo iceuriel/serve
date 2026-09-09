@@ -1869,19 +1869,37 @@ a {
 
        Grid areas rather than DOM order, so the markup stays 01 → 02 → 03 →
        handset. A keyboard or screen-reader user gets the steps in their
-       numbered order; only the painting is rearranged. */
+       numbered order; only the painting is rearranged.
+
+       COLUMNS ARE CAPPED, NOT 1fr. With 1fr the two outer columns swallowed
+       every spare pixel, so on a wide screen 01 and 03 grew wide, drifted away
+       from the handset, and sat at a different width from 02 — three steps that
+       should read as siblings looked like three unrelated blocks. Capping them
+       and centring the whole grid keeps the group tight at any width. */
     .steps {
         display: grid;
-        grid-template-columns: 1fr auto 1fr;
+        grid-template-columns: minmax(0, 18rem) auto minmax(0, 18rem);
         grid-template-areas:
-            ".    two   ."
+            "two  two   two"
             "one  ring  three";
-        align-items: start;
-        justify-items: stretch;
-        gap: 1.75rem 2rem;
+        /* centre the group in the section, and line 01/03 up with the handset
+           rather than with its top edge */
+        justify-content: center;
+        align-items: center;
+        gap: 1.5rem 2rem;
+        text-align: center;
     }
+    /* .step is a flex column; this centres the number badge and heading with
+       the copy instead of leaving them hard against the left edge. */
+    .step { align-items: center; }
     .step:nth-of-type(1) { grid-area: one; }
-    .step:nth-of-type(2) { grid-area: two; max-width: 30rem; justify-self: center; }
+    /* 02 spans all three columns rather than being confined to the middle one
+       and overflowing it — same centring, without relying on overflow. */
+    .step:nth-of-type(2) {
+        grid-area: two;
+        max-width: 34rem;
+        margin: 0 auto 0.25rem;
+    }
     .step:nth-of-type(3) { grid-area: three; }
     .steps__ring         { grid-area: ring; }
 
