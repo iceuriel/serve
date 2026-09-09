@@ -207,6 +207,46 @@
         if (d.view === 'partner') renderPartner(d); else renderClient(d);
     }
 
+    /**
+     * The date/time header, de-duplicated. ONE function for both views, so the
+     * two cannot drift into disagreeing about how a booking is described.
+     *
+     * A booking with a confirmed slot has a date and a window. A booking made
+     * on a time PREFERENCE has no date at all, and `start_time` and the
+     * schedule summary then hold the SAME SENTENCE — both come out as
+     * "Later in the day (typically 12:00 PM - 5:00 PM)". Rendering each in turn
+     * printed it twice, at the top of both tickets.
+     *
+     * Comparison is on letters and digits only, and by containment rather than
+     * equality: "9-11 AM" against "Wed 10 Sep, 9-11 AM" is the same fact told
+     * twice, and only the shorter one belongs under a date that already says
+     * the day. Two lines that genuinely differ are both kept.
+     */
+    function scheduleHead(b, subParts) {
+        var head = el('div', 'tk-when');
+        var day = prettyDate(b.date);
+        if (day) head.appendChild(el('div', 'tk-day', day));
+
+        var norm = function (s) {
+            return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        };
+        var seen = [];
+        [b.time, b.when].forEach(function (v) {
+            var text = String(v || '').trim();
+            var n = norm(text);
+            if (!n) return;
+            for (var i = 0; i < seen.length; i++) {
+                if (seen[i].indexOf(n) !== -1 || n.indexOf(seen[i]) !== -1) return;
+            }
+            seen.push(n);
+            head.appendChild(el('div', 'tk-time', text));
+        });
+
+        var sub = (subParts || []).filter(Boolean).join(' · ');
+        if (sub) head.appendChild(el('div', 'tk-sub', sub));
+        return head;
+    }
+
     /* ========================================================
        CLIENT — five sections
        ======================================================== */
@@ -215,14 +255,7 @@
         var done = !!b.completed;
 
         /* 1. BOOKING */
-        var head = el('div', 'tk-when');
-        var when = prettyDate(b.date);
-        if (when) head.appendChild(el('div', 'tk-day', when));
-        if (b.time) head.appendChild(el('div', 'tk-time', b.time));
-        if (!when && b.when) head.appendChild(el('div', 'tk-time', b.when));
-        var sub = [b.serviceLabel, homeLine(d.home)].filter(Boolean).join(' · ');
-        if (sub) head.appendChild(el('div', 'tk-sub', sub));
-        bodyEl.appendChild(head);
+        bodyEl.appendChild(scheduleHead(b, [b.serviceLabel, homeLine(d.home)]));
 
         var price = money(b.price);
         if (price) {
@@ -340,14 +373,7 @@
         var b = d.booking || {};
         var prop = d.property || {};
 
-        var head = el('div', 'tk-when');
-        var when = prettyDate(b.date);
-        if (when) head.appendChild(el('div', 'tk-day', when));
-        if (b.time) head.appendChild(el('div', 'tk-time', b.time));
-        if (!when && b.when) head.appendChild(el('div', 'tk-time', b.when));
-        var sub = [b.serviceLabel, b.condition, homeLine(prop)].filter(Boolean).join(' · ');
-        if (sub) head.appendChild(el('div', 'tk-sub', sub));
-        bodyEl.appendChild(head);
+        bodyEl.appendChild(scheduleHead(b, [b.serviceLabel, b.condition, homeLine(prop)]));
 
         /* THE PAYOUT. What this crew is paid, which is not what the customer
            paid — that number is in the client view and reaches no partner.
