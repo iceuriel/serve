@@ -402,6 +402,43 @@ t('step 3 exists', INDEX.includes(step3Mark));
 t('step 3 carries no inline link', !/serve-inline-link/.test(step3));
 t('the existing "see how the day runs" link survived', /href="#after-you-book"/.test(step3));
 
+/* ---------- 7a. the hero ------------------------------------------------ */
+console.log('\n=== 7a. the hero says what Serve is ===');
+
+t('the headline is the one-less-thing line',
+  INDEX.includes('<h1 class="hero__headline">A clean home. One less thing to manage.</h1>'));
+t('the sub leads with manages',
+  /hero__sub">Serve manages, coordinates, and books your service through partnerships/.test(INDEX));
+
+/* Order matters: the sub explains the headline, and the tagline closes under
+   it. Reversing them puts a slogan between a claim and its explanation. */
+t('the sub comes before the tagline',
+  INDEX.indexOf('hero__sub') < INDEX.indexOf('hero__tagline'),
+  [INDEX.indexOf('hero__sub'), INDEX.indexOf('hero__tagline')]);
+t('the tagline survived the reorder', /hero__tagline">Made to Serve/.test(INDEX));
+
+/* The mark carries the city now. serve-logo-v2.svg is deliberately NOT edited
+   — it may already be printed on something — so the hero points at a copy. */
+t('the hero wears the Boston mark',
+  /hero__logo" src="images\/serve-logo-boston\.svg"/.test(INDEX));
+t('and its alt names the city', /alt="Serve Home Cleaning, Boston"/.test(INDEX));
+t('serve-logo-v2.svg is untouched by the page',
+  !INDEX.includes('serve-logo-v2.svg') ||
+  INDEX.indexOf('serve-logo-v2.svg') > INDEX.indexOf('serve-logo-boston.svg'));
+
+const MARK = fs.readFileSync(path.join(REPO_ROOT, 'images', 'serve-logo-boston.svg'), 'utf8');
+const markLines = (MARK.match(/<text/g) || []).length;
+t('the mark has three lines of type', markLines === 3, markLines);
+t('Serve, then the category, then the city',
+  MARK.indexOf('>Serve<') < MARK.indexOf('>HOME CLEANING<') &&
+  MARK.indexOf('>HOME CLEANING<') < MARK.indexOf('>BOSTON<'));
+/* Boston wears the wordmark's white, not the category's blue, so it reads as
+   part of the name rather than as a second subtitle. */
+t('the city is set in the wordmark white',
+  /fill="#ffffff"[^>]*>BOSTON</.test(MARK));
+t('the viewBox grew to fit it — a third line outside it renders as nothing',
+  /viewBox="40 10 200 254"/.test(MARK));
+
 /* ---------- 7b. the section is condensed, and the handset is in it ------- */
 console.log('\n=== 7b. How Serve Works: condensed, with the handset ===');
 

@@ -355,10 +355,12 @@ a {
     font-family: 'Times New Roman', Times, serif;
 }
 
+/* The tagline now sits BELOW this, so the big gap moved down with it: these
+   two lines belong together and the air belongs before the button. */
 .hero__sub {
     font-size: 1.05rem;
     color: #9ca3af;
-    margin: 0 auto 1.75rem;
+    margin: 0 auto 0.6rem;
     max-width: 520px;
     line-height: 1.7;
 }
@@ -371,7 +373,7 @@ a {
     font-family: var(--flow-serif);
     font-size: 1.15rem;
     color: #cbd5e1;
-    margin: 0 0 1rem;
+    margin: 0 0 1.75rem;
 }
 
 .hero__tagline strong {

@@ -1,0 +1,16 @@
+<!-- Serve / HOME CLEANING / Boston — the hero mark.
+     A COPY of serve-logo-v2.svg with a third line, not an edit of it. v2 is
+     unchanged and stays in images/: it is still the right mark anywhere the
+     city is not the point, and it may already be printed on things this repo
+     cannot reach.
+
+     "Boston" wears the wordmark's own treatment — same Times setting, same
+     white — rather than the blue of the category line, so it reads as part of
+     the name rather than as a second subtitle. Baselines run 196 / 228 / 256,
+     the same 28-32 unit rhythm the first two already had. -->
+<svg width="400" height="508" viewBox="40 10 200 254" role="img" aria-label="Serve Home Cleaning, Boston" xmlns="http://www.w3.org/2000/svg">
+    <path d="M 88 150 L 88 78 L 145 30 L 202 78 L 202 118" fill="none" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"></path>
+    <text x="140" y="196" text-anchor="middle" font-family="&#39;Times New Roman&#39;, Times, serif" font-weight="400" font-size="64" letter-spacing="1" fill="#ffffff">Serve</text>
+    <text x="140" y="228" text-anchor="middle" font-family="&#39;Times New Roman&#39;, Times, serif" font-weight="400" font-size="17" letter-spacing="4.5" fill="#6BA8D6">HOME CLEANING</text>
+    <text x="140" y="256" text-anchor="middle" font-family="&#39;Times New Roman&#39;, Times, serif" font-weight="400" font-size="19" letter-spacing="4.5" fill="#ffffff">BOSTON</text>
+</svg>
