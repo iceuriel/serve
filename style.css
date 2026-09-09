@@ -1898,10 +1898,6 @@ a {
        the copy instead of leaving them hard against the left edge. */
     .step { align-items: center; }
 
-    /* Two lines' worth, so a one-line heading and a two-line heading still
-       hand off to their paragraphs at the same y. */
-    .step h3 { min-height: 2.8em; }
-
     /* The BODY sets flush left while the heading stays centred. Centred body
        copy starts each line at a different x, which is what made these read as
        ragged. Flush left, not justified: at 18rem these lines carry about 35
