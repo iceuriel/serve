@@ -1,7 +1,21 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-08  ·  master  ·  r17 — portal links on demand
+ * VERSION STAMP:  2026-09-09  ·  master  ·  r18 — the portal says who is coming
+ *
+ * r18 = THE PORTAL SAYS WHO IS COMING. buildPortalModel was written in r14,
+ *      a revision before VENDORS existed, and never gained a partner field.
+ *      Since r14 is also what redirected the confirmation email to the
+ *      PORTAL link, the page every customer actually opens was the one
+ *      page that could not answer "who is cleaning my home".
+ *
+ *      Upcoming bookings only. A finished booking is a receipt, and
+ *      "coordinating with our vendor network" over a job that happened
+ *      last month would be nonsense rather than merely useless.
+ *
+ *      Same whitelist as the ticket — buildClientVendorProfile — so there
+ *      is one definition of what a customer may learn about a partner and
+ *      no second one to forget to update.
  *
  * r17 = PORTAL LINKS ARE MINTED ON DEMAND, not by a booking. A token is a
  *      pure HMAC of the id, so a link has always existed the moment the row
@@ -865,7 +879,7 @@ function doGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-08 r17" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-09 r18" });
 }
 
 
@@ -1740,6 +1754,8 @@ function accessQuestionList(access) {
  */
 function buildPortalModel(ss, contact) {
   var bookings = getContactBookings(ss, contact.leadId);
+  /* A customer with a standing partner has the same vendor on every row. */
+  var vendorMemo = {};
 
   var homes = getContactProperties(bookings).map(function (p) {
     var access = getPropertyAccess(ss, p.propertyId);
@@ -1789,6 +1805,23 @@ function buildPortalModel(ss, contact) {
         });
         row.generalInstruction = sorted.general;
         row.atBooking = b.customerNotes;
+
+        /* Who is coming, through the SAME whitelist the per-job ticket uses.
+           null is a legitimate answer and the one the portal renders as
+           "coordinating" — it is every preference booking, since a booking
+           with no specific time consumes no availability row and so gets no
+           vendor. Never fatal: a missing VENDORS tab loses the card, not the
+           booking list. */
+        row.partner = null;
+        try {
+          var vid = String(getAssignment(ss, b).vendorId || "");
+          if (vid) {
+            if (vendorMemo[vid] === undefined) vendorMemo[vid] = getVendor(ss, vid);
+            row.partner = buildClientVendorProfile(vendorMemo[vid]);
+          }
+        } catch (vendErr) {
+          console.error("portal vendor lookup failed for " + b.bookingId + ": " + vendErr);
+        }
       }
       return row;
     }),

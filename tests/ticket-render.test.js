@@ -53,11 +53,17 @@ function node(tag) {
 }
 const box = { document: { createElement: node }, console };
 vm.createContext(box);
-vm.runInContext(
-  src + cut('function partnerCard(v)', 'function homeLine(') +
-  '\nglobalThis.h = scheduleHead;' +
-  '\nglobalThis.partnerCard = partnerCard;' +
-  '\nglobalThis.seekingCard = seekingCard;', box);
+vm.runInContext(src + '\nglobalThis.h = scheduleHead;', box);
+
+/* partner-card.js is a real module with a real export, so load the whole
+   file rather than slicing functions out of a bigger one. What is asserted
+   below is therefore the shipped file, byte for byte. */
+const PC = fs.readFileSync(path.join(REPO_ROOT, 'partner-card.js'), 'utf8');
+const pcBox = { document: { createElement: node }, console };
+pcBox.window = pcBox;                 /* the IIFE takes `window` as its root */
+vm.createContext(pcBox);
+vm.runInContext(PC, pcBox);
+const SP = pcBox.ServePartner;
 
 /** The rendered header as [class, text] pairs — what a person would see. */
 const lines = (b, sub) => box.h(b, sub).children.map(n => [n.className, n._text]);
@@ -136,7 +142,7 @@ const VEN = {
   publicDescription: 'Our own cleaning team.', partnerSince: '2026-07-01',
   insuranceVerified: true, rating: null, reviewCount: null,
 };
-const withLogo = box.partnerCard(VEN);
+const withLogo = SP.card(VEN);
 const imgs = byClass(withLogo, 'tk-partner__logo');
 
 imgs.length === 1 ? ok('one logo element') : fail('expected one logo, got ' + imgs.length);
@@ -147,21 +153,21 @@ t('pointing at the vendor logo_url', imgs.length ? imgs[0].src : null,
 t('alt is the company name', imgs.length ? imgs[0].alt : null, 'Serve');
 t('and it is lazy', imgs.length ? imgs[0].loading : null, 'lazy');
 
-const noLogo = box.partnerCard(Object.assign({}, VEN, { logoUrl: '' }));
+const noLogo = SP.card(Object.assign({}, VEN, { logoUrl: '' }));
 byClass(noLogo, 'tk-partner__logo').length === 0
   ? ok('no logo element when the vendor has no logo_url')
   : fail('an empty logo_url still rendered an <img>');
 t('the name still renders', byClass(noLogo, 'tk-partner__name').length, 1);
 
 /* Serve has one completed job. A rating of 0 must not print as 0 stars. */
-const unrated = box.partnerCard(Object.assign({}, VEN, { rating: 0, reviewCount: 0 }));
+const unrated = SP.card(Object.assign({}, VEN, { rating: 0, reviewCount: 0 }));
 /\u2605/.test(allText(unrated))
   ? fail('a zero rating printed a star')
   : ok('no star when there is no rating');
 
 head('E. No partner yet — the coordinating state');
 
-const seek = box.seekingCard();
+const seek = SP.seeking();
 const seekText = allText(seek);
 
 /Coordinating with our vendor network/.test(seekText)
@@ -191,10 +197,42 @@ decor.every(n => n.attrs['aria-hidden'] === 'true')
 
 /* The animation is CSS. A render that needed a timer would keep running on a
    backgrounded phone tab. */
-/setInterval|requestAnimationFrame|setTimeout/.test(
-  JS.slice(JS.indexOf('function seekingCard()'), JS.indexOf('function homeLine('))
-) ? fail('seekingCard drives its own animation loop')
+/setInterval|requestAnimationFrame|setTimeout/.test(PC)
+  ? fail('partner-card.js drives its own animation loop')
   : ok('the animation is left to CSS');
+
+/* ------------------------------------------------------------------
+   THE REGRESSION THIS FILE EXISTS FOR.
+
+   The block was written into ticket.js and shipped — but the booking
+   confirmation sends the PORTAL link whenever the customer has a
+   contact_id, so the page customers actually open never had it. Both
+   pages must render it, and both must load the file that defines it.
+   ------------------------------------------------------------------ */
+head('F. Both customer surfaces show who is coming');
+
+const PORTAL_JS = fs.readFileSync(path.join(REPO_ROOT, 'portal.js'), 'utf8');
+const J_HTML    = fs.readFileSync(path.join(REPO_ROOT, 'j.html'), 'utf8');
+const H_HTML    = fs.readFileSync(path.join(REPO_ROOT, 'h.html'), 'utf8');
+const BUILD     = fs.readFileSync(path.join(REPO_ROOT, 'scripts', 'build-site.sh'), 'utf8');
+
+JS.includes('ServePartner.block(')
+  ? ok('the per-job ticket renders the partner block')
+  : fail('ticket.js no longer renders the partner block');
+PORTAL_JS.includes('ServePartner.block(')
+  ? ok('the customer portal renders it too')
+  : fail('portal.js does not render the partner block — the page customers open');
+
+J_HTML.includes('partner-card.js')
+  ? ok('j.html loads partner-card.js')
+  : fail('j.html renders the block but never loads the file defining it');
+H_HTML.includes('partner-card.js')
+  ? ok('h.html loads partner-card.js')
+  : fail('h.html renders the block but never loads the file defining it');
+
+/BUILD_UNUSED/.test('') || BUILD.includes('partner-card.js')
+  ? ok('and the build publishes it')
+  : fail('partner-card.js is not on the build allow-list — both pages 404 it');
 
 console.log('\n' + (bad ? bad + ' FAILURES' : 'all ticket-render checks passed'));
 process.exit(bad ? 1 : 0);

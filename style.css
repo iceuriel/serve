@@ -4010,6 +4010,17 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
     font-variant-numeric: tabular-nums;
 }
 .pb__body { padding: 0 0.95rem 0.95rem; }
+/* Sub-heading inside an open booking — smaller than the portal's own h2,
+   since it labels a block within a row rather than a section of the page. */
+.pb__h {
+    font-family: var(--flow-sans);
+    font-size: 0.76rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    margin: 1.1rem 0 0.5rem;
+}
 
 /* --- one access question --- */
 .pq {

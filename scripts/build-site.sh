@@ -59,7 +59,7 @@ cp index.html pricing.html services.html privacy.html sms-terms.html serve-geo-d
 # It is not in the sitemap and carries noindex both in the markup and as an
 # X-Robots-Tag in _headers, because the URL exposes a home address and when the
 # house is empty. ticket.js is its only script.
-cp j.html ticket.js "$OUT"/
+cp j.html ticket.js partner-card.js "$OUT"/
 
 # h.html is served at /h and is the CUSTOMER PORTAL — one contact, every
 # booking, one link that never changes. Same noindex + no-store treatment as

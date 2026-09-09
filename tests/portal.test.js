@@ -39,7 +39,7 @@ const JOBS_HEADERS = ['job_id','lead_id','source','property_key','service_type',
   'completed_date','cleaner','start_time','duration_min','photos_passed','payment_status',
   'job_status','notes','submission_id','received_at','name','email','phone','segment','src_chain',
   'customer_notes','pets_flag','scheduling_type','address','unit','zip','quote_meta',
-  'property_id','contact_id','partner_payout'];
+  'property_id','contact_id','partner_payout','vendor_id','operator_id'];
 
 const LEADS_HEADERS = ['lead_id','name','email','phone','service_address','unit','zip','source',
   'source_detail','contacted_via','source_history','status','first_variant','dnc_scrub',
@@ -78,6 +78,11 @@ function build() {
   const tabs = {
     JOBS:   makeSheet('JOBS', JOBS_HEADERS),
     LEADS:  makeSheet('LEADS', LEADS_HEADERS),
+    /* openById returns this same book, so the vendor tabs sit here too.
+       Enough columns for buildClientVendorProfile and no more. */
+    VENDORS: makeSheet('VENDORS', ['vendor_id','status','display_name','logo_url',
+      'public_description','partner_since','insurance_verified','service_area',
+      'public_rating','public_review_count','rating_source','client_visible']),
   };
   const logs = [];
   const ss = {
@@ -339,6 +344,94 @@ t('no email is printed',   !custOut.includes('priya@example.com'));
 t('a row with no contact_id is counted, not silently dropped',
   /\d+ row\(s\) have no contact_id/.test(custOut), custOut.slice(-160));
 t('and it is not given a link', !custOut.includes('Not Yet Booked'));
+
+
+/* ============================================================
+   r18 — the portal answers "who is cleaning my home"
+
+   buildPortalModel was written in r14, before VENDORS existed, and never
+   gained a partner field. r14 is also the revision that pointed the booking
+   confirmation at the PORTAL link — so the one page every customer opens was
+   the one page that could not answer the question.
+   ============================================================ */
+console.log('\n=== r18: the portal carries the partner ===');
+
+T.tabs.VENDORS.appendRow(['VEN-0001','active','Beacon Hill Home Care',
+  '/images/vendors/bh.svg','Back Bay specialists.','2024', true, 'Greater Boston',
+  4.8, 31, 'Google', true]);
+T.tabs.VENDORS.appendRow(['VEN-0002','active','Half Filled Co.','','','', false,
+  '', '', '', '', false]);
+
+const jrows = T.tabs.JOBS._rows;
+const jvi = JOBS_HEADERS.indexOf('vendor_id');
+const jci = JOBS_HEADERS.indexOf('completed_date');
+const jji = JOBS_HEADERS.indexOf('job_id');
+
+const upcomingRows = [];
+for (let r = 1; r < jrows.length; r++) if (!jrows[r][jci]) upcomingRows.push(r);
+t('the fixture has an upcoming booking to assign', upcomingRows.length > 0,
+  upcomingRows.length);
+
+jrows[upcomingRows[0]][jvi] = 'VEN-0001';
+const ASSIGNED = jrows[upcomingRows[0]][jji];
+
+const P18 = get({ portal: 'CON-0001', t: MINE });
+t('the portal opens', P18.ok === true, P18.error);
+const mine18 = (P18.bookings || []).filter(b => b.bookingId === ASSIGNED)[0];
+t('the assigned booking is in it', !!mine18, ASSIGNED);
+
+t('it carries a partner at all', !!(mine18 && mine18.partner),
+  mine18 && mine18.partner);
+t('named as the company', !!mine18 && !!mine18.partner &&
+  mine18.partner.displayName === 'Beacon Hill Home Care',
+  mine18 && mine18.partner && mine18.partner.displayName);
+t('with the logo, which is the whole point', !!mine18 && !!mine18.partner &&
+  mine18.partner.logoUrl === '/images/vendors/bh.svg',
+  mine18 && mine18.partner && mine18.partner.logoUrl);
+
+/* Same whitelist as the ticket: nothing internal may ride along. */
+const p18 = JSON.stringify(mine18 && mine18.partner);
+t('no payout, legal name or internal contact in the payload',
+  !/payout|legal|internal/i.test(p18), p18);
+
+/* Unassigned stays null — that is what renders the coordinating state, and it
+   is EVERY preference booking. */
+/* Read it off the RESPONSE, not the sheet: the fixture's other upcoming job
+   belongs to the second contact, so it is correctly absent from this portal
+   and looking for it there asserts nothing. */
+const otherUp = (P18.bookings || []).filter(
+  b => !b.completed && b.bookingId !== ASSIGNED)[0];
+if (otherUp) {
+  t('an unassigned booking reports partner null', otherUp.partner === null,
+    otherUp.partner);
+} else {
+  t('this contact has exactly one upcoming booking', true, 'null case covered below');
+}
+
+/* A finished booking is a receipt. "Coordinating with our vendor network" over
+   a job that already happened would be nonsense, not merely useless. */
+const donerow = (P18.bookings || []).filter(b => b.completed)[0];
+if (donerow) {
+  t('completed bookings carry no partner field at all',
+    donerow.partner === undefined, donerow.partner);
+}
+
+/* A partner Serve has not finished setting up must not reach a customer:
+   client_visible FALSE renders as coordinating, never as a half-empty card. */
+jrows[upcomingRows[0]][jvi] = 'VEN-0002';
+const P18b = get({ portal: 'CON-0001', t: MINE });
+const half = (P18b.bookings || []).filter(b => b.bookingId === ASSIGNED)[0];
+t('client_visible FALSE yields no card', !!half && half.partner === null,
+  half && half.partner);
+
+/* A missing VENDORS tab must cost the card, never the booking list. */
+const savedVendors = T.tabs.VENDORS;
+delete T.tabs.VENDORS;
+const P18c = get({ portal: 'CON-0001', t: MINE });
+t('a missing VENDORS tab still returns the bookings',
+  P18c.ok === true && (P18c.bookings || []).length === (P18.bookings || []).length,
+  P18c.error);
+T.tabs.VENDORS = savedVendors;
 
 console.log('\n' + (bad ? bad + ' FAILURES' : 'ALL ASSERTIONS PASSED'));
 process.exit(bad ? 1 : 0);

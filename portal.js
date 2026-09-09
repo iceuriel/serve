@@ -275,6 +275,13 @@
 
         add(inner, line('Payment', b.paid ? 'Paid' : 'Due at service'));
 
+        /* Who is coming. The portal is the link the confirmation email
+           actually sends, so this is the surface that has to answer it —
+           and when nobody is assigned yet it says so, rather than leaving
+           the question unanswered. */
+        inner.appendChild(el('h3', 'pb__h', 'Your service partner'));
+        inner.appendChild(ServePartner.block(b.partner));
+
         /* Rooms, each with a note the customer can add. */
         (b.rooms || []).forEach(function (r) {
             var rd = document.createElement('details');
