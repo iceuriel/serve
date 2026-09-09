@@ -444,8 +444,11 @@ a {
 /* ============================================================
    HOW IT WORKS
    ============================================================ */
+/* Bottom padding is shorter than the top on purpose: the handset is the
+   last thing in this section and the calculator is the next thing after it,
+   so the two want to read as one move rather than two separate blocks. */
 .how-it-works {
-    padding: 4rem 1.25rem;
+    padding: 4rem 1.25rem 2rem;
     background: var(--color-bg);
 }
 
@@ -3549,17 +3552,6 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
     align-items: center;
 }
 
-.steps__coda {
-    margin: 2.5rem auto 0;
-    padding-top: 1.75rem;
-    border-top: 1px solid var(--color-border);
-    max-width: 620px;
-    text-align: center;
-    font-family: var(--flow-serif);
-    font-size: 1.2rem;
-    font-weight: 700;
-    color: var(--color-dark);
-}
 
 /* --- What Serve removes ----------------------------------------------- */
 .swap {

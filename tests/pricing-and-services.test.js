@@ -411,8 +411,11 @@ t('the heading capitalises Works',
 /* Each step is one sentence. Length is the tripwire rather than counting
    sentences, which breaks on abbreviations and em dashes — the point is that
    the paragraphs cannot quietly grow back. Measured 61 / 111 / 130. */
-const stepsBlock = INDEX.slice(INDEX.indexOf('<div class="steps">'),
-                               INDEX.indexOf('steps__coda'));
+/* End of the section, not the old closing line — that line moved up to become
+   the subtitle, and slicing to a string that is gone silently swallows the
+   rest of the page and every <p> in it. */
+const stepsStart = INDEX.indexOf('<div class="steps">');
+const stepsBlock = INDEX.slice(stepsStart, INDEX.indexOf('</section>', stepsStart));
 const stepCopy = [...stepsBlock.matchAll(/<p>([\s\S]*?)<\/p>/g)]
   .map(m => m[1].replace(/<[^>]+>/g, ' ').replace(/&[a-z]+;/g, '-')
                 .replace(/\s+/g, ' ').trim());
