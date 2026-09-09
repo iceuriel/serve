@@ -402,6 +402,46 @@ t('step 3 exists', INDEX.includes(step3Mark));
 t('step 3 carries no inline link', !/serve-inline-link/.test(step3));
 t('the existing "see how the day runs" link survived', /href="#after-you-book"/.test(step3));
 
+/* ---------- 7b. the section is condensed, and the handset is in it ------- */
+console.log('\n=== 7b. How Serve Works: condensed, with the handset ===');
+
+t('the heading capitalises Works',
+  INDEX.includes('<h2 class="section-title">How Serve Works</h2>'));
+
+/* Each step is one sentence. Length is the tripwire rather than counting
+   sentences, which breaks on abbreviations and em dashes — the point is that
+   the paragraphs cannot quietly grow back. Measured 61 / 111 / 130. */
+const stepsBlock = INDEX.slice(INDEX.indexOf('<div class="steps">'),
+                               INDEX.indexOf('steps__coda'));
+const stepCopy = [...stepsBlock.matchAll(/<p>([\s\S]*?)<\/p>/g)]
+  .map(m => m[1].replace(/<[^>]+>/g, ' ').replace(/&[a-z]+;/g, '-')
+                .replace(/\s+/g, ' ').trim());
+t('three step paragraphs', stepCopy.length === 3, stepCopy.length);
+stepCopy.forEach((p, i) =>
+  t('step ' + (i + 1) + ' stays one sentence (<=160 chars)', p.length <= 160, p.length));
+
+/* The handset appears twice: the centrepiece of the steps, and a flourish
+   under the booking confirmation. */
+const rings = (INDEX.match(/class="steps__ring"/g) || []).length;
+t('two handsets on the page', rings === 2, rings);
+t('both are hidden from screen readers — the copy carries the meaning',
+  (INDEX.match(/class="steps__ring" aria-hidden="true"/g) || []).length === 2);
+t('both marks are lazy', (INDEX.match(/tk-seek__mark[^>]*loading="lazy"/g) || []).length === 2);
+
+t('one handset sits inside the steps', /steps__ring/.test(stepsBlock));
+const confirmBlock = INDEX.slice(INDEX.indexOf('id="state-confirmed"'),
+                                 INDEX.indexOf('id="state-confirmed"') + 3000);
+t('the other sits in the confirmation', /steps__ring/.test(confirmBlock));
+t('and it is the small one', /tk-seek__stage--sm/.test(confirmBlock));
+
+/* The line the customer reads after booking now names what Serve is doing. */
+t('the confirmation says Serve is coordinating',
+  /Serve is coordinating with the vendor network/.test(INDEX));
+const SCRIPT = fs.readFileSync(path.join(REPO_ROOT, 'script.js'), 'utf8');
+t('and so does the slot-booked variant script.js writes',
+  (SCRIPT.match(/Serve is coordinating with the vendor network/g) || []).length === 2,
+  (SCRIPT.match(/Serve is coordinating with the vendor network/g) || []).length);
+
 /* ---------- 8. teasers are placed where they were asked for ---------- */
 console.log('\n=== 8. teaser placement ===');
 const iQuote  = INDEX.indexOf('id="quote"');

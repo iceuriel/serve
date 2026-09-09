@@ -68,13 +68,21 @@ head('New classes are styled');
 const NEW_CLASSES = ['svmA-section','svmA-wrap','svmA-lede','svmA-grid','svmA-bubble','svmA-step',
   // svmA-shots* removed 2026-08-03 with the "What done looks like" gallery.
   // flow-textarea removed 2026-09-01 with the "anything we should know?" box.
-  'svmA-foot','step__link','reserve-aftercare','field-hint'];
+  'svmA-foot','step__link','reserve-aftercare','field-hint','steps__ring'];
 NEW_CLASSES.forEach(c => {
   if (!html.includes('class="' + c) && !html.includes(' ' + c + '"') && !html.includes(c + ' '))
     fail(c + ' not used in index.html');
   if (!css.includes('.' + c)) fail(c + ' has no rule in style.css');
 });
 ok('all ' + NEW_CLASSES.length + ' new classes used and styled');
+
+/* 5a. How Serve Works is a grid on desktop, and the areas must all exist.
+   Naming an area in grid-template-areas but never assigning it silently drops
+   the element into an implicit row instead of erroring. */
+head('How Serve Works keeps its three-up layout');
+['"one  ring  three"', 'grid-area: one', 'grid-area: two',
+ 'grid-area: three', 'grid-area: ring'].forEach(frag =>
+  css.includes(frag) ? ok(frag) : fail('style.css is missing ' + frag));
 
 /* 5b. Classes the ticket builds in JS must be styled too.
 

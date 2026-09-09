@@ -1865,15 +1865,25 @@ a {
         max-width: 320px;
     }
 
-    /* Steps: side by side */
-    .steps {
-        flex-direction: row;
-        gap: 1.5rem;
-    }
+    /* Steps: 02 across the top, the handset centre, 01 and 03 flanking it.
 
-    .step {
-        flex: 1;
+       Grid areas rather than DOM order, so the markup stays 01 → 02 → 03 →
+       handset. A keyboard or screen-reader user gets the steps in their
+       numbered order; only the painting is rearranged. */
+    .steps {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        grid-template-areas:
+            ".    two   ."
+            "one  ring  three";
+        align-items: start;
+        justify-items: stretch;
+        gap: 1.75rem 2rem;
     }
+    .step:nth-of-type(1) { grid-area: one; }
+    .step:nth-of-type(2) { grid-area: two; max-width: 30rem; justify-self: center; }
+    .step:nth-of-type(3) { grid-area: three; }
+    .steps__ring         { grid-area: ring; }
 
     /* Before/After grid: two pairs per row on tablet+ */
     .ba-grid {
@@ -2356,7 +2366,15 @@ a {
     padding: 1.5rem 1rem 1.2rem;
     text-align: center;
 }
+/* Used on THREE surfaces now: the partner card (/j and /h), How Serve Works,
+   and the booking confirmation. The `tk-` prefix is where it was born, not a
+   claim about where it belongs. Size travels through custom properties so
+   there is one set of keyframes rather than three. */
 .tk-seek__stage {
+    --ring-w: 54px;
+    --ring-h: 94px;
+    --ring-mark: 32px;
+    --ring-reach: 46px;
     position: relative;
     height: 108px;
     margin-bottom: 0.95rem;
@@ -2364,13 +2382,31 @@ a {
     align-items: center;
     justify-content: center;
 }
+/* Confirmation: a flourish under the tick, not a second headline. */
+.tk-seek__stage--sm {
+    --ring-w: 40px;
+    --ring-h: 70px;
+    --ring-mark: 24px;
+    --ring-reach: 34px;
+    height: 84px;
+    margin: 1.1rem 0 0;
+}
+/* How Serve Works: the centrepiece of the three steps, still restrained. */
+.tk-seek__stage--mid {
+    --ring-w: 62px;
+    --ring-h: 108px;
+    --ring-mark: 36px;
+    --ring-reach: 54px;
+    height: 124px;
+    margin: 0;
+}
 
 /* A rounded rect is enough. A drawn handset at this size reads as clip art. */
 .tk-seek__phone {
     position: relative;
     z-index: 1;
-    width: 54px;
-    height: 94px;
+    width: var(--ring-w);
+    height: var(--ring-h);
     padding: 6px 5px;
     border-radius: 12px;
     background: var(--color-dark);
@@ -2390,8 +2426,8 @@ a {
 }
 .tk-seek__mark {
     display: block;
-    width: 32px;
-    height: 32px;
+    width: var(--ring-mark);
+    height: var(--ring-mark);
 }
 
 /* Sound leaving the handset: an arc each side, twice, staggered. */
@@ -2399,9 +2435,9 @@ a {
     position: absolute;
     top: 50%;
     left: 50%;
-    width: 46px;
-    height: 46px;
-    margin: -23px 0 0 -23px;
+    width: var(--ring-reach);
+    height: var(--ring-reach);
+    margin: calc(var(--ring-reach) / -2) 0 0 calc(var(--ring-reach) / -2);
     border: 2px solid transparent;
     border-radius: 50%;
     opacity: 0;
@@ -3470,6 +3506,14 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
 
 /* The line under How Serve Works. It is the thesis of the whole page, so it
    gets its own rule and its own air rather than being a fourth paragraph. */
+/* Mobile: the handset is the last thing in the flex column, a flourish after
+   the three steps rather than an interruption between them. */
+.steps__ring {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
 .steps__coda {
     margin: 2.5rem auto 0;
     padding-top: 1.75rem;

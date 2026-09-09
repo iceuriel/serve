@@ -1341,8 +1341,9 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
         const confirmCopy = $('confirm-copy');
         if (confirmCopy) {
             confirmCopy.textContent = (p.slot_date && p.slot_time)
-                ? "You're on the schedule for " + slotLabel() + ". We'll reach out shortly to confirm your exact arrival window."
-                : "We'll reach out shortly to confirm your exact arrival window.";
+                ? "You're on the schedule for " + slotLabel() +
+                  ". Serve is coordinating with the vendor network \u2014 we'll reach out shortly to confirm your exact arrival window."
+                : "Serve is coordinating with the vendor network. We'll reach out shortly to confirm your exact arrival window.";
         }
 
         // Only claim the spot once the sheet write comes back confirmed. If it
