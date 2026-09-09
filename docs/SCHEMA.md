@@ -420,6 +420,27 @@ own entry always wins.
 is the vendor's call, not Serve's — that is the §148B line, not a missing
 feature.
 
+### Getting a partner their link (r17)
+
+**A booking is not required and never was.** A token is a pure HMAC of the id, so
+the link exists the moment the `VENDORS` row does, never expires and never
+changes. What was missing until r17 was a way to print one: the Apps Script Run
+button cannot pass arguments, so `vendorUrl("VEN-0002")` had no caller.
+
+In the Apps Script editor, pick **`printVendorLinks`** from the function dropdown
+and Run. It logs every vendor with their status, whether customers can see them,
+and their link. **`printCustomerLinks`** does the same for contacts — kept
+separate because it prints a working credential for every customer you have.
+
+Both are read-only.
+
+This is the onboarding path *and* the sales path: add the row, run it, send the
+link. A row with `status = prospect` and `client_visible = FALSE` has a fully
+working portal that no customer can ever reach — **`status` does not gate the
+portal**, only the token and the row existing do. So a company you are pitching
+can be shown their own portal, with their own name and blurb in it, before they
+have agreed to anything.
+
 ### What a vendor may change about themselves
 
 Editable: `display_name` · `public_description` · `service_area` ·

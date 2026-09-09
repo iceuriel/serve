@@ -1,7 +1,17 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-08  ·  master  ·  r16 — availability decides dispatch
+ * VERSION STAMP:  2026-09-08  ·  master  ·  r17 — portal links on demand
+ *
+ * r17 = PORTAL LINKS ARE MINTED ON DEMAND, not by a booking. A token is a
+ *      pure HMAC of the id, so a link has always existed the moment the row
+ *      did — what was missing was a way to print one. The Run button cannot
+ *      pass arguments, so vendorUrl("VEN-0002") had no caller.
+ *
+ *      printVendorLinks() and printCustomerLinks() are that caller. Two
+ *      functions rather than one: the customer list prints a working
+ *      credential for every customer you have, and that should be a thing
+ *      you chose to do, not a side effect of looking up a partner.
  *
  * r16 = THE SCHEDULE IS THE ASSIGNMENT. The AVAILABILITY row a booking
  *      consumes already knows whose capacity it was, so dispatch is
@@ -855,7 +865,7 @@ function doGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-08 r16" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-08 r17" });
 }
 
 
@@ -4096,6 +4106,104 @@ function findOpenSlot() {
  *   move-out          add_on_rev 0 in the sheet, not 85
  *   replay            duplicate true, and nothing changes anywhere
  */
+/* ---------- portal links, minted on demand ---------- */
+
+/**
+ * Print the portal link for every partner company. RUN THIS FROM THE EDITOR.
+ *
+ * A BOOKING HAS NEVER BEEN REQUIRED. The token is a pure HMAC of the vendor id,
+ * so the link exists the moment the VENDORS row does, never expires and never
+ * changes. Until r17 there was simply no zero-argument entry point to print it
+ * from — the editor's Run button cannot pass arguments.
+ *
+ * This is how a partner is onboarded, and how one is pitched: add the row, run
+ * this, send them the link. A row with `client_visible = FALSE` has a fully
+ * working portal that no customer can ever reach, which is exactly what a
+ * prospect should have — `status` does not gate the portal, only the token and
+ * the row's existence do.
+ *
+ * Read-only. Writes nothing, to any tab.
+ */
+function printVendorLinks() {
+  var sheet = opsBook().getSheetByName(VENDORS_TAB);
+  if (!sheet) { console.log("No " + VENDORS_TAB + " tab in the Ops workbook."); return; }
+
+  var h = sheetHeaders(sheet);
+  var last = sheet.getLastRow();
+  if (last < 2) { console.log(VENDORS_TAB + " has no rows yet."); return; }
+
+  var rows = sheet.getRange(2, 1, last - 1, h.length).getValues();
+  var iId = h.indexOf("vendor_id"),
+      iNm = h.indexOf("display_name"),
+      iSt = h.indexOf("status"),
+      iCv = h.indexOf("client_visible");
+  if (iId === -1) { console.log(VENDORS_TAB + " has no vendor_id column."); return; }
+
+  var out = [];
+  for (var r = 0; r < rows.length; r++) {
+    var id = String(rows[r][iId] || "").trim();
+    if (!id) continue;
+    var name = iNm === -1 ? "" : String(rows[r][iNm] || "").trim();
+    var status = iSt === -1 ? "?" : String(rows[r][iSt] || "(blank)").trim();
+    var seen = iCv !== -1 && truthy(rows[r][iCv]);
+    out.push(
+      id + "  " + (name || "(no display name yet)") + "\n" +
+      "    status " + status + "  ·  " +
+        (seen ? "shown on customer tickets" : "hidden from customers") + "\n" +
+      "    " + vendorUrl(id));
+  }
+
+  console.log(out.length ? out.join("\n\n")
+                         : "No vendor_id values in " + VENDORS_TAB + ".");
+}
+
+/**
+ * Print the portal link for every customer. RUN THIS FROM THE EDITOR.
+ *
+ * Deliberately separate from printVendorLinks: this prints a working credential
+ * for every customer on the sheet, which should be something you chose to do
+ * rather than a side effect of looking up a partner.
+ *
+ * The link is the same one the booking confirmation carries. It does not expire
+ * and does not change, so re-sending it is always safe.
+ *
+ * Read-only, and prints no address, phone or email — a name and a link is all
+ * anyone needs to send somebody their own portal.
+ */
+function printCustomerLinks() {
+  var ss = SPREADSHEET_ID ? SpreadsheetApp.openById(SPREADSHEET_ID)
+                          : SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(LEADS_TAB);
+  if (!sheet) { console.log("No " + LEADS_TAB + " tab."); return; }
+
+  var h = sheetHeaders(sheet);
+  var last = sheet.getLastRow();
+  if (last < 2) { console.log(LEADS_TAB + " has no rows yet."); return; }
+
+  var iCid = h.indexOf("contact_id"), iNm = h.indexOf("name");
+  if (iCid === -1) {
+    console.log(LEADS_TAB + " has no contact_id column — add it and re-run.");
+    return;
+  }
+
+  var rows = sheet.getRange(2, 1, last - 1, h.length).getValues();
+  var out = [], blanks = 0;
+  for (var r = 0; r < rows.length; r++) {
+    var id = String(rows[r][iCid] || "").trim();
+    if (!id) { blanks++; continue; }
+    var name = iNm === -1 ? "" : String(rows[r][iNm] || "").trim();
+    out.push((name || "(no name)") + "\n    " + portalUrl(id));
+  }
+
+  console.log(out.length ? out.join("\n\n") : "No contact_id values yet.");
+  /* A blank contact_id is not an error — it fills itself on that customer's
+     next booking. Saying how many are waiting beats silence. */
+  if (blanks) {
+    console.log("\n" + blanks + " row(s) have no contact_id yet — each gets one " +
+                "automatically on that customer's next booking.");
+  }
+}
+
 function testPayload() {
   const stamp = Date.now();
   const open  = findOpenSlot();

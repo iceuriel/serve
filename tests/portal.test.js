@@ -295,5 +295,50 @@ const fallback = S.ticketBlock('SRV-20260920-AAAAAA', '');
 t('falls back to the per-job link when contact_id is missing',
   fallback.includes('view=client'));
 
+/* ============================================================
+   r17 — customer links printed on demand, not by a booking
+
+   Lives here rather than in vendor-portal.test.js because that harness has
+   no LEADS tab: the same assertions there passed against the string
+   "No LEADS tab.", which is a test that proves nothing.
+   ============================================================ */
+console.log('\n=== r17: printing customer portal links ===');
+
+/* One lead carrying the fields that must never be printed, and one with no
+   contact_id — the normal state until that customer books. */
+const pii = new Array(LEADS_HEADERS.length).fill('');
+pii[LEADS_HEADERS.indexOf('lead_id')]         = 'priya@example.com';
+pii[LEADS_HEADERS.indexOf('name')]            = 'Priya N.';
+pii[LEADS_HEADERS.indexOf('contact_id')]      = 'CON-0042';
+pii[LEADS_HEADERS.indexOf('service_address')] = '77 Marlborough St';
+pii[LEADS_HEADERS.indexOf('phone')]           = '6175559999';
+pii[LEADS_HEADERS.indexOf('email')]           = 'priya@example.com';
+T.tabs.LEADS.appendRow(pii);
+
+const unbooked = new Array(LEADS_HEADERS.length).fill('');
+unbooked[LEADS_HEADERS.indexOf('lead_id')] = 'later@example.com';
+unbooked[LEADS_HEADERS.indexOf('name')]    = 'Not Yet Booked';
+T.tabs.LEADS.appendRow(unbooked);
+
+T.logs.length = 0;
+S.printCustomerLinks();
+const custOut = T.logs.join('\n');
+
+t('the LEADS tab was actually found', !custOut.includes('No LEADS tab'),
+  custOut.slice(0, 80));
+t('a link is printed for a contact', custOut.includes('CON-0042'), custOut.slice(0, 200));
+t('under their name', custOut.includes('Priya N.'));
+t('and the token is exactly portalToken(id)',
+  custOut.includes(S.portalToken('CON-0042')));
+
+/* The link is the credential; nothing else about the person belongs in a log. */
+t('no address is printed', !custOut.includes('77 Marlborough St'));
+t('no phone is printed',   !custOut.includes('6175559999'));
+t('no email is printed',   !custOut.includes('priya@example.com'));
+
+t('a row with no contact_id is counted, not silently dropped',
+  /\d+ row\(s\) have no contact_id/.test(custOut), custOut.slice(-160));
+t('and it is not given a link', !custOut.includes('Not Yet Booked'));
+
 console.log('\n' + (bad ? bad + ' FAILURES' : 'ALL ASSERTIONS PASSED'));
 process.exit(bad ? 1 : 0);

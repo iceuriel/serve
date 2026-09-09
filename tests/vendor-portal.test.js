@@ -300,5 +300,54 @@ t('it names the COMPANY',
 t('and never the individual', !ctJson.includes('Maria'), ctJson.slice(0, 200));
 t('nor the vendor\'s internal phone', !ctJson.includes('617-555-0199'));
 
+/* ============================================================
+   r17 — a link is minted from the row, never from a booking
+
+   This is the onboarding and the sales path: add a VENDORS row for a company
+   that has never worked a job, print their link, and show them their own
+   portal. If this needed a booking first there would be nothing to pitch.
+   ============================================================ */
+console.log('\n=== r17: a partner who has never had a booking ===');
+
+seedVendor('VEN-0003', 'Prospect Cleaning', { status: 'prospect', client_visible: false });
+
+const untouched = JSON.stringify(opsTabs.VENDORS._rows) + JSON.stringify(leadsTabs.JOBS._rows);
+logs.length = 0;
+S.printVendorLinks();
+const printed = logs.join('\n');
+
+t('the prospect is listed', printed.includes('VEN-0003'), printed.slice(0, 120));
+t('under their display name', printed.includes('Prospect Cleaning'));
+t('marked hidden from customers', /VEN-0003[\s\S]*?hidden from customers/.test(printed));
+t('while a live partner is marked shown',
+  /VEN-0001[\s\S]*?shown on customer tickets/.test(printed));
+t('printing writes nothing anywhere',
+  JSON.stringify(opsTabs.VENDORS._rows) + JSON.stringify(leadsTabs.JOBS._rows) === untouched);
+
+/* The whole point: take the printed link and open it. */
+const mintedLine = printed.split('\n').find(l => l.indexOf('/v?id=VEN-0003') !== -1);
+t('a link was printed for them', !!mintedLine, printed.slice(0, 200));
+const mintedTok = mintedLine ? (mintedLine.match(/[&?]t=([a-f0-9]+)/) || [])[1] : 'none';
+
+const fresh = get({ vendor: 'VEN-0003', t: mintedTok });
+t('the printed token opens the portal with zero bookings', fresh.ok === true, fresh.error);
+t('the company tab is fully usable',
+  fresh.company && fresh.company.displayName === 'Prospect Cleaning', fresh.company);
+t('the bookings tab is simply empty, not broken',
+  Array.isArray(fresh.bookings) && fresh.bookings.length === 0, fresh.bookings);
+t('status does not gate the portal — a prospect is not locked out',
+  fresh.ok === true);
+t('but a prospect still cannot open another vendor',
+  get({ vendor: 'VEN-0001', t: mintedTok }).error === 'not_found');
+t('and hiding them from customers held: no client ticket names them',
+  !JSON.stringify(get({ job: 'SRV-20260925-DDDDDD',
+    t: S.ticketToken('SRV-20260925-DDDDDD', 'client'),
+    view: 'client' })).includes('Prospect Cleaning'));
+
+/* The minted link must be the same one a booking would have produced —
+   two ways of deriving it that disagree would be worse than no helper. */
+t('the printed token is exactly vendorToken(id)', mintedTok === S.vendorToken('VEN-0003'),
+  mintedTok);
+
 console.log('\n' + (bad ? bad + ' FAILURES' : 'ALL ASSERTIONS PASSED'));
 process.exit(bad ? 1 : 0);
