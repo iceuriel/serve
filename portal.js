@@ -40,7 +40,12 @@
     fetch(API + '?id=' + encodeURIComponent(id) + '&t=' + encodeURIComponent(token))
         .then(function (r) { return r.json(); })
         .then(function (d) {
-            if (!d || d.ok !== true) {
+            /* view === portal, not merely ok. An older deployment has no
+               portal route, so doGet falls through to the HEALTH CHECK, which
+               answers ok:true — and this page would render that as an empty
+               account rather than saying anything was wrong. The ticket hit
+               the same ordering problem on 2026-09-08. */
+            if (!d || d.ok !== true || d.view !== 'portal') {
                 fail('We could not open that link. It may be mistyped, or it ' +
                      'may have been replaced.');
                 return;
