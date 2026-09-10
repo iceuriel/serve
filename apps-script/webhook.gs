@@ -1,7 +1,35 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-09  ·  master  ·  r19 — the partner's link, in the email
+ * VERSION STAMP:  2026-09-10  ·  master  ·  r20 — the proof the price was ours
+ *
+ * r20 = THE ROW REMEMBERS THAT THE PRICE WAS PROVED. The edge Worker now
+ *      ISSUES prices and signs them (see "SIGNED QUOTES" in src/worker.js);
+ *      it verifies that signature before relaying a booking, and then the
+ *      verdict was thrown away, because quote_meta is a whitelist and
+ *      quote_sig was not on it.
+ *
+ *      Three keys join QUOTE_META_KEYS so the verdict survives: `quote_sig`,
+ *      `quote_scope` and `quote_version`. Together they let the Worker
+ *      re-prove, months later, that the figure in `quoted_price` is the one
+ *      Serve offered for THAT home — which is the gate a payment link has to
+ *      pass before it may charge anybody.
+ *
+ *      quote_scope is stored rather than rebuilt from the row ON PURPOSE.
+ *      `service_type` lands here as "First Clean", not the code the engine
+ *      prices from, and the add-on booleans are not stored at all — only
+ *      their dollar total. Rebuilding through those would drift, and the
+ *      failure would be SILENT: every job quietly unchargeable and nothing
+ *      in a log to say why. The canonical string is one cell and cannot rot.
+ *
+ *      NONE OF THE THREE IS A SECRET. quote_sig is an HMAC output, useless
+ *      without QUOTE_SECRET, which lives only on the Worker. quote_scope is
+ *      beds, baths, floors, ZIP, service, condition, add-ons and frequency —
+ *      the home, never the person. Nothing here identifies a customer.
+ *
+ *      This revision writes no new column and changes no existing behaviour.
+ *      A booking that arrives without a signature — an old tab, a blocked
+ *      request — stores blanks and books exactly as it always has.
  *
  * r19 = THE PARTNER'S LINK RIDES ALONG. Every booking notification now
  *      carries the vendor's own portal link beside the cleaner's job link.
@@ -420,6 +448,26 @@ const QUOTE_META_KEYS = [
      means every submission carries its own consent state with no new JOBS
      column, so the audit trail exists even before LEADS gets its headers. */
   "sms_transactional", "sms_promotional",
+  /* r20 — PROOF THAT THE PRICE CAME FROM US, not from the customer's machine.
+     The Worker signs every quote it issues and verifies the signature before
+     this script ever sees the booking; these three keys are what let it prove
+     the same thing again later, when a payment link wants to know whether
+     `quoted_price` may be charged.
+
+     `quote_scope` is the canonical description of the home the price was
+     quoted for — beds, baths, floors, ZIP, service, condition, add-ons,
+     frequency. It is STORED rather than rebuilt from this row because the row
+     is lossy: service_type is written as "First Clean" rather than the code
+     the engine prices from, and the add-on booleans never land at all. A
+     rebuild would drift and fail silently.
+
+     `quote_version` is the engine the SERVER signed with, which is not
+     necessarily the `pricing_version` the browser reported — that is the whole
+     point of telling drift from tampering. Verification needs the server's.
+
+     All three are blank on an unsigned booking, and blank simply means the
+     price was never authenticated. It does not mean anything is wrong. */
+  "quote_sig", "quote_scope", "quote_version",
 ];
 
 /**
@@ -888,7 +936,7 @@ function doGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-09 r19" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-10 r20" });
 }
 
 

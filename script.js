@@ -551,10 +551,16 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
                                  '. Booking at the price on screen.');
                     return null;
                 }
-                return d.quote_sig;
+                /* All three travel together or not at all. The signature alone
+                   cannot be re-checked later: `scope` is the home it covers,
+                   which a JOBS row cannot losslessly reproduce, and `version`
+                   is the engine the SERVER signed with, which is not
+                   necessarily the one this page is running. */
+                return { sig: d.quote_sig, scope: d.quote_scope,
+                         version: d.pricing_version };
             })
             .catch(() => null)
-            .then(sig => { clearTimeout(timer); return sig; });
+            .then(proof => { clearTimeout(timer); return proof; });
     }
 
     function bedroomsLabel(n) {
@@ -1433,8 +1439,12 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
            blocks: an unreachable or unbound signer resolves null, `quote_sig`
            is simply absent, and the reservation proceeds exactly as it did
            before signatures existed. */
-        signQuote(p).then(sig => {
-            if (sig) p.quote_sig = sig;
+        signQuote(p).then(proof => {
+            if (proof) {
+                p.quote_sig     = proof.sig;
+                p.quote_scope   = proof.scope;
+                p.quote_version = proof.version;
+            }
             return postReservation(p);
         }).then(result => {
             clearTimeout(slowNotice);

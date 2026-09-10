@@ -97,18 +97,59 @@ partners still accept each job: Serve should not hold money for work nobody has
 agreed to do. Auth holds lapse after roughly seven days, so acceptance has to
 happen inside that window — an operating constraint, not yet a built one.
 
+### A HOLE WAS SHIPPED AND CLOSED THE SAME DAY. Read before touching quoteScope.
+
+`quoteScope` encoded the condition as `Number(d.condition)`. **The engine takes
+LABELS there** — `standard`, `heavy` — which it looks up in `PRICING.CONDITION`,
+so that expression was `NaN` on every real booking. Every condition therefore
+signed to the same scope string, and a signature bought for a standard clean
+verified against a heavy one at the standard price. Because the signed path
+short-circuits the audit, this was **strictly weaker than r19 for that one
+case**: the old audit would have recomputed the heavy price, seen the mismatch
+under the same engine version, and refused.
+
+Live in commits `527d3cf`/`5f08a6e` for roughly twenty minutes. No booking was
+made through it. Caught by the scope string printing `NaN` in ordinary test
+output, not by an assertion — which is why there is now one assertion per
+priced input that the scope actually distinguishes two values of it, plus a
+behavioural test that a standard-clean signature is refused on a heavy clean.
+
+The rule: **bind what is sent, and never coerce a priced input to a type it
+does not have.** A coercion that silently collapses two different homes to one
+string is indistinguishable from a working signature.
+
+**Written this session but NOT YET DEPLOYED — webhook.gs r20 and its site half.**
+
+- `apps-script/webhook.gs` → **r20**, awaiting a manual paste. Adds `quote_sig`,
+  `quote_scope` and `quote_version` to `QUOTE_META_KEYS`. Writes no new column
+  and changes no behaviour; a booking without a signature stores blanks.
+- `src/worker.js` — `/api/quote` now echoes `quote_scope`, and `verifyPrice`
+  refuses a booking whose echoed scope does not match the one it derives, so
+  what reaches the sheet is provably the string that was verified.
+- `script.js` — carries all three fields into the booking payload.
+- `docs/SCHEMA.md` — documents the three keys and why scope is stored rather
+  than rebuilt.
+
+**On the ordering rule.** The standing rule is to deploy the script before
+pushing the site, and it exists because the reverse once cost a day of broken
+tickets. It does not bite here, and the reason is worth stating: the site does
+not depend on r20. Under r19 the three new keys are simply dropped, because
+`quote_meta` is a whitelist. So the site half is safe in either order — the only
+consequence of pushing it first is that the fields are not stored yet.
+
 **Remaining, in order.**
 
-1. Set `npx wrangler secret put QUOTE_SECRET`, push, confirm `can_sign: true`,
-   then book a real test reservation and confirm the row still lands.
-2. **webhook.gs r20** — persist `quote_sig` and the authenticated flag. Extra
-   payload keys are dropped today: `quote_meta` is a whitelist, so `quote_sig`
-   currently reaches the sheet and is discarded. Needs `QUOTE_META_KEYS` and a
-   SCHEMA.md update in the same commit. **Deploy the script BEFORE pushing the
-   site.**
+1. Paste r20 into Leads MASTER → Extensions → Apps Script, then push the site
+   half. Confirm the version endpoint reports `2026-09-10 r20`.
+2. A real booking through the live site, watching the Worker log stream for
+   `price authenticated: <submission_id>`. Nothing else proves the browser half
+   works: a `signQuote()` that fails silently books unsigned and looks normal.
+   Then confirm `quote_sig` / `quote_scope` / `quote_version` land in the row.
 3. `/api/checkout` in test mode — takes `job_id` plus the portal token, reads
-   the amount from the JOBS row, refuses any job not signature-verified. Never
-   accepts an amount from the caller.
+   the amount from the JOBS row, re-verifies the stored signature against the
+   stored scope, and refuses any job that fails. Never accepts an amount from
+   the caller. Stripe Checkout Session, `capture_method: manual`, idempotency
+   key on the job id. `STRIPE_SECRET_KEY` (test) is already bound.
 4. Portal Pay button. **The portal, not the ticket** — `/j` is the cleaner's
    surface and the confirmation email sends `/h`. Three places currently state
    in comments that no Stripe integration exists and must change together:

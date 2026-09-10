@@ -533,6 +533,85 @@ console.log('\n=== 7. the failure UI exists and is reachable ===');
     { method: 'POST', body: JSON.stringify(INPUTS) }), QENV);
   t('signing makes no upstream call', calls.filter(c => c.target).length === 0);
 
+  /* ---- the scope travels with the booking, because it cannot be rebuilt ----
+     A JOBS row stores service_type as "First Clean" rather than the code the
+     engine prices from, and never stores the add-on booleans at all. So the
+     canonical string rides along and is persisted verbatim. What matters is
+     that the string reaching the sheet is the one that was VERIFIED, not merely
+     one carrying a valid signature. */
+  t('/api/quote echoes the scope it signed',
+    typeof issued.quote_scope === 'string' && issued.quote_scope.startsWith('q1|'),
+    issued.quote_scope);
+  t('and it is exactly what the verifier derives from the booking',
+    issued.quote_scope === box.quoteScope(JSON.parse(signed({}))), issued.quote_scope);
+
+  const liedScope = await verifyPrice(
+    signed({ quote_scope: 'q1|02186|0|1|1|first_clean|1|0|0|once' }), QENV);
+  t('a scope that does not describe the booking is REFUSED',
+    liedScope.reject === true, liedScope);
+
+  /* An honest client cannot produce a mismatch — it builds both from one frozen
+     payload — so this only fires on a hand-edited one. It must not fire on a
+     booking that simply has no scope, which is every pre-r20 tab. */
+  const noScope = await verifyPrice(signed({ quote_scope: undefined }), QENV);
+  t('a booking with no scope at all still passes',
+    noScope.ok === true && noScope.authenticated === true, noScope);
+
+  /* ---- EVERY PRICED INPUT MUST ACTUALLY MOVE THE SCOPE STRING ----
+     `condition` shipped as Number(d.condition) for one deploy. The engine takes
+     LABELS there — "standard", "heavy" — so that was NaN on every real booking,
+     every condition signed to the same string, and a signature bought for a
+     standard clean verified against a heavy one at the standard price. The
+     signed path short-circuits the audit that used to catch exactly that.
+
+     One assertion per field, so the next input added is covered whether or not
+     anyone remembers to write a test for it. */
+  const VARIANTS = {
+    zip:                ['02116', '02186'],
+    bedrooms:           [2, 5],
+    bathrooms:          [1.5, 3],
+    levels:             [2, 3],
+    service:            ['first_clean', 'move_out'],
+    condition:          ['standard', 'heavy'],
+    addon_fridge:       [false, true],
+    addon_oven:         [false, true],
+    frequency_selected: ['monthly', 'weekly'],
+  };
+  Object.keys(VARIANTS).forEach(field => {
+    const pair = VARIANTS[field];
+    const one = box.quoteScope(Object.assign({}, INPUTS, { [field]: pair[0] }));
+    const two = box.quoteScope(Object.assign({}, INPUTS, { [field]: pair[1] }));
+    t('the scope distinguishes ' + field, one !== two, { one: one, two: two });
+  });
+  const realScope = box.quoteScope(JSON.parse(signed({})));
+  t('and no priced input collapses to NaN', !/NaN/.test(realScope), realScope);
+
+  /* The end of that story, stated as behaviour rather than as string shape:
+     a signature issued for one condition must not verify against another. */
+  const cheapQuote = await (await askQuote({ condition: 'standard' })).json();
+  const swapped = await verifyPrice(JSON.stringify(Object.assign({
+    event_type: 'reservation', submission_id: 'swap-1',
+    quote_price: cheapQuote.price, quote_sig: cheapQuote.quote_sig,
+  }, INPUTS, { condition: 'heavy' })), QENV);
+  t('a standard-clean signature is refused on a heavy clean',
+    swapped.reject === true, swapped);
+
+  /* ---- and the sheet has to actually keep them ----
+     This is the bug r20 exists to fix: quote_meta is a whitelist, so a field
+     the site sends and the sheet has never heard of is dropped in silence. The
+     Worker would verify a price, the row would forget, and nothing would be
+     chargeable for a reason no log line mentions. Assert across the two files
+     rather than trusting that both were remembered. */
+  const gs = fs.readFileSync(path.join(REPO_ROOT, 'apps-script', 'webhook.gs'), 'utf8');
+  const metaKeys = (gs.match(/const QUOTE_META_KEYS = \[([\s\S]*?)\n\];/) || [, ''])[1];
+  ['quote_sig', 'quote_scope', 'quote_version'].forEach(k => {
+    t('webhook.gs persists ' + k, new RegExp('"' + k + '"').test(metaKeys));
+  });
+  const siteSends = fs.readFileSync(path.join(REPO_ROOT, 'script.js'), 'utf8');
+  ['quote_sig', 'quote_scope', 'quote_version'].forEach(k => {
+    t('and the site actually sends ' + k, new RegExp('p\\.' + k + '\\s*=').test(siteSends));
+  });
+
   /* ---- the two field lists that have to agree ---- */
   const site = fs.readFileSync(path.join(REPO_ROOT, 'script.js'), 'utf8');
   const listed = (site.match(/QUOTE_SCOPE_FIELDS\s*=\s*\[([\s\S]*?)\]/) || [, ''])[1]

@@ -880,7 +880,15 @@ function quoteScope(d) {
     Number(d.bathrooms),
     Number(d.levels) || 1,
     String(d.service || d.service_type || ""),
-    Number(d.condition),
+    /* STRING, not Number. `condition` is a LABEL — "standard", "heavy" — that
+       the engine looks up in PRICING.CONDITION, and Number("heavy") is NaN.
+       Coercing it collapsed every condition to the same NaN, so a signature
+       bought for a standard clean verified against a heavy one at the standard
+       price: the signed path short-circuits the audit that used to catch that.
+       Shipped that way for one deploy on 2026-09-10 and caught by the scope
+       string printing NaN in test output. Bind what is SENT; never coerce a
+       priced input to a type it does not have. */
+    String(d.condition),
     d.addon_fridge === true ? "1" : "0",
     d.addon_oven === true ? "1" : "0",
     String(d.frequency_selected || "once"),
@@ -1007,6 +1015,14 @@ async function handleQuote(request, env) {
     price,
     pricing_version: PRICING_VERSION,
     quote_sig: await signQuote(secret, d, price, exp),
+    /* Echoed back so the booking can CARRY it to the sheet. Re-deriving this
+       from a JOBS row later does not work: service_type is stored as "First
+       Clean" rather than the code the engine prices from, and the add-on
+       booleans are never stored at all. A rebuild would drift and fail
+       silently — every job quietly unchargeable, nothing in a log to say why.
+       verifyPrice refuses any booking whose echoed scope does not match the
+       one it derives, so what reaches the sheet is provably the verified one. */
+    quote_scope: quoteScope(d),
     expires_at: exp,
   });
 }
@@ -1058,6 +1074,15 @@ async function verifyPrice(rawBody, env) {
        our own signature needs no engine, so this keeps working on the day the
        engine fails to bundle — the one failure that has actually happened. */
     if (d.quote_sig) {
+      /* The echoed scope is what gets PERSISTED and re-checked at charge time,
+         so it has to be the same string this Worker just verified against — not
+         merely a string that happens to carry a valid signature. The browser
+         builds both from one frozen payload, so a mismatch is not something an
+         honest client can produce. */
+      if (d.quote_scope && d.quote_scope !== quoteScope(d)) {
+        return { reject: true, note: "quote scope does not describe this booking",
+                 claimed: claimed, submission_id: d.submission_id || null };
+      }
       const v = await checkQuoteSig(env && env.QUOTE_SECRET, d, claimed);
       if (v.ok) return { ok: true, authenticated: true,
                          submission_id: d.submission_id || null };

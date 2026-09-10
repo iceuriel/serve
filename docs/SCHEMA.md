@@ -72,7 +72,45 @@ narrative.
 | 33 | `address` | WH | Street address snapshot. Real column, not `quote_meta` — ops sorts and filters on it. |
 | 34 | `unit` | WH | Unit/apt. |
 | 35 | `zip` | WH | ZIP. |
-| 36 | `quote_meta` | WH | JSON blob: secondary quote data only (`original_price`, `discount_applied`, `steady_state_price`, the three recurring prices, `zip_tier`, `page_path`, `utm_*`, `unit_label`, `src`, `submitted_at`, the two SMS consent flags, plus `zone` / `park_tier` / `levels` — see below). |
+| 36 | `quote_meta` | WH | JSON blob: secondary quote data only (`original_price`, `discount_applied`, `steady_state_price`, the three recurring prices, `zip_tier`, `page_path`, `utm_*`, `unit_label`, `src`, `submitted_at`, the two SMS consent flags, plus `zone` / `park_tier` / `levels`, and `quote_sig` / `quote_scope` / `quote_version` — see below). |
+
+### `quote_sig`, `quote_scope` and `quote_version` in `quote_meta` — added 2026-09-10 (webhook.gs r20)
+
+**What they are for:** proving, later, that the number in `quoted_price` is one
+Serve actually offered for *that* home. The edge Worker issues prices and signs
+them (`POST /api/quote`) and verifies the signature before a booking is relayed;
+these three keys are what let it prove the same thing again months afterwards —
+which is the gate a payment link must pass before it may charge anyone.
+
+| key | what it holds |
+|---|---|
+| `quote_sig` | `q1.<unix expiry>.<64 hex>` — HMAC-SHA256 over scope + price + engine version + expiry, keyed on the Worker's `QUOTE_SECRET`. |
+| `quote_scope` | The canonical home the price was quoted for: `q1\|zip\|beds\|baths\|levels\|service\|condition\|fridge\|oven\|frequency`. |
+| `quote_version` | The engine the **server** signed with. |
+
+**Three things about these that are easy to get wrong:**
+
+**`quote_scope` is stored, not rebuilt.** This row cannot losslessly reproduce
+it: `service_type` is written as `First Clean` rather than the code the engine
+prices from, and the add-on booleans are never stored at all — only `add_on_rev`,
+their dollar total. A rebuild would drift, and it would fail **silently**: every
+job quietly unchargeable with nothing in a log to say why.
+
+**`quote_version` is the server's, not `pricing_version`.** `pricing_version` is
+what the *browser* reported, and telling those two apart is the entire mechanism
+for distinguishing a mid-session deploy from a tampered payload. Verification
+needs the one the signature was made with.
+
+**None of the three is a secret.** `quote_sig` is an HMAC output and is useless
+without `QUOTE_SECRET`, which exists only on the Worker and is not
+`TICKET_SECRET`. `quote_scope` describes the home — never the person. Nothing
+here identifies a customer, and none of it may be shown to one.
+
+**Blank is normal and is not an error.** A booking arriving without a signature —
+a tab older than the deploy, a blocked request, an expired quote — stores blanks
+and books exactly as it always has. Blank means *the price was never
+authenticated*, which is a reason to have a human look before charging, not a
+reason to doubt the booking.
 
 ### `geo_factor`, `park_tier` and `levels` in `quote_meta` — added 2026-08-20
 
