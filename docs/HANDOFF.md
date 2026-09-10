@@ -15,7 +15,7 @@ except where a later section supersedes them.
 
 ## Current work — 2026-09-10, Codex: room photos and shared updates
 
-In progress. Founder authorized private Cloudflare R2 room photos, shown in
+LIVE from commit `4cdb615`. Founder authorized private Cloudflare R2 room photos, shown in
 customer and partner booking slips, plus automatic refresh of all shared portal
 information. Sheets remains the record for booking/photo metadata. Preserve the
 concurrent Stripe work in worker.js, portal.js, style.css and its tests.
@@ -32,8 +32,22 @@ America placement, Public Access Disabled verified. Existing Apps Script source
 was backed up and matched HEAD r20 exactly. r21 was saved, read back to verify
 the source, and deployed to the EXISTING endpoint; live health reports r21.
 Matching PHOTO_BRIDGE_SECRET was saved in Script Properties and as an encrypted
-Cloudflare runtime secret. Next: publish and verify the isolated photo/site
-release, preserving the concurrent payment work in the working tree.
+Cloudflare runtime secret. The isolated photo/site release was committed and
+pushed; existing Workers Builds published it. Production health reports
+`can_price`, `can_sign`, and `can_store_photos` true. All ten changed public
+assets/pages were compared with the tested release and matched exactly. A live
+invalid-credential image READ returned not_found with no-store/private headers.
+Dashboard confirms BOOKING_PHOTOS binds the private serve-booking-photos bucket.
+All 26 tests passed against the isolated release and the build staged 70 public
+files with no private files. No production booking or image was written for tests.
+
+Live upload/camera/delete behavior has not been exercised on a real booking;
+the synthetic browser and in-memory integration checks cover those paths.
+Automatic approval review rejected a live cleanup probe because cleanup can
+alter production photo records; it was not run or bypassed. Read-only production
+checks were used instead. Daily cleanup is configured by the deployed Worker.
+The temporary local setup server was stopped and its secret file removed.
+Concurrent Stripe, continuity-file, and logo changes remain uncommitted in Code.
 
 ## Session 2026-09-10 — signed quotes, step 1 of Stripe (Claude Code)
 
