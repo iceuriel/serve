@@ -489,6 +489,41 @@ t('and so does the slot-booked variant script.js writes',
   (SCRIPT.match(/Serve is coordinating with the vendor network/g) || []).length === 2,
   (SCRIPT.match(/Serve is coordinating with the vendor network/g) || []).length);
 
+/* ---------- 7c. After you book matches the network model --------------- */
+console.log('\n=== 7c. After you book: the company, never the person ===');
+
+const aStart = INDEX.indexOf('id="after-you-book"');
+const after  = INDEX.slice(aStart, INDEX.indexOf('</section>', aStart));
+
+/* THE ONE THAT MATTERS. This section used to promise "a text with your window
+   and your cleaner's name", which contradicts the §148B position the whole
+   system is built on: Serve introduces a COMPANY, never a named individual.
+   The client ticket has never named one; the homepage was promising it. */
+t('it never promises to name an individual',
+  !/cleaner\u2019s name|cleaner\x27s name|your cleaner\b/.test(after),
+  (after.match(/cleaner[^.<]*/g) || []).slice(0, 3));
+t('it names the company instead',
+  /company handling the visit/.test(after));
+
+/* The portal is the surface the confirmation actually sends them to, so the
+   page that explains what happens next has to mention it. */
+t('the portal is explained', /portal/i.test(after));
+t('and described as permanent', /link that never changes/.test(after));
+
+/* Door codes are write-only in the portal. Telling people to text them here
+   is the same promise the portal makes when they try to type one. */
+t('door codes are told to be texted, not typed',
+  /codes are the one thing we ask you to text/.test(after));
+
+t('still six bubbles, so the grid stays two clean rows',
+  (after.match(/svmA-bubble/g) || []).length === 6,
+  (after.match(/svmA-bubble/g) || []).length);
+
+/* The vendor relationship is the product now, and this section is where it is
+   spelled out for someone deciding whether to book. */
+t('the network is described as vendors Serve coordinates',
+  /network of trusted Boston vendors/.test(after));
+
 /* ---------- 8. teasers are placed where they were asked for ---------- */
 console.log('\n=== 8. teaser placement ===');
 const iQuote  = INDEX.indexOf('id="quote"');
