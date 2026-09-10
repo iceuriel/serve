@@ -317,23 +317,37 @@ console.log('\n=== 7. the failure UI exists and is reachable ===');
     frequency_selected: 'monthly', levels: 2, pricing_version: VERSION,
     quote_price: honest, submission_id: 'verify-1' }, o));
 
-  t('an honest booking passes', verifyPrice(body({})).ok === true, verifyPrice(body({})));
+  /* Every case below is UNSIGNED — no quote_sig in the payload — so all of it
+     exercises the audit exactly as it ran before signatures existed. That is
+     the point: adding the strong path must not have moved the lenient floor
+     underneath it, because the floor is what keeps real bookings alive. */
+  const SECRET = 'test-quote-secret-not-a-real-key';
+  const QENV = { QUOTE_SECRET: SECRET };
+  const vp = (b, e) => verifyPrice(b, e === undefined ? QENV : e);
 
-  const cheap = verifyPrice(body({ quote_price: 1 }));
+  t('an honest booking passes', (await vp(body({}))).ok === true, await vp(body({})));
+
+  const cheap = await vp(body({ quote_price: 1 }));
   t('a payload edited down to $1 is REFUSED', cheap.reject === true, cheap);
-  const dear  = verifyPrice(body({ quote_price: 9999 }));
+  const dear  = await vp(body({ quote_price: 9999 }));
   t('a payload edited up is refused too', dear.reject === true, dear);
 
-  const drift = verifyPrice(body({ pricing_version: '2026-07-20', quote_price: 199 }));
+  const drift = await vp(body({ pricing_version: '2026-07-20', quote_price: 199 }));
   t('an older engine is honoured, not refused', !drift.reject && !!drift.note, drift);
-  const noVer = verifyPrice(body({ pricing_version: undefined, quote_price: 199 }));
+  const noVer = await vp(body({ pricing_version: undefined, quote_price: 199 }));
   t('a payload with no version is honoured', !noVer.reject, noVer);
 
   /* A guard on the booking path must never eat a booking through its own bug. */
-  t('a non-reservation is skipped',  !!verifyPrice(body({ event_type: 'quote_emailed' })).skipped);
-  t('unparseable JSON is skipped',   !!verifyPrice('{not json').skipped);
-  t('a missing zip is skipped',      !!verifyPrice(body({ zip: undefined })).skipped);
-  t('a missing price is skipped',    !!verifyPrice(body({ quote_price: undefined })).skipped);
+  t('a non-reservation is skipped',  !!(await vp(body({ event_type: 'quote_emailed' }))).skipped);
+  t('unparseable JSON is skipped',   !!(await vp('{not json')).skipped);
+  t('a missing zip is skipped',      !!(await vp(body({ zip: undefined }))).skipped);
+  t('a missing price is skipped',    !!(await vp(body({ quote_price: undefined }))).skipped);
+
+  /* An honest booking is only ever `ok`. Nothing on the unsigned path may
+     claim `authenticated`, because that flag is what will later unlock a
+     charge — and the unsigned path is precisely the one that can be lied to. */
+  t('an unsigned booking is NOT authenticated',
+    (await vp(body({}))).authenticated !== true, await vp(body({})));
 
   /* THE GEO WIRE. serveGeo reads a global in the browser and there is no global
      in a bundle, so the Worker has to pass its own lookup in. If that ever
@@ -380,6 +394,141 @@ console.log('\n=== 7. the failure UI exists and is reachable ===');
     /if \(!CAN_PRICE\) return \{ skipped:/.test(SRC));
   t('no second copy of the price formula in the worker',
     !/PER_BEDROOM|PER_BATHROOM|WORK_RATE\s*=/.test(SRC));
+}
+
+/* ============================================================
+   Signed quotes — the server issues the price, /api/quote.
+   ------------------------------------------------------------
+   The audit above re-derives a number the browser sent. That is enough to keep
+   a spreadsheet honest and NOT enough to charge a card: five payload shapes
+   relay a $1 booking past it, the cheapest being a `pricing_version` nobody has
+   ever deployed. Each one is a deliberate fail-open, and each one is fine right
+   up until the moment that figure selects an amount of money.
+
+   So the price is also ISSUED here and signed. These tests care about one
+   question above all others: on the SIGNED path, does every bypass that works
+   against the audit stop working? */
+{
+  console.log('\n=== signed quotes ===');
+  const SECRET = 'test-quote-secret-not-a-real-key';
+  const QENV   = Object.assign({}, ENV, { QUOTE_SECRET: SECRET });
+  const VERSION = engineExports.PRICING_VERSION;
+
+  const { worker, box } = loadWorker(async () => new Response('{"status":"ok"}'));
+  const verifyPrice = box.verifyPrice;
+
+  /* Exactly what the site posts — see QUOTE_SCOPE_FIELDS in script.js. */
+  const INPUTS = { zip: '02116', bedrooms: 2, bathrooms: 1.5, levels: 2,
+                   service: 'first_clean', condition: 'heavy',
+                   addon_fridge: false, addon_oven: false,
+                   frequency_selected: 'monthly' };
+
+  const askQuote = (over, env) => worker.fetch(new Request(
+    'https://servecleaning.com/api/quote',
+    { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(Object.assign({}, INPUTS, over)) }), env || QENV);
+
+  const issued = await (await askQuote({})).json();
+  const honest = engineExports.computeQuote(Object.assign({}, INPUTS, {
+    addonFridge: false, addonOven: false, frequency: 'monthly',
+    geo: engineExports.serveGeo('02116', engineExports.lookupGeo) })).displayPrice;
+
+  t('/api/quote prices a home', issued.ok === true && issued.price === honest,
+    { got: issued.price, engine: honest });
+  t('and signs it', typeof issued.quote_sig === 'string' && issued.quote_sig.length > 0);
+  t('the signature is the documented format', /^q1\.\d+\.[0-9a-f]{64}$/.test(issued.quote_sig || ''),
+    issued.quote_sig);
+  t('and it stamps the engine that priced it', issued.pricing_version === VERSION);
+
+  /* A booking carrying that signature, exactly as the site would send it. */
+  const signed = o => JSON.stringify(Object.assign({
+    event_type: 'reservation', pricing_version: VERSION, submission_id: 'sig-1',
+    quote_price: issued.price, quote_sig: issued.quote_sig }, INPUTS, o));
+
+  const good = await verifyPrice(signed({}), QENV);
+  t('a signed booking passes', good.ok === true, good);
+  t('and is marked AUTHENTICATED — the flag a charge may key on',
+    good.authenticated === true, good);
+
+  /* ---- the five bypasses, re-run against the signed path ---- */
+  const tampered = async (label, over) => {
+    const r = await verifyPrice(signed(over), QENV);
+    t(label, r.reject === true, r);
+  };
+  await tampered('$1 under a valid signature is REFUSED', { quote_price: 1 });
+  await tampered('$1 with an invented version is refused now',
+    { quote_price: 1, pricing_version: '9999-01-01' });
+  await tampered('$1 with the version deleted is refused now',
+    { quote_price: 1, pricing_version: undefined });
+  await tampered('$1 with the version blanked is refused now',
+    { quote_price: 1, pricing_version: '' });
+  await tampered('$1 with the zip deleted is refused now', { quote_price: 1, zip: undefined });
+
+  /* The signature covers the HOME, not just the number. Buying a studio quote
+     and booking a five-bedroom on it is the same attack wearing a hat. */
+  await tampered('editing bedrooms under a valid signature is refused', { bedrooms: 5 });
+  await tampered('editing the zip to a cheaper tier is refused', { zip: '02186' });
+  await tampered('a forged signature is refused',
+    { quote_sig: 'q1.' + (Math.floor(Date.now() / 1000) + 600) + '.' + 'a'.repeat(64) });
+  await tampered('a malformed signature is refused', { quote_sig: 'not-a-token' });
+
+  /* ---- and the fail-open floor, which must still be exactly where it was ---- */
+  const expSig = await box.signQuote(SECRET, INPUTS, issued.price,
+                                     Math.floor(Date.now() / 1000) - 60);
+  const stale = await verifyPrice(signed({ quote_sig: expSig }), QENV);
+  t('an EXPIRED signature is not treated as an attack',
+    !stale.reject && stale.ok === true, stale);
+  t('but an expired one is not authenticated either', stale.authenticated !== true, stale);
+
+  const staleCheap = await verifyPrice(
+    signed({ quote_sig: expSig, quote_price: 1 }), QENV);
+  t('an expired signature drops to the audit, which still catches $1',
+    staleCheap.reject === true, staleCheap);
+
+  const unbound = await verifyPrice(signed({}), ENV);
+  t('with no QUOTE_SECRET bound, a signed booking still books',
+    !unbound.reject, unbound);
+  t('and is emphatically not authenticated', unbound.authenticated !== true, unbound);
+
+  /* /api/quote is on the booking path. It may fail; it may not take the form
+     down with it. Every one of these is a 200 the browser can shrug off. */
+  const noZip = await askQuote({ zip: undefined });
+  t('a quote with no zip answers 200, not an error',
+    noZip.status === 200 && (await noZip.json()).ok === false, noZip.status);
+  const unsigned = await askQuote({}, ENV);
+  t('with no secret bound it still returns a price, unsigned',
+    (await unsigned.clone().json()).ok === true &&
+    (await unsigned.json()).quote_sig === null);
+  const junk = await worker.fetch(new Request('https://servecleaning.com/api/quote',
+    { method: 'POST', body: '{not json' }), QENV);
+  t('unparseable input is a 400, never a 500', junk.status === 400, junk.status);
+  const wrongVerb = await worker.fetch(new Request('https://servecleaning.com/api/quote',
+    { method: 'GET' }), QENV);
+  t('GET is refused', wrongVerb.status === 405, wrongVerb.status);
+
+  /* THE SIGNER NEVER TALKS TO GOOGLE. It is pure computation at the edge; a
+     quote that made an upstream call would put Apps Script's latency and its
+     quota on the path of every reservation. */
+  const { worker: w2, calls } = loadWorker(async () => new Response('{}'));
+  await w2.fetch(new Request('https://servecleaning.com/api/quote',
+    { method: 'POST', body: JSON.stringify(INPUTS) }), QENV);
+  t('signing makes no upstream call', calls.filter(c => c.target).length === 0);
+
+  /* ---- the two field lists that have to agree ---- */
+  const site = fs.readFileSync(path.join(REPO_ROOT, 'script.js'), 'utf8');
+  const listed = (site.match(/QUOTE_SCOPE_FIELDS\s*=\s*\[([\s\S]*?)\]/) || [, ''])[1]
+    .split(',').map(s => s.trim().replace(/^'|'$/g, '')).filter(Boolean);
+  const scopeBody = (SRC.match(/function quoteScope\(d\) \{([\s\S]*?)\n\}/) || [, ''])[1];
+  const read = [...new Set([...scopeBody.matchAll(/\bd\.([a-z_]+)/g)].map(m => m[1]))];
+  /* service_type is an alias the booking payload also carries; the site sends
+     `service`, and quoteScope falls back to it only for older callers. */
+  const missing = read.filter(f => f !== 'service_type' && !listed.includes(f));
+  t('the site posts every field the signature covers', missing.length === 0, missing);
+
+  /* PII HAS NO BUSINESS HERE. Signing a price needs the home, not the person,
+     and this endpoint is one more place a name could end up in a log line. */
+  const personal = listed.filter(f => /name|email|phone|address|unit|notes/.test(f));
+  t('and posts nothing personal to do it', personal.length === 0, personal);
 }
 
 /* ============================================================

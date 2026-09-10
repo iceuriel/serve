@@ -265,6 +265,22 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
          { ok: true, slots: [ { date: "2026-08-07", time: "12:00 PM", open: 1 }, … ] } */
     const AVAILABILITY_SOURCE_URL = '/api/slots';
 
+    /* Signed quote -> src/worker.js handleQuote.
+       Response shape: { ok: true, price, pricing_version, quote_sig, expires_at }
+
+       WHY THE CALCULATOR STILL PRICES LOCALLY. This is not the price the
+       customer watches while they set bedrooms and bathrooms — that has to be
+       instant, and computeQuote is right here. This is called ONCE, at reserve,
+       to have the server put its name to the final figure. The signature is
+       what lets anything downstream charge a card against that figure without
+       trusting a number that spent the last ten minutes in a browser.
+
+       Its failure mode is silence: no signature attached, the booking goes
+       through on exactly the terms it did before this existed, and the job is
+       simply not auto-chargeable. Nothing here may ever block a reservation. */
+    const QUOTE_SIGN_URL = '/api/quote';
+    const QUOTE_SIGN_TIMEOUT_MS = 4000;
+
     /* Hard caps. The availability fetch must never strand a customer on
        "Loading times…" with no way to submit, and the reservation POST must
        never leave them staring at "Reserving…". */
@@ -487,6 +503,58 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
             submitted_at:       now,
             submission_id:      newSubmissionId(),
         };
+    }
+
+    /* Exactly the fields the Worker's quoteScope() reads — and deliberately no
+       more. No name, no address, no phone: signing a price needs the home, not
+       the person, and this endpoint has no business seeing the customer.
+
+       Adding a priced input means adding it BOTH here and in quoteScope(). Miss
+       one and the two sides derive different strings, the signature does not
+       verify, and the booking falls back to unsigned. That is the safe way for
+       this to break, and the test suite catches it. */
+    const QUOTE_SCOPE_FIELDS = ['zip', 'bedrooms', 'bathrooms', 'levels', 'service',
+                                'condition', 'addon_fridge', 'addon_oven',
+                                'frequency_selected'];
+
+    /**
+     * Ask the server to price this booking and put its name to the answer.
+     *
+     * Resolves to a signature, or to null — and null is an ordinary outcome,
+     * not an error. One same-origin edge round trip on a path already budgeted
+     * for fifteen seconds.
+     *
+     * THE SIGNATURE IS ATTACHED ONLY WHEN THE SERVER AGREES WITH THE NUMBER ON
+     * SCREEN. When the two disagree — a deploy landed while this tab sat open —
+     * the customer still pays what they were shown, because a quote that moves
+     * after the fact is the most damaging thing this system could do to
+     * somebody. The booking goes through unsigned and an operator settles it.
+     */
+    function signQuote(p) {
+        const ctrl  = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        const timer = setTimeout(() => { if (ctrl) ctrl.abort(); }, QUOTE_SIGN_TIMEOUT_MS);
+        const body  = {};
+        QUOTE_SCOPE_FIELDS.forEach(k => { body[k] = p[k]; });
+
+        return fetch(QUOTE_SIGN_URL, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify(body),
+            signal:  ctrl ? ctrl.signal : undefined,
+        })
+            .then(r => (r.ok ? r.json() : null))
+            .then(d => {
+                if (!d || !d.ok || !d.quote_sig) return null;
+                if (Number(d.price) !== Number(p.quote_price)) {
+                    console.warn('Quote signature declined — server $' + d.price +
+                                 ' vs shown $' + p.quote_price +
+                                 '. Booking at the price on screen.');
+                    return null;
+                }
+                return d.quote_sig;
+            })
+            .catch(() => null)
+            .then(sig => { clearTimeout(timer); return sig; });
     }
 
     function bedroomsLabel(n) {
@@ -1361,7 +1429,14 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
 
            Now the endpoint is same-origin a genuine failure means something is
            actually broken, so saying so is both honest and rare. */
-        postReservation(p).then(result => {
+        /* Signature first, then the booking. signQuote never rejects and never
+           blocks: an unreachable or unbound signer resolves null, `quote_sig`
+           is simply absent, and the reservation proceeds exactly as it did
+           before signatures existed. */
+        signQuote(p).then(sig => {
+            if (sig) p.quote_sig = sig;
+            return postReservation(p);
+        }).then(result => {
             clearTimeout(slowNotice);
             if (result.confirmed) {
                 setView('confirmed');

@@ -36,10 +36,25 @@
 
   // SECRETS ARE NOT LISTED HERE, AND MUST NOT BE.
   //
-  // The Worker expects ONE provider key, set as a Cloudflare SECRET rather
-  // than as a var:
+  // The Worker expects TWO, both set as Cloudflare SECRETS rather than vars:
   //
   //     npx wrangler secret put GEOAPIFY_KEY     // /api/address
+  //     npx wrangler secret put QUOTE_SECRET     // /api/quote
+  //
+  // QUOTE_SECRET signs the price the server issues, so that a figure which has
+  // been sitting in a browser can be proved to have come from here before
+  // anything charges a card against it. See "SIGNED QUOTES" in src/worker.js.
+  //
+  // It is NOT the Apps Script TICKET_SECRET and must not be set to the same
+  // value. That key mints the four ticket audiences, and the rule there is that
+  // none of them opens another; a quote signature is a fifth audience and gets
+  // its own key so that leaking one can never be worked back into a portal
+  // link. Any long random string — `openssl rand -hex 32`.
+  //
+  // Unbound, the site still works and still books: quotes go out unsigned and
+  // /api/health reports `can_sign: false`. What it cannot do is authenticate a
+  // price, so nothing becomes chargeable without a human. Check can_sign after
+  // any change to the Worker's secrets.
   //
   // RENTCAST_KEY IS NO LONGER READ, as of 2026-09-08. /api/property was
   // deleted: measured against 15 real Boston condo addresses it matched the

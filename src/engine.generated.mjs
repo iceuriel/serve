@@ -506,6 +506,14 @@ const ZIP_TIERS = {
         "02119","02120","02121","02122","02124","02125","02126","02127","02128",
         "02129","02130","02131","02132","02134","02135","02136","02163","02199",
         "02210","02215",
+        // 02117 is a PO-BOX ZIP — nobody lives in it, and it is here anyway.
+        // Geoapify returns it for real Back Bay addresses (37 Appleton St), and
+        // some residents give it as their mailing ZIP. Either way the person is
+        // in Boston, and the rule at the top of this block applies: a missing ZIP
+        // is a lost lead. It has no serve-geo-data.js entry and takes NEUTRAL_GEO
+        // — correct rather than lazy, since a ZIP with no residents has no homes
+        // to have measured. Alias it to 02116 if that ever looks under-priced.
+        "02117",
         "02138","02139","02140","02141","02142",     // Cambridge
         "02143","02144","02145",                     // Somerville
         "02445","02446","02447",                     // Brookline

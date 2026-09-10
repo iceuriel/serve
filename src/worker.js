@@ -100,6 +100,7 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === "/api/submit") return handleSubmit(request, env);
+    if (url.pathname === "/api/quote")  return handleQuote(request, env);
     if (url.pathname === "/api/slots")  return handleSlots(request, env);
     if (url.pathname === "/api/job")    return handleJob(request, env);
     if (url.pathname === "/api/address")  return handleAddressSuggest(request, env);
@@ -136,7 +137,7 @@ async function handleSubmit(request, env) {
   }
 
   /* Re-derive the price before relaying it. See verifyPrice(). */
-  const audit = verifyPrice(body);
+  const audit = await verifyPrice(body, env);
   if (audit.reject) {
     console.error("PRICE REJECTED " + JSON.stringify(audit));
     return json({ status: "error", error: "price_mismatch" }, 409);
@@ -459,6 +460,10 @@ function handleHealth(env) {
     /* Whether the engine survived bundling. False here means every geo-mapped
        ZIP is pricing as unmapped — the 2026-09-02 outage, made visible. */
     can_price: CAN_PRICE,
+    /* Whether QUOTE_SECRET is bound. False means quotes go out unsigned and
+       nothing books through the authenticated path — the site looks perfectly
+       healthy either way, which is exactly why it is reported here. */
+    can_sign: !!(env && env.QUOTE_SECRET),
     bindings: names,
   });
 }
@@ -807,6 +812,197 @@ function numOrNull(v) { const n = Number(v); return isFinite(n) && n > 0 ? n : n
 
 
 /* ============================================================
+   SIGNED QUOTES  —  POST /api/quote
+   ============================================================
+
+   THE PRICE STOPS BEING A CLAIM AND BECOMES SOMETHING WE ISSUED.
+
+   verifyPrice below re-derives the browser's arithmetic and refuses a payload
+   that disagrees. That is an audit, and an audit has to fail open — see the
+   long note there. Five separate payload shapes therefore relay a $1 booking
+   today, the cheapest being to send a `pricing_version` nobody has heard of.
+   All five are acceptable on a lead form, where the worst case is a wrong
+   number in a spreadsheet an operator reads. None is acceptable once that
+   number selects an amount to charge a card.
+
+   So the server also ISSUES prices. The browser posts the inputs, this Worker
+   runs the same engine and hands back the price together with an HMAC over
+   (inputs, price, engine version, expiry). At submit the browser returns the
+   signature, and verifying it proves the figure came from here — no
+   arithmetic, no version negotiation, nothing the customer's machine can move.
+
+   WHY THIS DOES NOT SIMPLY REPLACE THE AUDIT. A signature can be absent for
+   entirely innocent reasons: a tab opened before this deployed, a blocked
+   request, an engine that could not price. Requiring one would drop those
+   bookings, which is the trade the audit exists to refuse to make. So an
+   unsigned payload still books, on exactly the terms it books on today.
+
+   The gate that matters is downstream instead: a job whose price was never
+   signature-verified is not chargeable without a human. That is the whole
+   design in one line — LENIENT ABOUT BOOKING, STRICT ABOUT MONEY.
+
+   THE SECRET IS THIS WORKER'S OWN. The four ticket audiences are minted in
+   Apps Script under TICKET_SECRET and none of them opens another; this is a
+   fifth audience under a SEPARATE key, so that a quote signature leaking can
+   never be worked backwards into a portal link.
+
+       npx wrangler secret put QUOTE_SECRET
+
+   Unbound, /api/quote answers with a price and no signature, and everything
+   downstream behaves exactly as it did before signatures existed. */
+
+const QUOTE_TTL_S = 60 * 60 * 2;
+
+/**
+ * The exact string the signature covers.
+ *
+ * ISSUING AND VERIFYING BOTH CALL THIS, on their own request bodies, which is
+ * the only reason the two can be trusted to agree. An inlined second copy that
+ * read one field differently would produce signatures that never verify — or,
+ * far worse, signatures that verify while covering less than they appear to.
+ * Add a priced input here and to computeQuote's arguments in the same edit.
+ */
+function quoteScope(d) {
+  return [
+    "q1",
+    zipN(d.zip),
+    Number(d.bedrooms),
+    Number(d.bathrooms),
+    Number(d.levels) || 1,
+    String(d.service || d.service_type || ""),
+    Number(d.condition),
+    d.addon_fridge === true ? "1" : "0",
+    d.addon_oven === true ? "1" : "0",
+    String(d.frequency_selected || "once"),
+  ].join("|");
+}
+
+/** The engine call, written once so /api/quote and the audit cannot diverge. */
+function priceFrom(d) {
+  return computeQuote({
+    bedrooms:    Number(d.bedrooms),
+    bathrooms:   Number(d.bathrooms),
+    service:     d.service || d.service_type,
+    condition:   d.condition,
+    addonFridge: d.addon_fridge === true,
+    addonOven:   d.addon_oven === true,
+    zip:         String(d.zip),
+    frequency:   d.frequency_selected || "once",
+    levels:      Number(d.levels) || 1,
+    /* geo passed explicitly: computeQuote's internal lookup reads a global that
+       does not exist in a bundle. See serveGeo() in pricing-engine.js. */
+    geo:         serveGeo(String(d.zip), lookupGeo),
+  });
+}
+
+async function hmac(secret, message) {
+  const key = await crypto.subtle.importKey(
+    "raw", new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message));
+  /* Hex rather than base64url, which is 21 characters longer and worth it: hex
+     needs nothing but ECMAScript, while btoa is a host global. This project has
+     already lost an hour of live bookings to something that existed in the
+     browser and not in the bundle, and the token rides in a JSON body where its
+     length buys us nothing. It is URL-safe as a side effect. */
+  return [...new Uint8Array(sig)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** `q1.<unix expiry>.<signature>` — self-describing, so a format change is visible. */
+async function signQuote(secret, d, price, exp) {
+  const sig = await hmac(secret, ["q1", quoteScope(d), price, PRICING_VERSION, exp].join("|"));
+  return "q1." + exp + "." + sig;
+}
+
+/**
+ * Three outcomes, deliberately, and they are not interchangeable:
+ *
+ *   ok        this price came from us, for these inputs
+ *   skipped   we are not in a position to judge  -> fall through to the audit
+ *   note      the signature is wrong             -> refuse
+ *
+ * EXPIRY COUNTS AS "SKIPPED", NOT AS TAMPERING. A stale token means a slow
+ * afternoon, not an attack, and rejecting it would fail a real booking. It
+ * drops to the unsigned path, which is where such a booking would have been
+ * anyway — and stays unchargeable without a human, which is the point.
+ */
+async function checkQuoteSig(secret, d, claimed) {
+  if (!secret) return { skipped: "QUOTE_SECRET not bound" };
+
+  const parts = String(d.quote_sig).split(".");
+  if (parts.length !== 3 || parts[0] !== "q1") return { note: "malformed quote signature" };
+
+  const exp = Number(parts[1]);
+  if (!isFinite(exp)) return { note: "malformed quote expiry" };
+  if (exp * 1000 < Date.now()) return { skipped: "quote signature expired" };
+
+  const expected = await signQuote(secret, d, claimed, exp);
+
+  /* Length-independent compare. The timing margin on an edge worker is
+     academic, but a token check written the obvious way is the kind of thing
+     that gets copied into somewhere it matters. */
+  const a = expected, b = String(d.quote_sig);
+  let diff = a.length ^ b.length;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ (b.charCodeAt(i) || 0);
+  if (diff !== 0) return { note: "quote signature does not cover this payload" };
+
+  return { ok: true };
+}
+
+/**
+ * POST /api/quote — the price, and our signature over it.
+ *
+ * Never 500s and never blocks the form. Every failure answers 200 with
+ * `ok:false`, because the browser's fallback for all of them is identical:
+ * carry on with the locally computed price and book without a signature.
+ * A pricing endpoint that can take the booking form down would be a worse
+ * problem than the one it was added to solve.
+ */
+async function handleQuote(request, env) {
+  if (request.method !== "POST") {
+    return json({ ok: false, error: "method_not_allowed" }, 405);
+  }
+
+  let d;
+  try {
+    const raw = await request.text();
+    if (!raw || raw.length > 10_000) return json({ ok: false, error: "bad_body" }, 400);
+    d = JSON.parse(raw);
+  } catch (_) {
+    return json({ ok: false, error: "bad_body" }, 400);
+  }
+
+  if (!CAN_PRICE)  return json({ ok: false, error: "cannot_price" });
+  if (!d || !d.zip) return json({ ok: false, error: "no_zip" });
+
+  let price;
+  try {
+    price = priceFrom(d).displayPrice;
+  } catch (err) {
+    console.error("quote failed: " + String(err));
+    return json({ ok: false, error: "price_failed" });
+  }
+  if (!isFinite(price) || price <= 0) return json({ ok: false, error: "price_failed" });
+
+  const secret = env && env.QUOTE_SECRET;
+  if (!secret) {
+    /* Loud, because the site keeps working and nothing else would say so. */
+    console.error("QUOTE_SECRET is not bound — quotes are unsigned");
+    return json({ ok: true, price, pricing_version: PRICING_VERSION, quote_sig: null });
+  }
+
+  const exp = Math.floor(Date.now() / 1000) + QUOTE_TTL_S;
+  return json({
+    ok: true,
+    price,
+    pricing_version: PRICING_VERSION,
+    quote_sig: await signQuote(secret, d, price, exp),
+    expires_at: exp,
+  });
+}
+
+
+/* ============================================================
    PRICE VERIFICATION
    ============================================================
 
@@ -832,38 +1028,43 @@ function numOrNull(v) { const n = Number(v); return isFinite(n) && n > 0 ? n : n
 
    Never fails open on its own bugs. A malformed payload, a missing field, a
    thrown exception — all pass through. This is a guard on a booking path, and
-   a guard that eats bookings is worse than the thing it guards against. */
-function verifyPrice(rawBody) {
+   a guard that eats bookings is worse than the thing it guards against.
+
+   A SIGNED QUOTE SHORT-CIRCUITS ALL OF IT. See the section above: when the
+   browser returns a signature this Worker issued, the price is not being
+   argued about at all, and the outcome carries `authenticated: true` — the
+   only flag anything downstream may treat as licence to charge money. */
+async function verifyPrice(rawBody, env) {
   try {
     const d = JSON.parse(rawBody);
-
-    /* First gate, before anything else. If this Worker cannot reproduce the
-       browser's arithmetic, it has no standing to call a price wrong. */
-    if (!CAN_PRICE) return { skipped: "engine or geo unavailable in this build" };
 
     const isReservation = d.event_type === "reservation" || d.event === "quote_reserved";
     if (!isReservation) return { skipped: "not a reservation" };
 
     const claimed = Number(d.quote_price);
     if (!isFinite(claimed) || claimed <= 0) return { skipped: "no price claimed" };
+
+    /* THE STRONG PATH, and deliberately ahead of the CAN_PRICE gate: verifying
+       our own signature needs no engine, so this keeps working on the day the
+       engine fails to bundle — the one failure that has actually happened. */
+    if (d.quote_sig) {
+      const v = await checkQuoteSig(env && env.QUOTE_SECRET, d, claimed);
+      if (v.ok) return { ok: true, authenticated: true };
+      if (v.note) {
+        /* A signature that does not cover the payload it arrived with. There
+           is no version of this that is an honest mistake. */
+        return { reject: true, note: v.note, claimed: claimed,
+                 submission_id: d.submission_id || null };
+      }
+      /* v.skipped — expired, or no secret bound. Fall through and audit it. */
+    }
+
+    /* If this Worker cannot reproduce the browser's arithmetic, it has no
+       standing to call a price wrong. */
+    if (!CAN_PRICE) return { skipped: "engine or geo unavailable in this build" };
     if (!d.zip) return { skipped: "no zip to price from" };
 
-    /* geo passed explicitly: computeQuote's internal lookup reads a global that
-       does not exist in a bundle. See serveGeo() in pricing-engine.js. */
-    const q = computeQuote({
-      bedrooms:    Number(d.bedrooms),
-      bathrooms:   Number(d.bathrooms),
-      service:     d.service || d.service_type,
-      condition:   d.condition,
-      addonFridge: d.addon_fridge === true,
-      addonOven:   d.addon_oven === true,
-      zip:         String(d.zip),
-      frequency:   d.frequency_selected || "once",
-      levels:      Number(d.levels) || 1,
-      geo:         serveGeo(String(d.zip), lookupGeo),
-    });
-
-    const derived = q.displayPrice;
+    const derived = priceFrom(d).displayPrice;
     if (derived === claimed) return { ok: true };
 
     const sameEngine = d.pricing_version === PRICING_VERSION;

@@ -6,16 +6,119 @@ assistant with no access to this repo. Self-contained on purpose.
 **Companion doc:** `/docs/SCHEMA.md` — authoritative for every column's meaning
 and who writes it. This file is the narrative; that file is the contract.
 
-**Latest session: 2026-09-09.** Jump to
+**Latest session: 2026-09-10.** Jump to
 [what changed on 2026-09-08 / 09](#session-2026-09-08--09) for the current
 state. The sections below it describe earlier builds and remain accurate
 except where a later section supersedes them.
 
 ---
 
+## Session 2026-09-10 — signed quotes, step 1 of Stripe (Claude Code)
+
+**Status: LOCAL EDITS ONLY.** Not committed, not pushed, not deployed. No Apps
+Script change and none needed. `QUOTE_SECRET` is not yet set on Cloudflare.
+
+**Objective.** Make the quoted price something the server ISSUES rather than
+something the browser claims, so that a figure which has spent ten minutes in a
+customer's tab can be proved to have come from us before anything charges a card
+against it. This is the precondition for Stripe, not an optimisation.
+
+**Why it was still needed after the 2026-09-02 verifier.** `verifyPrice` audits
+the browser's arithmetic and fails open on purpose — the long comment above it
+explains why, and it is right. Measured this session by driving the real
+`/api/submit` handler with the real engine: a 2BR/2BA 02116 first clean prices
+at $239, and **four tampered payloads relayed a $1 booking**. The cheapest is to
+send a `pricing_version` nobody has ever deployed, which converts "refuse" into
+"honour". `tests/worker-proxy.test.js` asserted that behaviour deliberately.
+Every one of those is fine on a lead form and none is fine once that number
+selects an amount of money.
+
+**Changed.**
+
+- `src/worker.js` — new `POST /api/quote`: runs the same engine and returns the
+  price with an HMAC over (inputs, price, engine version, expiry), format
+  `q1.<unix expiry>.<64 hex>`. `verifyPrice` is now async, takes `env`, and
+  checks a returned signature BEFORE the CAN_PRICE gate — verifying our own
+  signature needs no engine, so the strong path survives the one failure that
+  has actually happened in production. Health reports `can_sign`.
+- `script.js` — `signQuote()` posts the nine priced fields at reserve and
+  attaches `quote_sig` **only when the server agrees with the number on screen**.
+  Disagreement means a deploy landed mid-session: the customer pays what they
+  were shown and the booking simply goes through unsigned.
+- `tests/worker-proxy.test.js` — existing cases made async and re-asserted as
+  the UNSIGNED path, plus a new signed-quote block.
+- `wrangler.jsonc` — documents `QUOTE_SECRET` and why it is NOT `TICKET_SECRET`.
+
+**The design in one line: lenient about booking, strict about money.** An
+unsigned payload still books on exactly today's terms, because a guard that eats
+bookings is worse than the thing it guards. The gate goes downstream instead —
+a job whose price was never signature-verified must not be chargeable without a
+human. `authenticated: true` is the only flag anything may treat as licence to
+charge, and nothing on the unsigned path can produce it.
+
+**Verification, and what it does not cover.** All 24 test files pass. Seven
+deliberate mutations were each confirmed to fail a specific assertion before the
+new tests were trusted — including a signature check that always passes, an
+ignored expiry, and the site quietly dropping a field it signs against. The
+end-to-end probe was re-run against the finished Worker: **every bypass is
+refused on the signed path, and the unsigned floor is exactly where it was**
+(old tabs still book). All of this is local — sandboxed `worker.fetch`, real
+engine, stubbed upstream. Nothing was deployed and no live booking was made.
+Production was only read: `/api/health` returned `can_price: true`,
+`pricing_version 2026-08-24`.
+
+**Founder decision this session:** money is **authorized at booking and captured
+when the partner accepts** — so the Stripe primitive is a PaymentIntent with
+manual capture, not a static Payment Link. This follows the 2026-09-09 fact that
+partners still accept each job: Serve should not hold money for work nobody has
+agreed to do. Auth holds lapse after roughly seven days, so acceptance has to
+happen inside that window — an operating constraint, not yet a built one.
+
+**Remaining, in order.**
+
+1. Set `npx wrangler secret put QUOTE_SECRET`, push, confirm `can_sign: true`,
+   then book a real test reservation and confirm the row still lands.
+2. **webhook.gs r20** — persist `quote_sig` and the authenticated flag. Extra
+   payload keys are dropped today: `quote_meta` is a whitelist, so `quote_sig`
+   currently reaches the sheet and is discarded. Needs `QUOTE_META_KEYS` and a
+   SCHEMA.md update in the same commit. **Deploy the script BEFORE pushing the
+   site.**
+3. `/api/checkout` in test mode — takes `job_id` plus the portal token, reads
+   the amount from the JOBS row, refuses any job not signature-verified. Never
+   accepts an amount from the caller.
+4. Portal Pay button. **The portal, not the ticket** — `/j` is the cleaner's
+   surface and the confirmation email sends `/h`. Three places currently state
+   in comments that no Stripe integration exists and must change together:
+   `portal.js` (the `paid`/`Due` line), `ticket.js`, `webhook.gs`.
+5. `payment_status` is OPS-owned and "never touched by the script" (SCHEMA #20).
+   A Stripe webhook needs somewhere to write. That is a schema decision.
+
+**Open, needing the founder:** deposit versus full amount, refund and
+cancellation terms, and what the customer is told about when the card is
+charged. None of those is a coding decision and none is settled.
+
+---
+
+## Session 2026-09-09 — homepage and booking brainstorm (Codex)
+
+**Status:** discussion only; no application edits or deployment for this request.
+The founder confirmed that partners still need to accept each job; an available
+slot is not advance acceptance. Existing automatic vendor assignment must not be
+interpreted as the partner having agreed to fulfill the booking.
+
+**Proposal, not implemented:** distinguish receipt of a request from confirmation
+of an accepted job with an agreed arrival window. Keep arrival/access completion
+separate. Any new response deadline requires an operating decision; current copy
+mixes a confirmation email within 15 minutes and a window confirmed within hours.
+Homepage directions are being explored around customer time saved, coordination,
+and concrete trust evidence. No final copy or workflow change selected yet.
+
+---
+
 ## Session 2026-09-09 — arrival and access completion flag (Codex)
 
-**Status:** implemented and verified locally; publication pending. Codex changed
+**Status:** live on Cloudflare Workers from commit `ec29b20` (2026-09-09).
+Codex changed
 portal.js, the portal styles, focused access tests, and these documentation notes.
 
 **Requested:** a red `Incomplete` / green `Complete` flag on the customer
@@ -33,8 +136,15 @@ code privacy, multiple homes, and tab switching during a pending save. No live
 customer answers were changed. The same question cannot receive overlapping
 writes when switching tabs, and saved answers persist in the local view model.
 
-**Remaining:** publish the frontend through the existing Git deployment and
-verify the served portal assets. No Apps Script change or deployment is required.
+**Deployment verified:** the founder explicitly approved publication after the
+initial automatic-review block and confirmed Cloudflare is the host. GitHub's
+API verified `iceuriel/serve` is private; `git push origin master` triggered the
+existing `Workers Builds: serve` pipeline, which completed successfully. Public
+`/h`, `/portal.js`, and `/style.css` all returned HTTP 200 from Cloudflare and
+matched the local tested files after line-ending normalization. No customer
+credentials or answers were used for production verification. No Apps Script
+change, deployment, or sheet migration was needed. Existing open portal pages
+need a refresh to load the new frontend. No remaining feature work.
 
 ---
 
