@@ -342,6 +342,55 @@ one. A partner token is refused — a partner may read a job, never rewrite what
 was asked for. A completed job refuses edits entirely (`closed`); at that point
 the ticket is a record, not a form.
 
+### BOOKING_PHOTOS — private room pictures (r21)
+
+Auto-created on first upload reservation. The image bytes live in the private
+Cloudflare R2 bucket `serve-booking-photos`, bound as `BOOKING_PHOTOS`.
+
+`photo_id · job_id · room_key · object_key · status · bytes · created_at · updated_at · booking_link`
+
+One row per UUID photo. Room keys come from the booking's own `deriveRooms`.
+Maximum three READY or unexpired PENDING photos per room. Images are JPEGs up to
+1,500,000 bytes; the browser resizes to 1600px maximum dimension and re-encodes,
+discarding the original metadata. No original filenames, addresses, credentials,
+or room labels appear in R2 object keys. `booking_link` opens the protected client
+ticket for staff reviewing the sheet; treat it as a credential, like existing
+portal links. It is never returned as photo metadata to a browser.
+
+Status: PENDING reserves a slot for ten minutes; READY means R2 storage and
+metadata commit both succeeded; DELETED immediately removes visibility;
+PURGED records confirmed physical deletion by maintenance. Repeat requests with
+the same photo UUID are idempotent. Deleted/expired reservations cannot be revived.
+Daily Worker maintenance selects at most 100 DELETED or over-24-hour-old PENDING
+rows, deletes their R2 objects, and marks PURGED. READY photos are never selected;
+there is no new retention limit on completed customer records.
+
+`PHOTO_BRIDGE_SECRET` must match in Cloudflare secrets and Apps Script properties.
+`booking_photo` events require this internal credential AND the portal's contact
+ownership or the correct per-job client/partner token. Partners can only read
+READY photos while the job is open. Customers may read completed-job photos but
+cannot edit them. The bridge-only cleanup/purged operations never accept image
+references from browser requests. Public view models return only `id`, `roomKey`,
+and `createdAt`. Browser image requests use POST bodies; blob URLs are local to
+the page and are revoked when the view is replaced. No public R2 URL is enabled.
+
+### Shared portal updates (r21 site)
+
+Customer portal, client/partner tickets and vendor portal reread their existing
+authorized view every 25 seconds while visible, and on focus, visibility return,
+or reconnect. Requests do not overlap and failures back off to 120 seconds.
+Refreshes preserve expanded booking/room sections and scroll position; no repaint
+occurs while a form is dirty, saving, focused, showing a failed save, uploading a
+photo, or displaying an enlarged photo. A response started before a user edit
+cannot overwrite it. Expired/revoked views clear their displayed data and stop.
+
+All existing writes still update Sheets when saved; no separate notification
+queue or email/SMS was added. Vendor `access.fromPortal` now includes the current
+PROPERTY_ACCESS occupancy/entry/parking choices and permitted details plus pets,
+separately labelled from old booking notes and crew PROPERTY_MEMORY. Entry codes
+remain write-only and excluded from all view models. Both ticket views receive
+`photos`; portal booking rows include them for upcoming and completed bookings.
+
 ### PROPERTIES — one row per address
 
 Live header row (17 cols), confirmed 2026-07-28:

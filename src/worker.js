@@ -96,6 +96,9 @@ const CAN_PRICE = (() => {
 const UPSTREAM_TIMEOUT_MS = { submit: 12000, slots: 8000 };
 
 export default {
+  async scheduled(controller, env, ctx) {
+    ctx.waitUntil(cleanupPhotoStorage(env));
+  },
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
@@ -103,6 +106,7 @@ export default {
     if (url.pathname === "/api/quote")  return handleQuote(request, env);
     if (url.pathname === "/api/slots")  return handleSlots(request, env);
     if (url.pathname === "/api/job")    return handleJob(request, env);
+    if (url.pathname === "/api/photos") return handlePhotos(request, env);
     if (url.pathname === "/api/address")  return handleAddressSuggest(request, env);
     if (url.pathname === "/api/portal")   return handlePortal(request, env);
     if (url.pathname === "/api/vendor")   return handleVendor(request, env);
@@ -474,6 +478,7 @@ function handleHealth(env) {
        nothing books through the authenticated path — the site looks perfectly
        healthy either way, which is exactly why it is reported here. */
     can_sign: !!(env && env.QUOTE_SECRET),
+    can_store_photos: !!(env && env.BOOKING_PHOTOS && env.PHOTO_BRIDGE_SECRET && env.WEBHOOK_URL),
     bindings: names,
   });
 }
@@ -1163,4 +1168,133 @@ function json(obj, status) {
     headers: { "Content-Type": "application/json; charset=utf-8",
                "Cache-Control": "no-store" },
   });
+}
+
+/* Private R2 images. All credentials travel in request bodies; the sheet
+   authorizes the job/room/photo on EVERY operation, including image reads. */
+async function handlePhotos(request, env) {
+  const reply = (data, status = 200) => new Response(JSON.stringify(data), {
+    status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store, private" }
+  });
+  if (request.method !== "POST") return reply({ ok: false, error: "method_not_allowed" }, 405);
+  if (!env.BOOKING_PHOTOS || !env.PHOTO_BRIDGE_SECRET || !env.WEBHOOK_URL) {
+    return reply({ ok: false, error: "not_configured" }, 503);
+  }
+  // Prevent cross-site form posts; photos never require cross-origin access.
+  const origin = request.headers.get("Origin");
+  if (origin && origin !== new URL(request.url).origin) return reply({ ok: false, error: "not_found" }, 403);
+  let data, file;
+  try {
+    const raw = await photoRequestBytes(request, 1600000);
+    const type = request.headers.get("Content-Type") || "";
+    if (type.startsWith("multipart/form-data")) {
+      const form = await new Response(raw, { headers: { "Content-Type": type } }).formData();
+      data = JSON.parse(String(form.get("data") || ""));
+      file = form.get("photo");
+      if (!file || file.type !== "image/jpeg" || file.size > 1500000) throw new Error();
+    } else {
+      if (raw.byteLength > 8000) throw new Error();
+      data = JSON.parse(new TextDecoder().decode(raw));
+    }
+    if (!data || typeof data !== "object") throw new Error();
+  } catch (_) { return reply({ ok: false, error: "bad_upload" }, 400); }
+  const action = data.action;
+  if (!["upload", "read", "delete"].includes(action)) return reply({ ok: false, error: "bad_action" }, 400);
+  // Caller-supplied storage keys, internal actions, and bridge tokens are ignored.
+  const auth = { event_type: "booking_photo", bridge_token: env.PHOTO_BRIDGE_SECRET,
+    auth_kind: String(data.auth_kind || ""), contact_id: String(data.contact_id || ""),
+    job_id: String(data.job_id || ""), room_key: String(data.room_key || ""),
+    photo_id: String(data.photo_id || ""), t: String(data.t || "") };
+  if (Object.values(auth).some(v => v.length > 256)) return reply({ ok: false, error: "bad_upload" }, 400);
+  const authorize = async (operation, extra = {}) => {
+    const upstream = await relay(env.WEBHOOK_URL, { method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ ...auth, ...extra, action: operation }) }, UPSTREAM_TIMEOUT_MS.submit);
+    if (!upstream.ok) throw new Error("photo_unavailable");
+    const answer = JSON.parse(upstream.text);
+    if (!answer || answer.ok !== true) return answer || { ok: false, error: "photo_unavailable" };
+    // Old webhook health responses must never authorize storage.
+    if (!/^booking-photos\/[a-f0-9-]{36}\.jpg$/.test(answer.object_key || "") ||
+        !answer.photo || answer.photo.id !== auth.photo_id || answer.photo.roomKey !== auth.room_key) {
+      throw new Error("photo_unavailable");
+    }
+    return answer;
+  };
+  try {
+    if (action === "upload") {
+      if (!file) return reply({ ok: false, error: "bad_upload" }, 400);
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      if (bytes.length < 4 || bytes[0] !== 255 || bytes[1] !== 216 ||
+          bytes[bytes.length - 2] !== 255 || bytes[bytes.length - 1] !== 217) {
+        return reply({ ok: false, error: "bad_upload" }, 400);
+      }
+      const reservation = await authorize("begin", { bytes: bytes.length });
+      if (!reservation.ok) return reply(reservation);
+      if (reservation.status === "READY") return reply({ ok: true, photo: reservation.photo });
+      // First write wins on retries: an acknowledged photo is immutable.
+      await env.BOOKING_PHOTOS.put(reservation.object_key, bytes, {
+        onlyIf: { etagDoesNotMatch: "*" }, httpMetadata: { contentType: "image/jpeg" }
+      });
+      const committed = await authorize("commit");
+      if (!committed.ok) return reply(committed);
+      return reply({ ok: true, photo: committed.photo });
+    }
+    const allowed = await authorize(action);
+    if (!allowed.ok) return reply(allowed);
+    if (action === "delete") {
+      await env.BOOKING_PHOTOS.delete(allowed.object_key);
+      return reply({ ok: true });
+    }
+    const object = await env.BOOKING_PHOTOS.get(allowed.object_key);
+    if (!object) return reply({ ok: false, error: "not_found" }, 404);
+    return new Response(object.body, { headers: {
+      "Content-Type": "image/jpeg", "Cache-Control": "no-store, private",
+      "X-Content-Type-Options": "nosniff", "Content-Disposition": "inline; filename=room-photo.jpg",
+      "Content-Security-Policy": "default-src 'none'; sandbox", "Referrer-Policy": "no-referrer"
+    } });
+  } catch (_) {
+    // No upstream response, credentials, storage keys or customer data in logs.
+    return reply({ ok: false, error: "photo_unavailable" }, 502);
+  }
+}
+
+async function photoRequestBytes(request, limit) {
+  if (Number(request.headers.get("Content-Length")) > limit || !request.body) throw new Error();
+  const reader = request.body.getReader();
+  const chunks = [];
+  let length = 0;
+  while (true) {
+    const part = await reader.read();
+    if (part.done) break;
+    length += part.value.byteLength;
+    if (length > limit) { await reader.cancel(); throw new Error(); }
+    chunks.push(part.value);
+  }
+  const result = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) { result.set(chunk, offset); offset += chunk.byteLength; }
+  return result;
+}
+
+
+async function cleanupPhotoStorage(env) {
+  if (!env.BOOKING_PHOTOS || !env.PHOTO_BRIDGE_SECRET || !env.WEBHOOK_URL) return;
+  async function step(action, extra = {}) {
+    const up = await relay(env.WEBHOOK_URL, { method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ ...extra, event_type: "booking_photo", action,
+        bridge_token: env.PHOTO_BRIDGE_SECRET }) }, UPSTREAM_TIMEOUT_MS.submit);
+    if (!up.ok) throw new Error("Photo maintenance unavailable");
+    const d = JSON.parse(up.text);
+    if (!d.ok || !Array.isArray(d.photos)) throw new Error("Photo maintenance unavailable");
+    return d.photos;
+  }
+  const photos = await step("cleanup");
+  if (!photos.length) return;
+  if (photos.length > 100 || photos.some(p =>
+      !/^[a-f0-9-]{36}$/.test(p.id) || p.object_key !== "booking-photos/" + p.id + ".jpg")) {
+    throw new Error("Invalid photo maintenance response");
+  }
+  await env.BOOKING_PHOTOS.delete(photos.map(p => p.object_key));
+  await step("purged", { photo_ids: photos.map(p => p.id) });
 }

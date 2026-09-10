@@ -13,6 +13,28 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-10, Codex: room photos and shared updates
+
+In progress. Founder authorized private Cloudflare R2 room photos, shown in
+customer and partner booking slips, plus automatic refresh of all shared portal
+information. Sheets remains the record for booking/photo metadata. Preserve the
+concurrent Stripe work in worker.js, portal.js, style.css and its tests.
+Implementation is complete locally, including photo handlers, shared browser
+helpers, ticket/portal integration, schema documentation and focused tests.
+All 26 test files pass; four deliberate in-memory security/refresh mutations
+were caught. Browser fixture proved a customer upload and written room note
+appear on the open partner ticket automatically. Source and photos were synthetic;
+no production booking was created or edited.
+
+Founder activated the R2 subscription themselves in the dashboard. Codex created
+`serve-booking-photos` in Serve Account: Standard class, automatic Eastern North
+America placement, Public Access Disabled verified. Existing Apps Script source
+was backed up and matched HEAD r20 exactly. r21 was saved, read back to verify
+the source, and deployed to the EXISTING endpoint; live health reports r21.
+Matching PHOTO_BRIDGE_SECRET was saved in Script Properties and as an encrypted
+Cloudflare runtime secret. Next: publish and verify the isolated photo/site
+release, preserving the concurrent payment work in the working tree.
+
 ## Session 2026-09-10 — signed quotes, step 1 of Stripe (Claude Code)
 
 **Status: LIVE on Cloudflare from commit `527d3cf` (2026-09-10).** No Apps Script

@@ -54,6 +54,11 @@
             }
             model = d;
             start();
+            if (typeof ServeLive !== 'undefined') ServeLive.watch({
+                url: API + '?id=' + encodeURIComponent(id) + '&t=' + encodeURIComponent(token),
+                view: 'portal', root: bodyEl, initial: d,
+                onData: function (next) { model = next; paint(); }
+            });
         })
         .catch(function (err) {
             console.warn('portal load failed', err);
@@ -190,7 +195,10 @@
                 ? opts.save(text, status, btn)
                 : save(opts.payload(text), status, btn);
             pending.then(function (ok) {
-                if (ok && opts.onSaved) opts.onSaved();
+                if (ok && opts.onSaved) opts.onSaved(text);
+                if (ok && ta.value.trim() !== text) {
+                    status.textContent = 'Not saved yet'; status.className = 'tk-save is-dirty';
+                }
             });
         });
         /* A note typed and then abandoned is the common failure. Say so rather
@@ -231,6 +239,7 @@
     }
 
     function paint() {
+        if (typeof ServePhotos !== 'undefined') ServePhotos.release(bodyEl);
         updateAccessStatus();
         navEl.querySelectorAll('.portal__tab').forEach(function (b) {
             var on = b.getAttribute('data-tab') === tab;
@@ -268,6 +277,7 @@
     function bookingRow(b) {
         var det = document.createElement('details');
         det.className = 'pb' + (b.completed ? ' pb--done' : '');
+        det.setAttribute('data-live-key', b.bookingId);
 
         var sum = document.createElement('summary');
         sum.className = 'pb__sum';
@@ -281,6 +291,15 @@
         if (b.propertyLabel) add(inner, line('Home', b.propertyLabel));
         if (b.addOns) add(inner, line('Add-ons', b.addOns));
         if (b.completed) {
+            if (typeof ServePhotos !== 'undefined') {
+                var pastRooms = [];
+                (b.photos || []).forEach(function (p) { if (pastRooms.indexOf(p.roomKey) < 0) pastRooms.push(p.roomKey); });
+                pastRooms.forEach(function (key) {
+                    inner.appendChild(el('h3', 'pb__h', key.replace(/_/g, ' ').toLowerCase()));
+                    inner.appendChild(ServePhotos.mount({ jobId: b.bookingId, roomKey: key, roomLabel: key.replace(/_/g, ' '),
+                        photos: b.photos, editable: false, auth: { auth_kind: 'portal', contact_id: id, t: token } }));
+                });
+            }
             add(inner, line('Completed', prettyDate(b.completed) || b.completed));
             add(inner, line('Payment', b.paid ? 'Paid' : 'Due'));
             inner.appendChild(el('p', 'tk-note',
@@ -302,6 +321,7 @@
         (b.rooms || []).forEach(function (r) {
             var rd = document.createElement('details');
             rd.className = 'tk-room';
+            rd.setAttribute('data-live-key', b.bookingId + '/' + r.key);
             var rs = document.createElement('summary');
             rs.className = 'tk-room__sum';
             rs.appendChild(el('span', 'tk-room__name', r.label));
@@ -311,16 +331,24 @@
             rd.appendChild(editor({
                 value: r.instruction, rows: 2,
                 placeholder: 'e.g. Fresh sheets are in the closet.',
+                onSaved: function (text) { r.instruction = text;
+                    rs.querySelector('.tk-room__flag').textContent = text ? 'Has instructions' : 'Add instructions'; },
                 payload: function (text) {
                     return { kind: 'instruction', job_id: b.bookingId,
                              scope_type: 'ROOM', scope_key: r.key, instruction: text };
                 },
+            }));
+            if (model.photoSupport && typeof ServePhotos !== 'undefined') rd.appendChild(ServePhotos.mount({
+                jobId: b.bookingId, roomKey: r.key, roomLabel: r.label, photos: b.photos, editable: true,
+                auth: { auth_kind: 'portal', contact_id: id, t: token },
+                onChange: function (photos) { b.photos = (b.photos || []).filter(function (p) { return p.roomKey !== r.key; }).concat(photos); }
             }));
             inner.appendChild(rd);
         });
 
         inner.appendChild(editor({
             label: 'Anything else for this visit', value: b.generalInstruction, rows: 3,
+            onSaved: function (text) { b.generalInstruction = text; },
             placeholder: 'Anything that applies to the whole visit.',
             payload: function (text) {
                 return { kind: 'instruction', job_id: b.bookingId,
@@ -398,6 +426,7 @@
             });
             bodyEl.appendChild(editor({
                 label: 'Pets (optional)', value: home.petNotes, rows: 2,
+                onSaved: function (text) { home.petNotes = text; },
                 placeholder: home.petPlaceholder,
                 payload: function (text) {
                     return { kind: 'access', property_id: home.propertyId,

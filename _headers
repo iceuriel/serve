@@ -167,6 +167,14 @@
   Content-Type: text/javascript; charset=utf-8
   Cache-Control: public, max-age=0, must-revalidate
 
+/booking-live.js
+  Content-Type: text/javascript; charset=utf-8
+  Cache-Control: public, max-age=0, must-revalidate
+
+/booking-photos.js
+  Content-Type: text/javascript; charset=utf-8
+  Cache-Control: public, max-age=0, must-revalidate
+
 # Photos are content-stable and heavy. Cache them properly.
 /images/*
   Cache-Control: public, max-age=604800

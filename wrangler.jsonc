@@ -28,6 +28,13 @@
   // scripts/build-engine-module.js.
   "main": "src/worker.js",
 
+  // Private room images. Do not enable r2.dev or attach a public domain.
+  // PHOTO_BRIDGE_SECRET must match the Apps Script property of the same name.
+  "r2_buckets": [
+    { "binding": "BOOKING_PHOTOS", "bucket_name": "serve-booking-photos" }
+  ],
+  "triggers": { "crons": ["17 8 * * *"] },
+
   "assets": {
     "directory": "./_site",
     // Lets the Worker hand non-API requests back to the static asset server.

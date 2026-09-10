@@ -54,6 +54,10 @@
                 return;
             }
             render(d);
+            if (typeof ServeLive !== 'undefined') ServeLive.watch({
+                url: API + '?id=' + encodeURIComponent(id) + '&t=' + encodeURIComponent(token) + '&view=' + view,
+                view: view, root: bodyEl, initial: d, onData: render
+            });
         })
         .catch(function (err) {
             console.warn('ticket load failed', err);
@@ -188,7 +192,12 @@
         wrap.appendChild(row);
 
         btn.addEventListener('click', function () {
-            saveInstruction(opts.scopeType, opts.scopeKey, ta.value.trim(), status, btn);
+            var text = ta.value.trim();
+            saveInstruction(opts.scopeType, opts.scopeKey, text, status, btn).then(function (ok) {
+                if (ok && ta.value.trim() !== text) {
+                    status.textContent = 'Not saved yet'; status.className = 'tk-save is-dirty';
+                }
+            });
         });
         /* A note typed and then abandoned is the common failure. Say so rather
            than silently keeping the old value. */
@@ -201,6 +210,8 @@
     }
 
     function render(d) {
+        if (typeof ServePhotos !== 'undefined') ServePhotos.release(bodyEl);
+        bodyEl.textContent = '';
         stateEl.hidden = true;
         bodyEl.hidden  = false;
         footEl.hidden  = false;
@@ -281,6 +292,7 @@
             rooms.forEach(function (r) {
                 var det = document.createElement('details');
                 det.className = 'tk-room';
+                det.setAttribute('data-live-key', r.key);
                 var sum = document.createElement('summary');
                 sum.className = 'tk-room__sum';
                 sum.appendChild(el('span', 'tk-room__name', r.label));
@@ -292,6 +304,11 @@
                     readOnly: done, rows: 2,
                     placeholder: 'e.g. Fresh sheets are in the closet.',
                 }));
+                if (typeof ServePhotos !== 'undefined' && (d.photoSupport || (d.photos || []).length)) {
+                    det.appendChild(ServePhotos.mount({ jobId: id, roomKey: r.key, roomLabel: r.label,
+                        photos: d.photos, editable: !done && d.photoSupport,
+                        auth: { auth_kind: 'client', t: token } }));
+                }
                 sec.appendChild(det);
             });
             bodyEl.appendChild(sec);
@@ -396,6 +413,10 @@
                 var line = el('div', 'tk-scope');
                 line.appendChild(el('span', 'tk-scope__name', r.label));
                 if (r.instruction) line.appendChild(el('span', 'tk-scope__ins', r.instruction));
+                if (typeof ServePhotos !== 'undefined' && (d.photos || []).some(function (p) { return p.roomKey === r.key; })) {
+                    line.appendChild(ServePhotos.mount({ jobId: id, roomKey: r.key, roomLabel: r.label,
+                        photos: d.photos, editable: false, auth: { auth_kind: 'partner', t: token } }));
+                }
                 ssec.appendChild(line);
             });
             bodyEl.appendChild(ssec);
@@ -425,6 +446,9 @@
         }
         (acc.fromCustomer || []).forEach(function (f) {
             add(asec, block(f.label + ' (this visit)', f.value));
+        });
+        (acc.fromPortal || []).forEach(function (f) {
+            add(asec, block(f.label + ' (customer portal)', f.value));
         });
         add(asec, block('Focus on', st.priorityRooms));
         add(asec, block('Skip', st.skipAreas));

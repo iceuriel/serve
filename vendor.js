@@ -49,6 +49,11 @@
             }
             model = d;
             start();
+            if (typeof ServeLive !== 'undefined') ServeLive.watch({
+                url: API + '?id=' + encodeURIComponent(id) + '&t=' + encodeURIComponent(token),
+                view: 'vendor', root: bodyEl, initial: d,
+                onData: function (next) { model = next; paint(); }
+            });
         })
         .catch(function (err) {
             console.warn('vendor portal load failed', err);
@@ -158,7 +163,12 @@
         wrap.appendChild(row);
 
         btn.addEventListener('click', function () {
-            save(opts.payload(ta.value.trim()), status, btn);
+            var text = ta.value.trim();
+            save(opts.payload(text), status, btn).then(function (ok) {
+                if (ok && ta.value.trim() !== text) {
+                    status.textContent = 'Not saved yet'; status.className = 'tk-save is-dirty';
+                }
+            });
         });
         ta.addEventListener('input', function () {
             status.textContent = 'Not saved yet';
@@ -231,6 +241,7 @@
     function jobRow(b) {
         var det = document.createElement('details');
         det.className = 'pb' + (b.completed ? ' pb--done' : '');
+        det.setAttribute('data-live-key', b.bookingId);
 
         var sum = document.createElement('summary');
         sum.className = 'pb__sum';

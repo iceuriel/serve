@@ -1,7 +1,9 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-10  ·  master  ·  r20 — the proof the price was ours
+ * VERSION STAMP:  2026-09-10  ·  master  ·  r21 — private room photos and shared portal answers
+ * r21 adds BOOKING_PHOTOS, private Worker-authorized image operations, and
+ * customer portal arrival answers in the vendor ticket (never entry codes).
  *
  * r20 = THE ROW REMEMBERS THAT THE PRICE WAS PROVED. The edge Worker now
  *      ISSUES prices and signs them (see "SIGNED QUOTES" in src/worker.js);
@@ -709,6 +711,7 @@ function doPost(e) {
        than on submission_id, because it is the customer editing their own
        booking rather than the site reporting one. */
     if (eventType === "booking_instruction") return handleInstruction(ss, data);
+    if (eventType === "booking_photo") return handleBookingPhoto(ss, data);
 
     /* Portal writes. Authorised by a portal token and an ownership check
        rather than by a per-job ticket token — see handlePortalWrite. */
@@ -936,7 +939,7 @@ function doGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-10 r20" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-10 r21" });
 }
 
 
@@ -1463,6 +1466,8 @@ function buildClientTicketModel(ss, booking) {
     ok: true,
     view: "client",
     bookingId: booking.bookingId,
+    photoSupport: !!PropertiesService.getScriptProperties().getProperty("PHOTO_BRIDGE_SECRET"),
+    photos: publicBookingPhotos(ss, booking.bookingId),
 
     booking: {
       serviceCode:  booking.serviceCode,
@@ -1551,6 +1556,7 @@ function buildVendorTicketModel(ss, booking) {
     ok: true,
     view: "partner",
     bookingId: booking.bookingId,
+    photos: publicBookingPhotos(ss, booking.bookingId),
 
     booking: {
       serviceCode:  booking.serviceCode,
@@ -1607,6 +1613,7 @@ function buildVendorTicketModel(ss, booking) {
         timingNotes:   access.timingNotes,
       },
       fromCustomer: accessFieldList(sorted.access).filter(function (f) { return f.value; }),
+      fromPortal: vendorPortalAccess(ss, booking.propertyId),
       petsFlagged:  booking.petsFlag,
     },
   };
@@ -1831,6 +1838,7 @@ function buildPortalModel(ss, contact) {
   return {
     ok: true,
     view: "portal",
+    photoSupport: !!PropertiesService.getScriptProperties().getProperty("PHOTO_BRIDGE_SECRET"),
     contactId: contact.contactId,
     firstName: contact.firstName,
     name:      contact.name,
@@ -1839,6 +1847,7 @@ function buildPortalModel(ss, contact) {
       var done = !!b.completedDate;
       var row = {
         bookingId:    b.bookingId,
+        photos:       publicBookingPhotos(ss, b.bookingId),
         serviceCode:  b.serviceCode,
         serviceLabel: SERVICE_CODES[b.serviceCode] || b.serviceLabel,
         date:         b.scheduledDate,
@@ -4614,4 +4623,163 @@ function deleteMatching(ss, tabName, column, pred) {
     if (pred(values[r][0])) { sheet.deleteRow(r + 2); deleted++; }
   }
   return tabName + ": " + deleted + " test row(s) deleted";
+}
+
+/* BEGIN BOOKING PHOTOS */
+/* Private room photo records. Images live in R2; Sheets owns authorization. */
+
+const BOOKING_PHOTOS_HEADERS = ["photo_id", "job_id", "room_key", "object_key",
+  "status", "bytes", "created_at", "updated_at", "booking_link"];
+
+function bookingPhotoRows(ss) {
+  var sheet = ss.getSheetByName("BOOKING_PHOTOS");
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  var h = sheetHeaders(sheet);
+  return sheet.getRange(2, 1, sheet.getLastRow() - 1, h.length).getValues().map(function (r, i) {
+    var out = { sheetRow: i + 2 };
+    BOOKING_PHOTOS_HEADERS.forEach(function (k) { out[k] = r[h.indexOf(k)]; });
+    return out;
+  });
+}
+
+function publicBookingPhotos(ss, jobId) {
+  return bookingPhotoRows(ss).filter(function (r) {
+    return r.job_id === jobId && r.status === "READY";
+  }).map(function (r) {
+    // Explicit whitelist. Storage keys and credentials never enter view models.
+    return { id: String(r.photo_id), roomKey: String(r.room_key),
+      createdAt: String(r.created_at) };
+  });
+}
+
+function vendorPortalAccess(ss, propertyId) {
+  var a = getPropertyAccess(ss, propertyId);
+  var fields = [];
+  ACCESS_QUESTIONS.forEach(function (q) {
+    var choice = accessChoice(q.field, String(a[q.field + "Choice"] || "").toUpperCase());
+    if (!choice) return;
+    var value = choice.label;
+    // Only the choice and permitted detail. Never entry_code or secret timestamps.
+    if (choice.detail && !choice.secret && a[q.field + "Detail"]) {
+      value += ": " + a[q.field + "Detail"];
+    }
+    fields.push({ key: q.field, label: q.label, value: value });
+  });
+  if (a.petNotes) fields.push({ key: "pets", label: "Pets", value: a.petNotes });
+  return fields;
+}
+
+function handleBookingPhoto(ss, data) {
+  // Only the Worker may reserve/commit storage metadata. A portal credential
+  // alone must not let a caller invent successful uploads via the public /exec.
+  var secret = PropertiesService.getScriptProperties().getProperty("PHOTO_BRIDGE_SECRET");
+  if (!secret || String(data.bridge_token || "") !== secret) return json({ ok: false, error: "not_found" });
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(8000);
+    if (data.action === "cleanup" || data.action === "purged") return cleanupBookingPhotos(ss, data);
+    var jobId = String(data.job_id || "");
+    var kind = String(data.auth_kind || "");
+    var tok = String(data.t || "");
+    if (!tok || !jobId) return json({ ok: false, error: "not_found" });
+    var booking = null;
+    if (kind === "portal") {
+      var contactId = String(data.contact_id || "");
+      if (!contactId || portalToken(contactId) !== tok) return json({ ok: false, error: "not_found" });
+      var contact = getContact(ss, contactId);
+      if (contact) {
+        var mine = getContactBookings(ss, contact.leadId);
+        for (var k = 0; k < mine.length; k++) if (mine[k].bookingId === jobId) booking = mine[k];
+      }
+    } else if ((kind === "client" || kind === "partner") && ticketToken(jobId, kind) === tok) {
+      booking = getBooking(ss, jobId);
+    }
+    if (!booking) return json({ ok: false, error: "not_found" });
+    if (kind === "partner" && booking.completedDate) return json({ ok: false, error: "expired" });
+    var action = String(data.action || "");
+    if (["begin", "commit", "read", "delete"].indexOf(action) < 0) return json({ ok: false, error: "bad_action" });
+    if (action !== "read" && kind === "partner") return json({ ok: false, error: "not_found" });
+    if (action !== "read" && booking.completedDate) return json({ ok: false, error: "closed" });
+    var room = String(data.room_key || "");
+    if (!deriveRooms(booking.beds, booking.baths).some(function (r) { return r.key === room; })) {
+      return json({ ok: false, error: "unknown_room" });
+    }
+    var photoId = String(data.photo_id || "");
+    if (!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(photoId)) {
+      return json({ ok: false, error: "bad_photo" });
+    }
+    var rows = bookingPhotoRows(ss);
+    var record = null;
+    rows.forEach(function (r) { if (r.photo_id === photoId) record = r; });
+    if (record && (record.job_id !== jobId || record.room_key !== room)) return json({ ok: false, error: "not_found" });
+    var now = new Date();
+    var sheet = ss.getSheetByName("BOOKING_PHOTOS");
+    function result() { return json({ ok: true, object_key: record.object_key, status: record.status,
+      photo: { id: photoId, roomKey: room, createdAt: String(record.created_at) } }); }
+    function status(value) {
+      var h = sheetHeaders(sheet);
+      sheet.getRange(record.sheetRow, h.indexOf("status") + 1).setValue(value);
+      sheet.getRange(record.sheetRow, h.indexOf("updated_at") + 1).setValue(now);
+      record.status = value;
+    }
+    if (action === "begin") {
+      if (record) {
+        if (record.status === "READY") return result();
+        // A retry cannot revive a deleted or expired reservation.
+        if (record.status !== "PENDING" || now - new Date(record.created_at) > 600000) return json({ ok: false, error: "retry_upload" });
+        return result();
+      }
+      var bytes = Number(data.bytes);
+      if (!Number.isInteger(bytes) || bytes < 4 || bytes > 1500000) return json({ ok: false, error: "bad_size" });
+      var count = rows.filter(function (r) {
+        return r.job_id === jobId && r.room_key === room &&
+          (r.status === "READY" || (r.status === "PENDING" && now - new Date(r.created_at) <= 600000));
+      }).length;
+      if (count >= 3) return json({ ok: false, error: "photo_limit" });
+      if (!sheet) {
+        assertWritable("BOOKING_PHOTOS");
+        sheet = ss.insertSheet("BOOKING_PHOTOS");
+        sheet.appendRow(BOOKING_PHOTOS_HEADERS);
+        sheet.setFrozenRows(1);
+      }
+      record = { photo_id: photoId, job_id: jobId, room_key: room,
+        object_key: "booking-photos/" + photoId + ".jpg", status: "PENDING", bytes: bytes,
+        created_at: now, updated_at: now, booking_link: ticketUrl(jobId, "client") };
+      sheet.appendRow(sheetHeaders(sheet).map(function (h) { return record[h] === undefined ? "" : record[h]; }));
+      return result();
+    }
+    if (!record) return json({ ok: false, error: "not_found" });
+    if (action === "read") return record.status === "READY" ? result() : json({ ok: false, error: "not_found" });
+    if (action === "delete") { status("DELETED"); return result(); }
+    if (record.status === "READY") return result();
+    if (record.status !== "PENDING" || now - new Date(record.created_at) > 600000) return json({ ok: false, error: "retry_upload" });
+    status("READY");
+    return result();
+  } catch (_) {
+    return json({ ok: false, error: "photo_unavailable" });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* END BOOKING PHOTOS */
+
+// Worker-only maintenance, under the same lock. Never selects READY images.
+function cleanupBookingPhotos(ss, data) {
+  var sheet = ss.getSheetByName("BOOKING_PHOTOS");
+  if (!sheet) return json({ ok: true, photos: [] });
+  var h = sheetHeaders(sheet), now = new Date();
+  var selected = bookingPhotoRows(ss).filter(function (r) {
+    if (data.action === "purged") return r.status === "DELETED" &&
+      Array.isArray(data.photo_ids) && data.photo_ids.slice(0, 100).indexOf(r.photo_id) >= 0;
+    return r.status === "DELETED" || (r.status === "PENDING" && now - new Date(r.created_at) > 86400000);
+  }).slice(0, 100);
+  var out = [];
+  selected.forEach(function (r) {
+    if (r.object_key !== "booking-photos/" + r.photo_id + ".jpg") return;
+    sheet.getRange(r.sheetRow, h.indexOf("status") + 1).setValue(data.action === "purged" ? "PURGED" : "DELETED");
+    sheet.getRange(r.sheetRow, h.indexOf("updated_at") + 1).setValue(now);
+    out.push({ id: String(r.photo_id), object_key: String(r.object_key) });
+  });
+  return json({ ok: true, photos: out });
 }
