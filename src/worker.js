@@ -144,6 +144,16 @@ async function handleSubmit(request, env) {
   }
   if (audit.note) console.warn("price audit: " + JSON.stringify(audit));
 
+  /* THE HAPPY PATH USED TO BE SILENT, which made the signed path invisible in
+     production: a browser whose signQuote() quietly failed would fall back to
+     booking unsigned and look exactly like a browser that never had one. That
+     is the failure this project keeps meeting — healthy from the outside, doing
+     nothing on the inside — so say when a price was proved rather than only
+     when one was doubted. A submission_id is a random client id, not a person. */
+  if (audit.authenticated) {
+    console.log("price authenticated: " + (audit.submission_id || "no id"));
+  }
+
   const upstream = await relay(env.WEBHOOK_URL, {
     method: "POST",
     /* text/plain deliberately: Apps Script reads e.postData.contents either
@@ -1049,7 +1059,8 @@ async function verifyPrice(rawBody, env) {
        engine fails to bundle — the one failure that has actually happened. */
     if (d.quote_sig) {
       const v = await checkQuoteSig(env && env.QUOTE_SECRET, d, claimed);
-      if (v.ok) return { ok: true, authenticated: true };
+      if (v.ok) return { ok: true, authenticated: true,
+                         submission_id: d.submission_id || null };
       if (v.note) {
         /* A signature that does not cover the payload it arrived with. There
            is no version of this that is an honest mistake. */

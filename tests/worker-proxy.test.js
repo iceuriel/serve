@@ -506,6 +506,25 @@ console.log('\n=== 7. the failure UI exists and is reachable ===');
     { method: 'GET' }), QENV);
   t('GET is refused', wrongVerb.status === 405, wrongVerb.status);
 
+  /* THE SIGNED PATH HAS TO BE VISIBLE IN PRODUCTION.
+     A browser whose signQuote() quietly failed falls back to booking unsigned,
+     which looks identical to a browser that never had a signature — right up
+     until someone asks why nothing is chargeable. The happy path was silent
+     until this was added, so assert the log line behaviourally rather than
+     trusting that it survives the next edit. */
+  {
+    const { worker: w3, box: b3 } = loadWorker(async () => new Response('{"status":"ok"}'));
+    const logged = [];
+    b3.console.log = (m) => logged.push(String(m));
+    await w3.fetch(new Request('https://servecleaning.com/api/submit',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: signed({}) }), QENV);
+    t('an authenticated booking says so in the log',
+      logged.some(l => /price authenticated/.test(l)), logged);
+    t('and the line carries no address, name, email or phone',
+      !logged.some(l => /@|Boylston|\d{3}-\d{3}/.test(l)), logged);
+  }
+
   /* THE SIGNER NEVER TALKS TO GOOGLE. It is pure computation at the edge; a
      quote that made an upstream call would put Apps Script's latency and its
      quota on the path of every reservation. */

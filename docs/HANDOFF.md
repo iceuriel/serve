@@ -15,8 +15,31 @@ except where a later section supersedes them.
 
 ## Session 2026-09-10 — signed quotes, step 1 of Stripe (Claude Code)
 
-**Status: LOCAL EDITS ONLY.** Not committed, not pushed, not deployed. No Apps
-Script change and none needed. `QUOTE_SECRET` is not yet set on Cloudflare.
+**Status: LIVE on Cloudflare from commit `527d3cf` (2026-09-10).** No Apps Script
+change was made or needed; webhook.gs remains r19.
+
+**Deployment, and exactly what was verified in production.** `QUOTE_SECRET` and
+a Stripe TEST key (`sk_test_`) were set as Cloudflare secrets by the founder.
+Note that setting a secret redeploys the Worker with THE CODE FROM THE LAST GIT
+PUSH — for a while both secrets were bound while `/api/quote` still 404'd,
+because the code was uncommitted. A secret set, a script deployed, and a site
+pushed are three separate events and none implies another.
+
+`git push origin master` ran the existing Workers Builds pipeline; it completed
+in about 45 seconds. Verified live afterwards: `/api/health` returns
+`can_sign: true` beside `can_price: true`; `POST /api/quote` for a 2BR/2BA
+02116 first clean returns `ok:true`, **$239**, version `2026-08-24`, a
+signature matching `q1.<unix expiry>.<64 hex>`, and a 120-minute expiry. The
+same inputs through the local engine give **$239** — so the engine survived
+bundling, which is the specific check the 2026-09-02 outage exists to remind us
+to run.
+
+**NOT verified in production:** no live booking has been made through the signed
+path, and the tamper rejection has not been exercised against the live endpoint.
+Both were proved locally against the real Worker and real engine. Live
+tamper-testing was deliberately not run unilaterally: a guard failure would
+write a junk row into the production sheet, which is the founder's call to
+authorise, not an agent's.
 
 **Objective.** Make the quoted price something the server ISSUES rather than
 something the browser claims, so that a figure which has spent ten minutes in a
