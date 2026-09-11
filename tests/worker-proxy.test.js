@@ -77,7 +77,8 @@ function loadWorker(fetchImpl) {
   const calls = [];
   const box = {
     console: { log() {}, warn() {}, error(m) { calls.push({ log: String(m) }); } },
-    AbortController, setTimeout, clearTimeout, URL, Response, Request, Headers, JSON,
+    AbortController, setTimeout, clearTimeout, URL, URLSearchParams,
+    Response, Request, Headers, JSON,
     /* Present globally in Workers, absent in a bare vm. Modelled rather than
        stubbed so the hashing under test is the hashing that ships. */
     crypto: require('crypto').webcrypto, TextEncoder, TextDecoder,
@@ -627,6 +628,283 @@ console.log('\n=== 7. the failure UI exists and is reachable ===');
      and this endpoint is one more place a name could end up in a log line. */
   const personal = listed.filter(f => /name|email|phone|address|unit|notes/.test(f));
   t('and posts nothing personal to do it', personal.length === 0, personal);
+}
+
+/* ============================================================
+   /api/checkout — the payment link.
+   ------------------------------------------------------------
+   Everything above exists so that this endpoint has a price it can trust. The
+   tests here care about one property above all the others: THE CALLER CANNOT
+   SAY WHAT TO CHARGE. Signing quotes would have been pointless if the endpoint
+   that picks an amount accepted one over the wire.
+*/
+{
+  console.log('\n=== checkout ===');
+
+  /* Comments out, so a copy assertion tests what a CUSTOMER can read rather
+     than what a developer wrote about it. Crude on purpose — it only has to be
+     good enough to stop a stale sentence surviving in the rendered page. */
+  const strip = s => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+  const PORTAL = {
+    ok: true, view: 'portal', contactId: 'CON-1', firstName: 'A', name: 'A',
+    homes: [],
+    bookings: [
+      { bookingId: 'SRV-1', serviceLabel: 'First Clean', date: '2026-09-20',
+        price: 239, paid: false, completed: '', status: 'new' },
+      { bookingId: 'SRV-PAID', serviceLabel: 'First Clean', date: '2026-09-21',
+        price: 239, paid: true, completed: '', status: 'new' },
+      { bookingId: 'SRV-DONE', serviceLabel: 'First Clean', date: '2026-08-01',
+        price: 239, paid: false, completed: '2026-08-01', status: 'done' },
+      { bookingId: 'SRV-HUGE', serviceLabel: 'First Clean', date: '2026-09-22',
+        price: 99999, paid: false, completed: '', status: 'new' },
+    ],
+  };
+
+  const CENV = Object.assign({}, ENV, { STRIPE_SECRET_KEY: 'sk_test_fake_key_for_tests' });
+
+  /* The same job seen through its own client ticket, which is the other
+     surface a customer can pay from. */
+  const TICKET = {
+    ok: true, view: 'client',
+    booking: { serviceLabel: 'First Clean', date: '2026-09-20',
+               price: 239, paid: false, completed: '', status: 'new' },
+    home: {},
+  };
+  const PARTNER = { ok: true, view: 'partner', booking: { price: 239 } };
+
+  /* One stub for every hop: Apps Script answers the portal or ticket read,
+     Stripe answers the session create. Recorded separately so each can be
+     asserted on. */
+  function checkoutWorker(stripeReply, upstream) {
+    const seen = { portal: [], stripe: [] };
+    const { worker } = loadWorker(async (target, init) => {
+      if (String(target).includes('api.stripe.com')) {
+        seen.stripe.push({ target, init });
+        return stripeReply || new Response(
+          JSON.stringify({ id: 'cs_test_1', url: 'https://checkout.stripe.com/c/pay/cs_test_1' }),
+          { status: 200 });
+      }
+      seen.portal.push({ target, init });
+      const body = upstream || (String(target).includes('job=') ? TICKET : PORTAL);
+      return new Response(JSON.stringify(body), { status: 200 });
+    });
+    return { worker, seen };
+  }
+
+  const pay = (worker, body, env) => worker.fetch(new Request(
+    'https://servecleaning.com/api/checkout',
+    { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body) }), env || CENV);
+
+  const GOOD = { job_id: 'SRV-1', contact_id: 'CON-1', t: 'a-token-long-enough-to-pass' };
+
+  /* ---- the happy path ---- */
+  {
+    const { worker, seen } = checkoutWorker();
+    const res  = await pay(worker, GOOD);
+    const body = await res.json();
+    t('a checkout returns a Stripe URL',
+      body.ok === true && /checkout\.stripe\.com/.test(body.url || ''), body);
+    t('and reports it is in test mode', body.test_mode === true, body.test_mode);
+
+    const form = new URLSearchParams(seen.stripe[0].init.body);
+    t('the amount is the portal price in cents, not anything sent in',
+      form.get('line_items[0][price_data][unit_amount]') === '23900',
+      form.get('line_items[0][price_data][unit_amount]'));
+    t('the hold is AUTHORIZE-ONLY, not a charge',
+      form.get('payment_intent_data[capture_method]') === 'manual');
+    t('the job is on the session for reconciliation',
+      form.get('client_reference_id') === 'SRV-1' && form.get('metadata[job_id]') === 'SRV-1');
+    t('a double-click cannot make two holds',
+      seen.stripe[0].init.headers['Idempotency-Key'] === 'serve-SRV-1-23900',
+      seen.stripe[0].init.headers['Idempotency-Key']);
+    t('the portal was read with the caller\'s own token',
+      /portal=CON-1/.test(seen.portal[0].target) && /t=a-token/.test(seen.portal[0].target));
+  }
+
+  /* ---- THE ONE THAT MATTERS ---- */
+  {
+    const { worker, seen } = checkoutWorker();
+    await pay(worker, Object.assign({}, GOOD, {
+      amount: 1, price: 1, unit_amount: 1, cents: 1, quote_price: 1,
+      line_items: [{ price_data: { unit_amount: 1 } }],
+    }));
+    const form = new URLSearchParams(seen.stripe[0].init.body);
+    t('NO field on the request can change the amount',
+      form.get('line_items[0][price_data][unit_amount]') === '23900',
+      form.get('line_items[0][price_data][unit_amount]'));
+    t('and a dollar never appears anywhere in what Stripe is told',
+      !/(^|[^0-9])100([^0-9]|$)/.test(seen.stripe[0].init.body.replace(/23900/g, '')) &&
+      !seen.stripe[0].init.body.includes('unit_amount=1&'),
+      seen.stripe[0].init.body.slice(0, 200));
+  }
+
+  /* ---- refusals, none of which may reach Stripe ---- */
+  const refuses = async (label, body, expected) => {
+    const { worker, seen } = checkoutWorker();
+    const res = await pay(worker, body);
+    const out = await res.json();
+    t(label, out.ok === false && out.error === expected && seen.stripe.length === 0,
+      { got: out, stripeCalls: seen.stripe.length });
+  };
+  await refuses('a job from someone else\'s portal is not found',
+    Object.assign({}, GOOD, { job_id: 'SRV-SOMEONE-ELSE' }), 'not_found');
+  await refuses('an already-paid booking is refused',
+    Object.assign({}, GOOD, { job_id: 'SRV-PAID' }), 'already_paid');
+  await refuses('a completed booking is refused',
+    Object.assign({}, GOOD, { job_id: 'SRV-DONE' }), 'already_completed');
+  await refuses('a nonsense price never reaches a card',
+    Object.assign({}, GOOD, { job_id: 'SRV-HUGE' }), 'price_out_of_range');
+
+  {
+    const { worker, seen } = checkoutWorker();
+    const res = await pay(worker, GOOD, ENV);   // no STRIPE_SECRET_KEY
+    const out = await res.json();
+    t('with no Stripe key the button simply cannot be used',
+      out.ok === false && out.error === 'not_configured' && seen.stripe.length === 0, out);
+  }
+  {
+    const { worker } = checkoutWorker();
+    const res = await worker.fetch(new Request('https://servecleaning.com/api/checkout',
+      { method: 'GET' }), CENV);
+    t('GET is refused', res.status === 405, res.status);
+  }
+
+  /* ---- Stripe itself failing ---- */
+  {
+    const { worker } = checkoutWorker(new Response(
+      '{"error":{"message":"No such price: sk_leak_hint","type":"invalid_request_error"}}',
+      { status: 400 }));
+    const res = await pay(worker, GOOD);
+    const out = await res.json();
+    t('a Stripe failure is a 502, not a 200 with no link', res.status === 502, res.status);
+    t('and Stripe\'s own message is never handed to the customer',
+      !JSON.stringify(out).includes('No such price') &&
+      !JSON.stringify(out).includes('sk_leak_hint'), out);
+  }
+
+  /* ---- the return trip ---- */
+  {
+    const { worker, seen } = checkoutWorker();
+    await pay(worker, GOOD);
+    const form = new URLSearchParams(seen.stripe[0].init.body);
+    const urls = [form.get('success_url'), form.get('cancel_url')];
+    t('return URLs are built here, never taken from the caller',
+      urls.every(u => u.startsWith('https://servecleaning.com/')), urls);
+    /* The portal token is a PERMANENT customer credential. It must not end up
+       in a third party's dashboard just to get the customer back to the page
+       they were already on — portal.js stashes and restores it instead. */
+    t('and they carry no portal token',
+      urls.every(u => !u.includes('a-token') && !/[?&]t=/.test(u)), urls);
+    t('a portal payer comes back to the portal', urls.every(u => u.includes('/h?')), urls);
+  }
+  {
+    /* Bouncing a ticket-payer to /h would land them on a page their credential
+       does not open, seconds after paying. */
+    const { worker, seen } = checkoutWorker();
+    await pay(worker, { job_id: 'SRV-1', t: 'a-token-long-enough-to-pass' });
+    const form = new URLSearchParams(seen.stripe[0].init.body);
+    t('a ticket payer comes back to the ticket',
+      form.get('success_url').includes('/j?') && form.get('cancel_url').includes('/j?'),
+      [form.get('success_url'), form.get('cancel_url')]);
+  }
+
+  /* ---- the ticket page ---- */
+  {
+    const tk = fs.readFileSync(path.join(REPO_ROOT, 'ticket.js'), 'utf8');
+    const call = (tk.match(/fetch\('\/api\/checkout'[\s\S]*?\}\)/) || [''])[0];
+    t('the ticket sends a job and a credential, nothing else',
+      /job_id:\s*id/.test(call) && !/price|amount|cents/.test(call), call.slice(0, 120));
+    t('the ticket keeps its credential before leaving', /sessionStorage\.setItem\(KEEP/.test(tk));
+    t('the old "due at service" copy is gone from the ticket',
+      !/due at service/i.test(strip(tk)),
+      (strip(tk).match(/.{0,40}due at service.{0,40}/i) || [])[0]);
+    /* renderPartner must never grow a pay button. The cleaner's view of a job
+       shows no price and must never offer to take one. */
+    const partner = (tk.match(/function renderPartner\(d\)[\s\S]*$/) || [''])[0];
+    t('the partner view has no payment button', !/payBlock/.test(partner));
+  }
+
+  /* ---- the other surface: a job's own client ticket ---- */
+  {
+    const { worker, seen } = checkoutWorker();
+    const res  = await pay(worker, { job_id: 'SRV-1', t: 'a-token-long-enough-to-pass' });
+    const body = await res.json();
+    t('a client ticket can pay without a portal id',
+      body.ok === true && /checkout\.stripe\.com/.test(body.url || ''), body);
+    t('and it is read through the JOB lookup, scoped to the client view',
+      /job=SRV-1/.test(seen.portal[0].target) && /view=client/.test(seen.portal[0].target),
+      seen.portal[0].target);
+    const form = new URLSearchParams(seen.stripe[0].init.body);
+    t('the ticket price is the sheet price too',
+      form.get('line_items[0][price_data][unit_amount]') === '23900');
+    t('and with no contact id, none is invented for Stripe',
+      form.get('metadata[contact_id]') === null);
+  }
+
+  /* A CLEANER MUST NOT BE ABLE TO RAISE A CHARGE ON A CUSTOMER. Apps Script
+     refuses a partner token on the client view already; this is the second
+     lock, because one lock on a payment path is not enough. */
+  {
+    const { worker, seen } = checkoutWorker(null, PARTNER);
+    const out = await (await pay(worker, { job_id: 'SRV-1', t: 'a-partner-token-long-enough' })).json();
+    t('a partner view is never priced from',
+      out.ok === false && out.error === 'not_found' && seen.stripe.length === 0, out);
+  }
+
+  /* An older Apps Script deployment with no portal route falls through to the
+     health check, which answers ok:true. The ticket page hit exactly this on
+     2026-09-08 and rendered it as a real booking. */
+  {
+    const { worker, seen } = checkoutWorker(null, { ok: true, service: 'serve-booking-webhook' });
+    const out = await (await pay(worker, GOOD)).json();
+    t('a health-check response is not mistaken for a booking',
+      out.ok === false && seen.stripe.length === 0, out);
+  }
+
+  /* ---- the page that calls it ----
+     The server refuses to take an amount, but the strongest version of that
+     guarantee is the browser never having one to send. Asserted against the
+     source, because this is about what the page is capable of asking for. */
+  {
+    const portal = fs.readFileSync(path.join(REPO_ROOT, 'portal.js'), 'utf8');
+    const call = (portal.match(/fetch\('\/api\/checkout'[\s\S]*?\}\)/) || [''])[0];
+    t('the portal sends a job and a credential, nothing else',
+      /job_id/.test(call) && /contact_id/.test(call) && /t:\s*token/.test(call), !!call);
+    t('and it cannot send an amount even by accident',
+      !/price|amount|cents|unit_amount/.test(call), call.slice(0, 160));
+
+    /* Without the stash the customer comes back from Stripe to a portal with
+       no credential and gets "This link is incomplete" after paying, which is
+       the worst possible moment to show that sentence. */
+    t('the page keeps its own credential before leaving for Stripe',
+      /sessionStorage\.setItem\(KEEP/.test(portal));
+    t('and restores it when Stripe sends them back',
+      /sessionStorage\.getItem\(KEEP/.test(portal));
+
+    /* "Due at service" stopped being true the moment a card is authorized at
+       booking. It must not survive anywhere the CUSTOMER can read it — comments
+       are free to discuss it, and the first version of this check failed on the
+       comment explaining the change. */
+    t('the old "due at service" copy is gone from the portal',
+      !/due at service/i.test(strip(portal)),
+      (strip(portal).match(/.{0,40}due at service.{0,40}/i) || [])[0]);
+  }
+
+  /* ---- health says whether this could move real money ---- */
+  {
+    const { worker } = loadWorker(async () => new Response('{}'));
+    const live = await (await worker.fetch(new Request('https://servecleaning.com/api/health'),
+      { STRIPE_SECRET_KEY: 'sk_live_dangerous' })).json();
+    const test = await (await worker.fetch(new Request('https://servecleaning.com/api/health'),
+      { STRIPE_SECRET_KEY: 'sk_test_harmless' })).json();
+    t('health distinguishes a LIVE key from a test one',
+      live.stripe_mode === 'LIVE' && test.stripe_mode === 'test',
+      { live: live.stripe_mode, test: test.stripe_mode });
+    t('and still never reports the key itself',
+      !JSON.stringify(live).includes('dangerous') && !JSON.stringify(test).includes('harmless'));
+  }
 }
 
 /* ============================================================

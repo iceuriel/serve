@@ -4115,6 +4115,67 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
     margin: 1.1rem 0 0.5rem;
 }
 
+/* --- authorize payment ---------------------------------------------------
+   Deliberately quieter than a booking CTA. By the time somebody sees this they
+   have already decided to use Serve; the job of the button is to be findable
+   and unambiguous, not to persuade. A loud button here reads as a demand. */
+.pay__wrap { margin: 0.9rem 0 0.2rem; }
+
+.pay__btn {
+    font-family: var(--flow-sans);
+    font-size: 0.86rem;
+    font-weight: 600;
+    color: #fff;
+    background: var(--color-accent);
+    border: 1px solid var(--color-accent);
+    border-radius: 7px;
+    padding: 0.62rem 1.05rem;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+.pay__btn:hover:not(:disabled) {
+    background: var(--color-accent-hover);
+    border-color: var(--color-accent-hover);
+}
+.pay__btn:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+}
+/* Disabled means "already working on it", so it must not look broken —
+   dimmed and not-allowed would suggest the click failed. */
+.pay__btn:disabled { opacity: 0.62; cursor: progress; }
+
+.pay__wrap .tk-note { margin: 0.5rem 0 0; }
+
+/* Empty until something goes wrong, so it takes no space in the normal case. */
+.pay__err:empty { display: none; }
+.pay__err {
+    font-family: var(--flow-sans);
+    font-size: 0.83rem;
+    line-height: 1.45;
+    color: #b91c1c;
+    margin: 0.55rem 0 0;
+}
+
+/* Returning from Stripe. The success tint is the same green the saved-answer
+   line uses, so the portal has one vocabulary for "that worked". */
+.portal__note {
+    font-family: var(--flow-sans);
+    font-size: 0.87rem;
+    line-height: 1.5;
+    color: var(--color-text);
+    background: var(--color-surface-muted, #f6f6f5);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 0.8rem 0.95rem;
+    margin: 0 0 1.1rem;
+}
+.portal__note--ok {
+    color: #166534;
+    background: #f0fdf4;
+    border-color: #bbf7d0;
+}
+
 /* --- one access question --- */
 .pq {
     border: 1px solid var(--color-border);

@@ -104,6 +104,7 @@ export default {
 
     if (url.pathname === "/api/submit") return handleSubmit(request, env);
     if (url.pathname === "/api/quote")  return handleQuote(request, env);
+    if (url.pathname === "/api/checkout") return handleCheckout(request, env);
     if (url.pathname === "/api/slots")  return handleSlots(request, env);
     if (url.pathname === "/api/job")    return handleJob(request, env);
     if (url.pathname === "/api/photos") return handlePhotos(request, env);
@@ -479,6 +480,12 @@ function handleHealth(env) {
        healthy either way, which is exactly why it is reported here. */
     can_sign: !!(env && env.QUOTE_SECRET),
     can_store_photos: !!(env && env.BOOKING_PHOTOS && env.PHOTO_BRIDGE_SECRET && env.WEBHOOK_URL),
+    /* Whether a payment link can be issued, and — the part worth reporting out
+       loud — whether it would move real money. A live key reaching production
+       unnoticed is the one mistake here that cannot be undone with a redeploy. */
+    can_charge: !!(env && env.STRIPE_SECRET_KEY),
+    stripe_mode: !(env && env.STRIPE_SECRET_KEY) ? "none"
+      : (env.STRIPE_SECRET_KEY.startsWith("sk_test_") ? "test" : "LIVE"),
     bindings: names,
   });
 }
@@ -1030,6 +1037,201 @@ async function handleQuote(request, env) {
     quote_scope: quoteScope(d),
     expires_at: exp,
   });
+}
+
+
+/* ============================================================
+   PAYMENT  —  POST /api/checkout
+   ============================================================
+
+   Hands back a Stripe Checkout URL for one booking. That URL is the "payment
+   link": the customer clicks it from their portal, Stripe collects the card,
+   and Serve never sees a card number or takes on any of the handling that
+   would come with seeing one.
+
+   THE ONE RULE THIS ENDPOINT EXISTS TO ENFORCE: THE CALLER DOES NOT SAY WHAT
+   TO CHARGE. It sends a job id and the credential proving the job is theirs.
+   The amount is then read out of the JOBS row through the same token-checked
+   lookup the portal itself uses. There is no field on this request that could
+   carry a price, which is the only version of this that cannot be argued with
+   — the whole point of signing quotes was to stop a number that has been in a
+   browser from choosing what a card is charged, and accepting one here would
+   have handed it straight back.
+
+   AUTHORIZE NOW, CAPTURE LATER. `capture_method: manual` puts a HOLD on the
+   card rather than taking the money: the funds are guaranteed to Serve but not
+   collected. That matches the operating fact that a partner still has to
+   accept each job — Serve should not be holding somebody's money for work
+   nobody has agreed to do. An operator captures when the partner accepts.
+
+   The hold lapses after about seven days. Acceptance has to happen inside that
+   window or the authorization has to be retaken; nothing here enforces that,
+   and it is an operating decision rather than a coding one. */
+
+/* Above this, something is wrong with the row rather than with the customer.
+   A TRIPWIRE, NOT A PRICE RULE: it exists so a corrupted cell, a stray zero or
+   a units mix-up cannot reach a card. Real quotes are hundreds of dollars, so
+   a genuine booking never comes near it — and if one ever does, the fix is to
+   look at the row, not to raise the number. */
+const MAX_CHARGE_CENTS = 250000;   // $2,500
+
+async function handleCheckout(request, env) {
+  if (request.method !== "POST") {
+    return json({ ok: false, error: "method_not_allowed" }, 405);
+  }
+  if (!env.STRIPE_SECRET_KEY) {
+    /* Not configured is not an outage — the button simply does not appear. */
+    console.error("STRIPE_SECRET_KEY is not bound — checkout unavailable");
+    return json({ ok: false, error: "not_configured" });
+  }
+  if (!env.WEBHOOK_URL) return json({ ok: false, error: "not_configured" });
+
+  let d;
+  try {
+    const raw = await request.text();
+    if (!raw || raw.length > 4000) return json({ ok: false, error: "bad_body" }, 400);
+    d = JSON.parse(raw);
+  } catch (_) {
+    return json({ ok: false, error: "bad_body" }, 400);
+  }
+
+  const jobId     = String((d && d.job_id) || "");
+  const contactId = String((d && d.contact_id) || "");
+  const tok       = String((d && d.t) || "");
+  if (!jobId || tok.length < 16) {
+    return json({ ok: false, error: "not_found" }, 404);
+  }
+
+  /* THE AMOUNT COMES FROM HERE AND NOWHERE ELSE.
+     Two ways in, because the customer has two surfaces that both show a price:
+     the portal, which is what the confirmation email sends, and one job's own
+     client ticket. Each is read back through the SAME token-checked lookup its
+     own page already uses, so ownership is proved upstream by Apps Script
+     rather than assumed here.
+     A PARTNER TOKEN OPENS NEITHER. It is a different audience under the same
+     secret, the upstream refuses it, and the view check below refuses it
+     again — a cleaner must never be able to raise a charge on a customer. */
+  const lookup = contactId
+    ? env.WEBHOOK_URL + "?portal=" + encodeURIComponent(contactId) +
+      "&t=" + encodeURIComponent(tok)
+    : env.WEBHOOK_URL + "?job=" + encodeURIComponent(jobId) +
+      "&t=" + encodeURIComponent(tok) + "&view=client";
+
+  const up = await relay(lookup, { method: "GET" }, UPSTREAM_TIMEOUT_MS.slots);
+  if (!up.ok) {
+    console.error("checkout portal read failed: " + up.error);
+    return json({ ok: false, error: "upstream_unreachable" }, 502);
+  }
+
+  let model;
+  try {
+    model = JSON.parse(up.text);
+  } catch (_) {
+    return json({ ok: false, error: "upstream_unreadable" }, 502);
+  }
+  if (!model || model.ok !== true) return json({ ok: false, error: "not_found" }, 404);
+
+  /* A portal answers with every booking on the account; a client ticket
+     answers with the one its token opens. Anything else — a partner view, a
+     health check from an older deployment answering ok:true — is not something
+     to price from. The ticket's own page hit that exact ordering bug on
+     2026-09-08, which is why this checks the VIEW and not merely `ok`. */
+  let booking = null;
+  if (model.view === "portal") {
+    booking = (model.bookings || []).find(b => String(b.bookingId) === jobId) || null;
+  } else if (model.view === "client") {
+    booking = model.booking || null;
+  }
+  /* A job id that is not on THIS credential belongs to somebody else, and the
+     answer is the same one an unknown job gets. Never say which it was. */
+  if (!booking) return json({ ok: false, error: "not_found" }, 404);
+
+  if (booking.completed) return json({ ok: false, error: "already_completed" });
+  if (booking.paid)      return json({ ok: false, error: "already_paid" });
+
+  const cents = Math.round(Number(booking.price) * 100);
+  if (!isFinite(cents) || cents <= 0) {
+    return json({ ok: false, error: "no_price_on_file" });
+  }
+  if (cents > MAX_CHARGE_CENTS) {
+    console.error("checkout refused, price above tripwire: " + jobId + " " + cents);
+    return json({ ok: false, error: "price_out_of_range" });
+  }
+
+  /* Built here, never taken from the request: a caller-supplied return address
+     would turn this into an open redirect wearing Stripe's domain. The portal
+     token is deliberately NOT in it — the page stashes its own credential
+     before leaving and restores it on the way back, so a permanent customer
+     credential never lands in a third party's dashboard. */
+  const origin = new URL(request.url).origin;
+
+  const form = new URLSearchParams();
+  form.set("mode", "payment");
+  form.set("payment_intent_data[capture_method]", "manual");
+  form.set("payment_intent_data[description]", "Serve — " + (booking.serviceLabel || "cleaning"));
+  form.set("line_items[0][quantity]", "1");
+  form.set("line_items[0][price_data][currency]", "usd");
+  form.set("line_items[0][price_data][unit_amount]", String(cents));
+  form.set("line_items[0][price_data][product_data][name]",
+           (booking.serviceLabel || "Cleaning") +
+           (booking.date ? " — " + booking.date : ""));
+  /* Back to the surface they started on. Bouncing a ticket-payer to the portal
+     would land them on a page their credential does not open, immediately
+     after paying — the worst possible moment to show "this link is
+     incomplete". Each page restores its own stashed credential. */
+  const back = contactId ? "/h" : "/j";
+  form.set("success_url", origin + back + "?pay=done");
+  form.set("cancel_url",  origin + back + "?pay=cancelled");
+  /* Reconciliation handles, both opaque ids rather than anything about a
+     person. This is what a Stripe webhook will key on when it writes the
+     payment back to the row. */
+  form.set("client_reference_id", jobId);
+  form.set("metadata[job_id]", jobId);
+  if (contactId) form.set("metadata[contact_id]", contactId);
+
+  let res, text;
+  try {
+    res = await fetch("https://api.stripe.com/v1/checkout/sessions", {
+      method: "POST",
+      headers: {
+        "Authorization": "Bearer " + env.STRIPE_SECRET_KEY,
+        "Content-Type": "application/x-www-form-urlencoded",
+        /* A double-click must not create two holds on one card. Keyed on the
+           amount as well as the job, so a repriced booking is legitimately a
+           new session rather than silently reusing the old figure. */
+        "Idempotency-Key": "serve-" + jobId + "-" + cents,
+      },
+      body: form.toString(),
+    });
+    text = await res.text();
+  } catch (err) {
+    console.error("stripe unreachable: " + String(err));
+    return json({ ok: false, error: "stripe_unreachable" }, 502);
+  }
+
+  if (!res.ok) {
+    /* Stripe's message names the parameter it disliked and carries nothing
+       about the customer. Logged in full because a silent checkout failure is
+       the hardest kind to diagnose; returned only as a generic error. */
+    console.error("stripe rejected the session: HTTP " + res.status + " " + text.slice(0, 500));
+    return json({ ok: false, error: "stripe_error" }, 502);
+  }
+
+  let session;
+  try {
+    session = JSON.parse(text);
+  } catch (_) {
+    return json({ ok: false, error: "stripe_unreadable" }, 502);
+  }
+  if (!session.url) return json({ ok: false, error: "stripe_no_url" }, 502);
+
+  /* Amount and job, never a name or an address. This is the line that answers
+     "was a link ever issued for this booking, and for how much". */
+  console.log("checkout session created: " + jobId + " " + cents + " " +
+              (env.STRIPE_SECRET_KEY.startsWith("sk_test_") ? "TEST" : "LIVE"));
+
+  return json({ ok: true, url: session.url, amount: cents,
+                test_mode: env.STRIPE_SECRET_KEY.startsWith("sk_test_") });
 }
 
 

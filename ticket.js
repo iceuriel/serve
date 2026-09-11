@@ -30,6 +30,26 @@
     var id     = params.get('id')  || '';
     var token  = params.get('t')   || '';
     var view   = params.get('view') === 'partner' ? 'partner' : 'client';
+    var payResult = params.get('pay') || '';
+
+    /* COMING BACK FROM STRIPE.
+       The checkout return URL carries no token on purpose: a ticket link is a
+       credential, and it has no business sitting in a payment processor's
+       dashboard just to return somebody to the page they were already on. So
+       this page keeps its own before leaving and picks it up here. Same tab,
+       same origin, gone when the tab closes. Storage being unavailable costs
+       the return trip, never the link. */
+    var KEEP = 'serve.ticket';
+    if (!id || !token) {
+        try {
+            var kept = JSON.parse(sessionStorage.getItem(KEEP) || 'null');
+            if (kept) {
+                id = id || kept.id || '';
+                token = token || kept.t || '';
+                if (kept.view) view = kept.view;
+            }
+        } catch (_) { /* private mode — fall through to fail() */ }
+    }
 
     if (!id || !token) { fail('This link is incomplete.'); return; }
 
@@ -261,9 +281,91 @@
     /* ========================================================
        CLIENT — five sections
        ======================================================== */
+    /* ========================================================
+       PAYMENT
+       ========================================================
+       Sends the JOB and this page's own credential — never an amount. The
+       server reads what to charge out of the booking row, which is the whole
+       reason a quote is signed; a price that travelled through here could be
+       edited before it arrived.
+
+       AUTHORIZE, NOT CHARGE. Stripe places a hold and the money is collected
+       only once the partner has accepted the job.
+
+       CLIENT VIEW ONLY. renderPartner never calls this, and the server refuses
+       a partner token besides — a cleaner must not be able to raise a charge
+       on a customer. */
+
+    var PAY_ERRORS = {
+        not_configured:    'Card payment is not available yet. We will send an invoice instead.',
+        already_paid:      'This booking is already paid.',
+        already_completed: 'This booking is finished — there is nothing left to pay here.',
+        no_price_on_file:  'We need to confirm the price on this booking first. We will be in touch.',
+        price_out_of_range:'We need to check the price on this booking first. We will be in touch.',
+        not_found:         'We could not find that booking.',
+    };
+
+    function payBlock(b) {
+        var wrap = el('div', 'pay__wrap');
+        var btn  = el('button', 'pay__btn', 'Authorize payment');
+        btn.type = 'button';
+        var err  = el('p', 'pay__err', '');
+
+        btn.addEventListener('click', function () {
+            btn.disabled = true;
+            btn.textContent = 'Opening secure checkout…';
+            err.textContent = '';
+
+            /* Stash before leaving — see the note where id and token are read. */
+            try {
+                sessionStorage.setItem(KEEP, JSON.stringify({ id: id, t: token, view: view }));
+            } catch (_) { /* the return trip degrades; the payment still works */ }
+
+            fetch('/api/checkout', {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({ job_id: id, t: token }),
+            })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    if (d && d.ok && d.url) { location.href = d.url; return; }
+                    throw new Error((d && d.error) || 'unavailable');
+                })
+                .catch(function (e) {
+                    var code = String((e && e.message) || 'unavailable');
+                    console.warn('checkout failed', code);
+                    btn.disabled = false;
+                    btn.textContent = 'Authorize payment';
+                    err.textContent = PAY_ERRORS[code] ||
+                        'We could not open checkout just now. Please try again, ' +
+                        'or call us on the number below.';
+                });
+        });
+
+        wrap.appendChild(btn);
+        wrap.appendChild(el('p', 'tk-note',
+            'We place a hold on your card for ' + money(b.price) +
+            ' now, and only charge it once your cleaner has confirmed the job.'));
+        wrap.appendChild(err);
+        return wrap;
+    }
+
+    /* Stripe returns everyone to the same two addresses, so say what happened.
+       `cancelled` is not an error and must not read like one. */
+    function payBanner() {
+        if (payResult !== 'done' && payResult !== 'cancelled') return null;
+        var ok = payResult === 'done';
+        return el('p', ok ? 'portal__note portal__note--ok' : 'portal__note',
+            ok ? 'Thank you — your card is authorized. We will charge it once ' +
+                 'your cleaner confirms.'
+               : 'No payment was taken. Your booking is unchanged and you can ' +
+                 'authorize whenever you are ready.');
+    }
+
     function renderClient(d) {
         var b = d.booking || {};
         var done = !!b.completed;
+        add(bodyEl, payBanner());
 
         /* 1. BOOKING */
         bodyEl.appendChild(scheduleHead(b, [b.serviceLabel, homeLine(d.home)]));
@@ -273,11 +375,15 @@
             var p = el('div', 'tk-blk');
             p.appendChild(el('div', 'tk-lbl', 'Your price'));
             p.appendChild(el('div', 'tk-money', price));
-            /* There is no Stripe integration, so there is no payment link and
-               this must not imply one. `paid` is a column an operator sets. */
+            /* AUTHORIZE, NOT CHARGE. Stripe places a hold now; the money is
+               collected only once the partner has accepted the job, because
+               Serve should not be holding somebody's money for work nobody has
+               agreed to do yet. The old copy said "due at service", which
+               stopped being true the moment a card is authorized at booking. */
             p.appendChild(el('div', 'tk-note',
                 b.paid ? 'Paid — thank you.'
-                       : 'All in. Due at service, and it does not change on the day.'));
+                       : 'All in, and it does not change on the day.'));
+            if (!b.paid && !done) p.appendChild(payBlock(b));
             bodyEl.appendChild(p);
         }
         add(bodyEl, block('Add-ons', b.addOns));

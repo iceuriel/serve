@@ -31,6 +31,22 @@
     var params = new URLSearchParams(location.search);
     var id     = params.get('id') || '';
     var token  = params.get('t')  || '';
+    var payResult = params.get('pay') || '';
+
+    /* COMING BACK FROM STRIPE.
+       The checkout return URL deliberately carries no token: a portal link is a
+       PERMANENT customer credential, and it has no business sitting in a
+       payment processor's dashboard merely to return somebody to the page they
+       were already on. So this page keeps its own credential before it leaves
+       and picks it up here — same tab, same origin, gone when the tab closes.
+       Storage being unavailable costs the return trip, never the link itself. */
+    var KEEP = 'serve.portal';
+    if (!id || !token) {
+        try {
+            var kept = JSON.parse(sessionStorage.getItem(KEEP) || 'null');
+            if (kept) { id = id || kept.id || ''; token = token || kept.t || ''; }
+        } catch (_) { /* private mode, storage disabled — fall through to fail() */ }
+    }
 
     var model = null;
     var tab   = 'bookings';
@@ -255,6 +271,9 @@
        ======================================================== */
     function renderBookings() {
         var list = model.bookings || [];
+        /* Before the empty check: somebody returning from Stripe must be told
+           what happened even in the odd case that the list will not render. */
+        add(bodyEl, payBanner());
         if (!list.length) {
             bodyEl.appendChild(el('p', 'tk-val', 'No bookings yet.'));
             return;
@@ -308,7 +327,8 @@
             return det;
         }
 
-        add(inner, line('Payment', b.paid ? 'Paid' : 'Due at service'));
+        add(inner, line('Payment', b.paid ? 'Paid' : 'Not yet authorized'));
+        if (!b.paid && Number(b.price) > 0) inner.appendChild(payBlock(b));
 
         /* Who is coming. The portal is the link the confirmation email
            actually sends, so this is the surface that has to answer it —
@@ -359,6 +379,90 @@
 
         det.appendChild(inner);
         return det;
+    }
+
+    /* ========================================================
+       PAYMENT
+       ========================================================
+
+       The button asks the Worker for a Stripe Checkout URL and goes there. It
+       sends the JOB and this page's own credential — never an amount. The
+       server reads what to charge out of the booking row, which is the whole
+       reason the quote is signed in the first place; a price that travelled
+       through here could be edited before it arrived.
+
+       AUTHORIZE, NOT CHARGE. Stripe places a hold; the money is collected only
+       when the partner has accepted the job. Serve should not be holding
+       somebody's money for work nobody has yet agreed to do.
+
+       Every failure leaves the customer where they were with a sentence they
+       can act on. A payment button that silently does nothing is worse than no
+       button, because the booking still stands and they cannot tell. */
+
+    var PAY_ERRORS = {
+        not_configured:    'Card payment is not available yet. We will send an invoice instead.',
+        already_paid:      'This booking is already paid.',
+        already_completed: 'This booking is finished — there is nothing left to pay here.',
+        no_price_on_file:  'We need to confirm the price on this booking first. We will be in touch.',
+        price_out_of_range:'We need to check the price on this booking first. We will be in touch.',
+        not_found:         'We could not find that booking on your account.',
+    };
+
+    function payBlock(b) {
+        var wrap = el('div', 'pay__wrap');
+        var btn  = el('button', 'pay__btn', 'Authorize payment');
+        btn.type = 'button';
+        var err  = el('p', 'pay__err', '');
+
+        btn.addEventListener('click', function () {
+            btn.disabled = true;
+            btn.textContent = 'Opening secure checkout…';
+            err.textContent = '';
+
+            /* Stash before leaving — see the note where id and token are read. */
+            try { sessionStorage.setItem(KEEP, JSON.stringify({ id: id, t: token })); }
+            catch (_) { /* the return trip degrades; the payment still works */ }
+
+            fetch('/api/checkout', {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({ job_id: b.bookingId, contact_id: id, t: token }),
+            })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    if (d && d.ok && d.url) { location.href = d.url; return; }
+                    throw new Error((d && d.error) || 'unavailable');
+                })
+                .catch(function (e) {
+                    var code = String((e && e.message) || 'unavailable');
+                    console.warn('checkout failed', code);
+                    btn.disabled = false;
+                    btn.textContent = 'Authorize payment';
+                    err.textContent = PAY_ERRORS[code] ||
+                        'We could not open checkout just now. Please try again, ' +
+                        'or call us on the number below.';
+                });
+        });
+
+        wrap.appendChild(btn);
+        wrap.appendChild(el('p', 'tk-note',
+            'We place a hold on your card for ' + money(b.price) +
+            ' now, and only charge it once your cleaner has confirmed the job.'));
+        wrap.appendChild(err);
+        return wrap;
+    }
+
+    /* Stripe sends everyone back to the same two addresses, so the page says
+       what happened rather than leaving them guessing. `cancelled` is not an
+       error and must not read like one — people change their minds. */
+    function payBanner() {
+        if (payResult !== 'done' && payResult !== 'cancelled') return null;
+        var ok = payResult === 'done';
+        return el('p', ok ? 'portal__note portal__note--ok' : 'portal__note',
+            ok ? 'Thank you — your card is authorized. We will charge it once ' +
+                 'your cleaner confirms, and your booking below will update shortly.'
+               : 'No payment was taken. Your booking is unchanged and you can ' +
+                 'authorize whenever you are ready.');
     }
 
     function line(label, value) {

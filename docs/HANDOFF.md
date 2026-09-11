@@ -150,6 +150,13 @@ output, not by an assertion — which is why there is now one assertion per
 priced input that the scope actually distinguishes two values of it, plus a
 behavioural test that a standard-clean signature is refused on a heavy clean.
 
+**Closed by `2d3f228` and verified live.** Two production `/api/quote` calls for
+the same 02116 home returned **$239** at `standard` and **$308** at `heavy` — a
+$69 gap — with different scope strings and, decisively, **different
+signatures**. Checked read-only: no booking was submitted and nothing was
+written to the sheet. The live tamper path itself is still unexercised in
+production for the reason given above.
+
 The rule: **bind what is sent, and never coerce a priced input to a type it
 does not have.** A coercion that silently collapses two different homes to one
 string is indistinguishable from a working signature.
@@ -172,6 +179,55 @@ tickets. It does not bite here, and the reason is worth stating: the site does
 not depend on r20. Under r19 the three new keys are simply dropped, because
 `quote_meta` is a whitelist. So the site half is safe in either order — the only
 consequence of pushing it first is that the fields are not stored yet.
+
+### Payment links — `/api/checkout`, Stripe, TEST MODE ONLY
+
+`POST /api/checkout` returns a Stripe Checkout URL for one booking. That URL is
+the payment link: the customer opens it from their own page, Stripe takes the
+card, and Serve never sees a card number.
+
+**The one rule the endpoint exists to enforce: the caller does not say what to
+charge.** It sends a job id and the credential proving the job is theirs;
+there is no field on the request that can carry a price. The amount is read out
+of the booking row through the SAME token-checked lookup the customer's own page
+performs, so ownership is proved by Apps Script rather than assumed. Signing
+quotes would have been pointless if the endpoint that picks an amount accepted
+one over the wire.
+
+**Two ways in, because the customer has two surfaces.** The portal sends
+`contact_id` + portal token; a job's client ticket sends just the job token and
+is read through `?job=…&view=client`. **A partner token opens neither** — the
+upstream refuses it and the `view` check refuses it again. A cleaner must never
+be able to raise a charge on a customer.
+
+**Authorize, not charge.** `capture_method: manual` places a hold. Money is
+collected when the partner accepts. Idempotency key is `serve-<job>-<cents>`, so
+a double-click cannot make two holds and a repriced booking is legitimately a
+new session.
+
+**Refusals, none of which reach Stripe:** a job not on this credential, an
+already-paid or completed booking, no price on file, and a price above a
+$2,500 tripwire. The tripwire is a guard against a corrupted cell, **not a
+price rule** — if a real booking ever hits it, look at the row.
+
+**The portal token is never sent to Stripe.** The return URL carries no
+credential; each page stashes its own in `sessionStorage` before leaving and
+restores it on the way back, and the return address is built server-side (a
+caller-supplied one would be an open redirect wearing Stripe's domain).
+
+`/api/health` now reports `can_charge` and `stripe_mode`, and **`stripe_mode`
+says `LIVE` in capitals on purpose** — a live key reaching production unnoticed
+is the one mistake here a redeploy cannot undo.
+
+**Copy changed on both customer surfaces.** "Due at service" stopped being true
+the moment a card is authorized at booking; a test now fails if that phrase
+returns to either page's rendered text. **The replacement wording is mine, not
+the founder's, and is still open for a decision** — see the open items below.
+
+**NOT built yet:** nothing captures the hold, and nothing writes payment state
+back. `payment_status` is still OPS-owned and untouched by the script, so the
+`paid` flag both pages read is still whatever an operator typed. A Stripe
+webhook and the capture action are the next pieces.
 
 **Remaining, in order.**
 
