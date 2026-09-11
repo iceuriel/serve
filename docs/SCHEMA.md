@@ -74,6 +74,41 @@ narrative.
 | 35 | `zip` | WH | ZIP. |
 | 36 | `quote_meta` | WH | JSON blob: secondary quote data only (`original_price`, `discount_applied`, `steady_state_price`, the three recurring prices, `zip_tier`, `page_path`, `utm_*`, `unit_label`, `src`, `submitted_at`, the two SMS consent flags, plus `zone` / `park_tier` / `levels`, and `quote_sig` / `quote_scope` / `quote_version` — see below). |
 
+### `payout_rate` in `quote_meta` — added 2026-09-11 (webhook.gs r24)
+
+The share of this booking that goes to the partner company. `0.85` means the
+partner is paid 85% of the ticket and Serve keeps 15%.
+
+**Stamped by the server at booking, never accepted from the payload.** `doPost`
+assigns it from `currentPayoutRate()` before the record is built, so a browser
+sending its own `payout_rate` is overwritten rather than obeyed. A test asserts
+exactly that.
+
+**It is read back instead of the live setting, and that is the whole point.**
+Every partner surface derives its payout from the rate stamped on *that*
+booking. Changing the rate must not reprice a job a partner already accepted —
+the same rule `quote_sig` enforces on the customer's side, for the same reason:
+a number somebody agreed to must not move under them afterwards.
+
+**The source of truth is a sheet cell**, not this column and not the code:
+`SETTINGS` in the **Ops** workbook, column A `key` = `payout_rate`, column B
+`value` = `0.85`. Editing it changes every booking made afterwards, with no
+deploy. Missing tab, missing row, empty cell or unreadable workbook all fall
+back to `DEFAULT_PAYOUT_RATE` in webhook.gs — a booking must never fail because
+a settings lookup did.
+
+**Anything outside `(0, 1]` is refused, not clamped**, and the default is used
+with a loud log. `85` typed where `0.85` was meant is far likelier than an
+instruction to pay 8500%, and clamping would be guessing with somebody's money.
+A trailing `%` is accepted, because eventually somebody types one.
+
+> **`partner_payout` still wins wherever it is set.** That column (OPS, #20's
+> neighbour) is how one job gets a different answer — a difficult home, an
+> apology, a bonus — and a derived figure must never quietly replace a number a
+> human chose. Blank rate *and* blank override means no derived payout at all,
+> which is every booking made before r24, and it renders as "confirmed at
+> dispatch" rather than as zero.
+
 ### `quote_sig`, `quote_scope` and `quote_version` in `quote_meta` — added 2026-09-10 (webhook.gs r20)
 
 **What they are for:** proving, later, that the number in `quoted_price` is one

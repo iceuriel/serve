@@ -145,9 +145,26 @@ const WANT_META = ['original_price','discount_applied','steady_state_price','rec
   'unit_label','src','submitted_at'];
 t('quote_meta carries every secondary field present', WANT_META.every(k => k in meta),
   WANT_META.filter(k => !(k in meta)));
+/* `payout_rate` is stamped by the server, not sent by the browser, so it is
+   here rather than in WANT_META — that list is what a payload carries in. */
+const ALSO_META = ['utm_campaign', 'payout_rate'];
 t('quote_meta has nothing unexpected',
-  Object.keys(meta).every(k => WANT_META.concat(['utm_campaign']).includes(k)),
-  Object.keys(meta).filter(k => !WANT_META.concat(['utm_campaign']).includes(k)));
+  Object.keys(meta).every(k => WANT_META.concat(ALSO_META).includes(k)),
+  Object.keys(meta).filter(k => !WANT_META.concat(ALSO_META).includes(k)));
+
+/* r24 — THE SHARE IS STAMPED, AND THE BROWSER DOES NOT GET A VOTE.
+   Every partner surface reads the stamped value rather than the live setting,
+   so changing the rate tomorrow cannot reprice a job already accepted. That
+   only holds if what lands here came from the server. */
+t('the partner share is stamped on the booking', meta.payout_rate === 0.85, meta.payout_rate);
+{
+  const sneaky = A.post(Object.assign({}, BOOKING,
+    { submission_id: 'payout-forge-1', payout_rate: 0.99 }));
+  const forged = A.tabs.JOBS._rows.find(r => r[h('submission_id')] === 'payout-forge-1');
+  const forgedMeta = JSON.parse(forged[h('quote_meta')]);
+  t('a payload cannot set its own payout rate', forgedMeta.payout_rate === 0.85,
+    forgedMeta.payout_rate);
+}
 t('property_key still populated alongside the address',
   row[h('property_key')] === '02134-123-BEACON-ST-4B', row[h('property_key')]);
 t('nothing dropped', A.post(Object.assign({}, BOOKING, { submission_id: 'x2' })).dropped_fields.length === 0);

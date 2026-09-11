@@ -492,6 +492,45 @@ t('the payout is blank until an operator sets it — never a guessed number',
   !partner.booking.payout, partner.booking.payout);
 t('and the client is never shown the payout', !/payout/i.test(clientJson));
 
+/* r24 — THE PARTNER SHARE.
+   85% of the ticket by default, one editable cell as the source of truth, and
+   the rate STAMPED on each booking so that changing it tomorrow cannot reprice
+   a job a partner already accepted. */
+{
+  const payoutFor = S.sandbox.partnerPayoutFor;
+  const job = (over) => Object.assign(
+    { partnerPayout: '', payoutRate: 0.85, price: { quoted: 239, final: '' } }, over);
+
+  t('85% of the ticket', payoutFor(job()) === 203.15, payoutFor(job()));
+  t('the final price wins over the quote when set, same as the customer sees',
+    payoutFor(job({ price: { quoted: 239, final: 300 } })) === 255,
+    payoutFor(job({ price: { quoted: 239, final: 300 } })));
+
+  /* An operator's number is a decision about one job — a hard home, an apology,
+     a bonus — and a formula must never quietly overwrite one. */
+  t('an operator override always wins', payoutFor(job({ partnerPayout: 150 })) === 150);
+  t('even when it is lower than the formula',
+    payoutFor(job({ partnerPayout: 10, payoutRate: 0.85 })) === 10);
+
+  /* Blank is a real state, not zero. A zero on a ticket reads as "this job pays
+     nothing", which is a worse lie than saying the amount is not set yet. */
+  t('a booking older than r24 derives nothing', payoutFor(job({ payoutRate: null })) === '');
+  t('and a booking with no price derives nothing',
+    payoutFor(job({ price: { quoted: '', final: '' } })) === '');
+
+  /* A typo here pays a real company real money. */
+  t('a nonsense rate derives nothing rather than guessing',
+    payoutFor(job({ payoutRate: 85 })) === '' && payoutFor(job({ payoutRate: -1 })) === '',
+    [payoutFor(job({ payoutRate: 85 })), payoutFor(job({ payoutRate: -1 }))]);
+
+  /* The rate the sheet is trusted to hold, and the range it is refused outside. */
+  t('the setting is refused outside (0,1] rather than clamped',
+    /n <= 0 \|\| n > 1/.test(SRC) && /using " \+ DEFAULT_PAYOUT_RATE/.test(SRC));
+  t('a percent sign is accepted, because somebody will type one',
+    /%\\s\*\$/.test(SRC) && /n \/ 100/.test(SRC));
+  t('the default is 85%', /const DEFAULT_PAYOUT_RATE = 0\.85;/.test(SRC));
+}
+
 /* r23 — A SHEET CELL DOES NOT ALWAYS HOLD WHAT SOMEBODY TYPED.
    An operator reformatting `start_time` turns it into a real time value, and
    getValues() then returns a Date rather than a string. String()ing one put

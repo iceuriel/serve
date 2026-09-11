@@ -1,7 +1,29 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-11  ·  master  ·  r23 — booking slips stop saying 1899
+ * VERSION STAMP:  2026-09-11  ·  master  ·  r24 — the partner share, 85% and adjustable
+ *
+ * r24 = PARTNERS SEE WHAT THEY ARE PAID, WITHOUT ANYONE TYPING IT PER JOB.
+ *      The payout is 85% of the ticket by default. An operator's
+ *      `partner_payout` still wins wherever it is set — that column is how one
+ *      job gets a different answer, and a formula must not overwrite a decision
+ *      a human made about a hard home or an apology.
+ *
+ *      ONE PLACE TO CHANGE THE RATE, AND IT IS A SHEET CELL: `SETTINGS` in the
+ *      Ops workbook, key `payout_rate`, value `0.85`. No code change, no
+ *      deploy. A dashboard built over it later is a nicer front end onto the
+ *      same cell, not a second source of truth competing with it.
+ *
+ *      AND IT IS STAMPED PER BOOKING. The rate in force is written into
+ *      quote_meta when the booking is made, and every partner surface reads the
+ *      stamped value. Moving to 20% tomorrow must not reprice a job a partner
+ *      already accepted at 85% — the same rule the signed quote enforces on the
+ *      customer's side, for the same reason.
+ *
+ *      The cell is NOT trusted: anything outside (0,1] is refused and the code
+ *      default used instead, loudly. `85` typed where `0.85` was meant is far
+ *      likelier than an instruction to pay 8500%, and clamping would be
+ *      guessing with somebody's money.
  *
  * r23 = A SHEET CELL DOES NOT ALWAYS HOLD WHAT SOMEBODY TYPED INTO IT.
  *      `scheduled_date` and `start_time` are written as plain text, but the
@@ -521,6 +543,11 @@ const QUOTE_META_KEYS = [
      All three are blank on an unsigned booking, and blank simply means the
      price was never authenticated. It does not mean anything is wrong. */
   "quote_sig", "quote_scope", "quote_version",
+  /* r24 — the partner share in force when this booking was made. STAMPED by
+     doPost from currentPayoutRate(), never accepted from the payload, and read
+     back by every partner surface instead of the live setting. Changing the
+     rate must not reprice a job somebody already accepted. */
+  "payout_rate",
 ];
 
 /**
@@ -783,6 +810,12 @@ function doPost(e) {
       return json({ status: "ok", duplicate: true, submission_id: data.submission_id });
     }
 
+    /* THE PARTNER SHARE IN FORCE RIGHT NOW, stamped onto this booking so that
+       changing the rate tomorrow cannot reprice it. Assigned, never defaulted:
+       `data` came from a browser, and a payload arriving with its own
+       payout_rate must not be the one that gets written. See currentPayoutRate. */
+    data.payout_rate = currentPayoutRate();
+
     const sched  = normalizeSchedule(data);
     const leadId = resolveLeadId(data);
 
@@ -990,7 +1023,7 @@ function doGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-11 r23" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-11 r24" });
 }
 
 
@@ -1332,6 +1365,10 @@ function getBooking(ss, jobId) {
       addOnRevenue: f("add_on_rev"),
     },
     partnerPayout: f("partner_payout"),
+    /* The share agreed when THIS booking was made, not the one in force today.
+       Blank on anything booked before r24, which is a real state and reads as
+       "no derived payout" rather than as zero. */
+    payoutRate:    Number(meta.payout_rate) || null,
     payment: {
       status: String(f("payment_status") || ""),
       paid:   String(f("payment_status") || "").toLowerCase() === "paid",
@@ -1679,10 +1716,13 @@ function buildVendorTicketModel(ss, booking) {
       serviceCode:  booking.serviceCode,
       serviceLabel: SERVICE_CODES[booking.serviceCode] || booking.serviceLabel,
       condition:    booking.condition,
-      /* THEIR payout, never the customer's price. Blank until an operator sets
-         it at dispatch, and the ticket says "confirmed at dispatch" rather
-         than showing a zero — a zero reads as "this job pays nothing". */
-      payout:       booking.partnerPayout,
+      /* THEIR payout, never the customer's price.
+         r24 — derived from the share stamped on this booking when a human has
+         not set a figure by hand. An operator's number always wins; see
+         partnerPayoutFor. Still blank on a pre-r24 booking with no override,
+         and the ticket says "confirmed at dispatch" rather than showing a zero,
+         because a zero reads as "this job pays nothing". */
+      payout:       partnerPayoutFor(booking),
       date:         booking.scheduledDate,
       time:         booking.startTime,
       when:         booking.scheduleSummary,
@@ -2297,6 +2337,106 @@ function opsBook() {
   return SpreadsheetApp.openById(OPS_SPREADSHEET_ID);
 }
 
+
+/* ============================================================
+   THE PARTNER SHARE  —  r24
+   ============================================================
+
+   What fraction of a booking goes to the partner company. 0.85 means the
+   partner is paid 85% of the ticket and Serve keeps 15%.
+
+   ONE PLACE TO CHANGE IT, AND IT IS A SHEET CELL. `SETTINGS` in the Ops
+   workbook, column A `key`, column B `value`, row `payout_rate`. Editing that
+   cell changes the rate for every booking made afterwards, with no code change,
+   no deploy, and no paste into the Apps Script editor. That is the whole design
+   goal: the number lives where the founder already works, and a dashboard built
+   over it later is a nicer front end onto the same cell rather than a new
+   source of truth competing with this one.
+
+   AND IT APPLIES TO FUTURE BOOKINGS ONLY. The rate in force is STAMPED onto
+   each JOBS row when the booking is made, and every partner surface reads the
+   stamped value rather than this function. Going from 15% to 20% tomorrow must
+   not quietly reprice a job a partner already accepted at 85% — that is the
+   same rule the signed quote enforces on the customer's side, for the same
+   reason: a number somebody agreed to must not move under them afterwards.
+
+   THE CELL IS NOT TRUSTED. A typo here pays a real company real money, and
+   `85` typed where `0.85` was meant would be an 8500% payout. Anything outside
+   (0, 1] is refused and the code default is used instead, loudly. A trailing
+   "%" is accepted because somebody will eventually type it.
+
+   Missing tab, missing row, empty cell, unreadable workbook — all fall back to
+   DEFAULT_PAYOUT_RATE. A booking must never fail because a settings lookup did. */
+
+const DEFAULT_PAYOUT_RATE = 0.85;
+const SETTINGS_TAB = "SETTINGS";
+
+/** Parsed once per execution. Apps Script runs are short; this is per-request. */
+var PAYOUT_RATE_CACHE = null;
+
+function currentPayoutRate() {
+  if (PAYOUT_RATE_CACHE !== null) return PAYOUT_RATE_CACHE;
+  PAYOUT_RATE_CACHE = readPayoutRate();
+  return PAYOUT_RATE_CACHE;
+}
+
+function readPayoutRate() {
+  try {
+    var sheet = opsBook().getSheetByName(SETTINGS_TAB);
+    if (!sheet || sheet.getLastRow() < 2) return DEFAULT_PAYOUT_RATE;
+
+    var rows = sheet.getRange(1, 1, sheet.getLastRow(), 2).getValues();
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i][0] || "").trim().toLowerCase() !== "payout_rate") continue;
+
+      var raw = String(rows[i][1] === 0 ? "0" : (rows[i][1] || "")).trim();
+      if (!raw) return DEFAULT_PAYOUT_RATE;
+
+      var pct = /%\s*$/.test(raw);
+      var n = Number(raw.replace(/%\s*$/, "").trim());
+      if (pct) n = n / 100;
+
+      if (!isFinite(n) || n <= 0 || n > 1) {
+        /* Loud, because the site keeps working and nothing else would say so.
+           Never clamp into range: "85" is far more likely to be a typo for
+           0.85 than an instruction to pay 8500%, and guessing which would be
+           guessing with somebody's money. */
+        console.error("SETTINGS payout_rate is not a fraction in (0,1]: " +
+                      JSON.stringify(raw) + " — using " + DEFAULT_PAYOUT_RATE);
+        return DEFAULT_PAYOUT_RATE;
+      }
+      return n;
+    }
+    return DEFAULT_PAYOUT_RATE;
+  } catch (err) {
+    console.error("payout_rate lookup failed, using default: " + err);
+    return DEFAULT_PAYOUT_RATE;
+  }
+}
+
+/**
+ * What this partner is paid for this job.
+ *
+ * `partner_payout` WINS WHENEVER IT IS SET. It is the operator's override for
+ * the job that does not fit the rule — a difficult home, an apology, a bonus —
+ * and a derived number must never quietly replace a figure a human chose.
+ *
+ * Otherwise it is the stamped rate times the ticket, using the same
+ * `final || quoted` the customer's own price uses, so the two sides of the job
+ * always describe the same booking. No stamped rate and no override means a
+ * booking older than r24, and the honest answer there is nothing at all.
+ */
+function partnerPayoutFor(booking) {
+  if (booking.partnerPayout !== "" && booking.partnerPayout != null) {
+    return booking.partnerPayout;
+  }
+  var rate  = Number(booking.payoutRate);
+  var total = Number(booking.price && (booking.price.final || booking.price.quoted));
+  if (!isFinite(rate) || rate <= 0 || rate > 1) return "";
+  if (!isFinite(total) || total <= 0) return "";
+  return Math.round(total * rate * 100) / 100;
+}
+
 /**
  * WHAT A VENDOR MAY EDIT ABOUT THEMSELVES. Everything else on the row is
  * Serve's.
@@ -2592,8 +2732,9 @@ function buildVendorPortalModel(ss, vendor) {
         status:       b.status,
         completed:    b.completedDate,
         /* Their payout. NOT b.price — what Serve charges is not a partner's
-           business, and the margin is the model. */
-        payout:       b.partnerPayout,
+           business, and the margin is the model. r24 derives it from the share
+           stamped on the booking when no operator figure is set. */
+        payout:       partnerPayoutFor(b),
         home:         [b.beds === 0 ? "Studio" : b.beds + " BR",
                        b.baths + " BA"].filter(Boolean).join(" / "),
         /* Address only. No customer name, email or phone — contact routes
