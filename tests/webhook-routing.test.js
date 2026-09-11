@@ -492,6 +492,50 @@ t('the payout is blank until an operator sets it — never a guessed number',
   !partner.booking.payout, partner.booking.payout);
 t('and the client is never shown the payout', !/payout/i.test(clientJson));
 
+/* r23 — A SHEET CELL DOES NOT ALWAYS HOLD WHAT SOMEBODY TYPED.
+   An operator reformatting `start_time` turns it into a real time value, and
+   getValues() then returns a Date rather than a string. String()ing one put
+
+       Fri Dec 29 1899 22:00:00 GMT-0500 (Eastern Standard Time)
+
+   at the top of live booking slips. 1899 is Sheets' own epoch for a cell that
+   has a time and no date. Driven here with the exact Date the sheet produces,
+   not with a hand-written string, because the string is the symptom. */
+{
+  const timeCell = S.sandbox.timeCellText, dateCell = S.sandbox.dateCellText;
+  t('the cell normalisers are reachable',
+    typeof timeCell === 'function' && typeof dateCell === 'function');
+
+  /* Exactly what Sheets hands back for a time-only cell reading 9:00. */
+  const sheetTime = new Date(1899, 11, 30, 9, 0, 0);
+  t('a time-only cell becomes a readable time, not 1899',
+    timeCell(sheetTime) === '9:00 AM ET', timeCell(sheetTime));
+  t('and never leaks the epoch date',
+    !/1899|GMT|Dec/.test(timeCell(sheetTime)), timeCell(sheetTime));
+
+  const pm = new Date(1899, 11, 30, 14, 30, 0);
+  t('afternoon reads as PM', timeCell(pm) === '2:30 PM ET', timeCell(pm));
+  const midnight = new Date(1899, 11, 30, 0, 5, 0);
+  t('midnight is 12, not 0', timeCell(midnight) === '12:05 AM ET', timeCell(midnight));
+
+  /* Most cells are still text and always will be. */
+  t('existing text is kept, with ET added', timeCell('9–11 AM') === '9–11 AM ET');
+  t('and ET is not doubled', timeCell('9–11 AM ET') === '9–11 AM ET');
+  t('prose is left completely alone', timeCell('Morning preferred') === 'Morning preferred');
+  t('blank stays blank', timeCell('') === '');
+
+  /* scheduled_date has to stay ISO — prettyDate() splits it on "-", so a
+     reformatted date cell would silently stop rendering a day. */
+  t('a date cell stays YYYY-MM-DD',
+    dateCell(new Date(2026, 8, 20)) === '2026-09-20', dateCell(new Date(2026, 8, 20)));
+  t('and date text passes through', dateCell('2026-09-20') === '2026-09-20');
+
+  /* The whole point: the partner ticket header is clean. */
+  t('no booking slip carries the 1899 epoch',
+    !/1899|GMT[-+]/.test(partnerJson + clientJson),
+    (('' + partnerJson + clientJson).match(/.{0,40}1899.{0,40}/) || [])[0]);
+}
+
 /* r22 — THE AMOUNT AND THE MONEY ARE TWO DIFFERENT MOMENTS.
    Both partner surfaces used to say only "at dispatch", and the vendor
    portal's "Payout at dispatch" read as though that were payday. The amount IS

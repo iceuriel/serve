@@ -1,7 +1,24 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-11  ·  master  ·  r22 — the customer's first name, on the job ticket
+ * VERSION STAMP:  2026-09-11  ·  master  ·  r23 — booking slips stop saying 1899
+ *
+ * r23 = A SHEET CELL DOES NOT ALWAYS HOLD WHAT SOMEBODY TYPED INTO IT.
+ *      `scheduled_date` and `start_time` are written as plain text, but the
+ *      moment an operator retypes one — or Sheets decides a typed value looks
+ *      like a time — the cell becomes a real date value and getValues() returns
+ *      a JavaScript Date. String()ing one put
+ *
+ *          Fri Dec 29 1899 22:00:00 GMT-0500 (Eastern Standard Time)
+ *
+ *      at the top of live booking slips, on every surface at once. 1899 is not
+ *      corruption: a time-only cell has no date, so Sheets anchors it to its own
+ *      epoch of 30 December 1899.
+ *
+ *      dateCellText and timeCellText normalise both, and every `when` field now
+ *      reads through them. Times carry ET, because a cleaner reading "9–11 AM"
+ *      on a phone in another timezone cannot tell which 9 is meant. Text passes
+ *      through untouched — most cells are still text and always will be.
  *
  * r22 = THE CREW KNOWS WHO THEY ARE EXPECTING. buildVendorTicketModel gains
  *      `customerFirstName`, and only that. Somebody knocking on a stranger's
@@ -973,7 +990,7 @@ function doGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-11 r22" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-11 r23" });
 }
 
 
@@ -1291,11 +1308,15 @@ function getBooking(ss, jobId) {
     baths:  isNaN(baths) ? null : baths,
     levels: Number(meta.levels) || 1,
 
-    /* when */
-    scheduledDate:   String(f("scheduled_date") || ""),
-    startTime:       String(f("start_time") || ""),
+    /* when — READ THROUGH THE CELL NORMALISERS, never String() directly.
+       See dateCellText/timeCellText: a cell an operator formatted as a date or
+       a time comes back from getValues() as a Date, and String()ing one of
+       those put "Fri Dec 29 1899 22:00:00 GMT-0500 (Eastern Standard Time)" at
+       the top of live booking slips. */
+    scheduledDate:   dateCellText(f("scheduled_date")),
+    startTime:       timeCellText(f("start_time")),
     scheduleSummary: String(f("notes") || ""),
-    completedDate:   String(f("completed_date") || "").trim(),
+    completedDate:   dateCellText(f("completed_date")).trim(),
     status:          String(f("job_status") || ""),
 
     /* MONEY, AND THE TWO SIDES OF IT ARE NOT THE SAME NUMBER.
@@ -1552,6 +1573,68 @@ function buildClientTicketModel(ss, booking) {
     partner: vendor,
     partnerPending: !vendor,
   };
+}
+
+/* ============================================================
+   DATE AND TIME CELLS  —  r23
+   ============================================================
+
+   A SHEET CELL DOES NOT ALWAYS CONTAIN WHAT SOMEBODY TYPED INTO IT.
+
+   The script writes `scheduled_date` as "2026-09-20" and `start_time` as
+   "9–11 AM", both plain text. The moment an operator retypes one, or Sheets
+   decides a typed value looks like a date, the cell stops being text and
+   becomes a real date value — and getValues() hands it back as a JavaScript
+   Date rather than a string.
+
+   String()ing one of those produced the bug this fixes:
+
+       Fri Dec 29 1899 22:00:00 GMT-0500 (Eastern Standard Time)
+
+   at the top of live booking slips. 1899 is not a corruption: a TIME-ONLY cell
+   has no date, so Sheets anchors it to its own epoch of 30 December 1899, and
+   the offset is the script's own timezone applied to that midnight.
+
+   NO Utilities.formatDate, AND NO TIMEZONE ARITHMETIC. Apps Script already
+   builds these Dates in the script's timezone, so the local getters return the
+   numbers the operator actually typed. Converting again would move them. It
+   also keeps both helpers pure JavaScript, so the test harness exercises the
+   real thing rather than a stubbed formatter.
+
+   Both are TOTAL: text in, the same text out. A value that is already
+   "9–11 AM" or "Morning preferred" passes through untouched, because most
+   cells are still text and always will be. */
+
+/** A real, valid Date — not a string that looks like one, not an Invalid Date. */
+function isDateValue(v) {
+  return Object.prototype.toString.call(v) === "[object Date]" && !isNaN(v.getTime());
+}
+
+/** A date cell as `YYYY-MM-DD`, whether it arrived as text or as a Date. */
+function dateCellText(v) {
+  if (!isDateValue(v)) return String(v || "");
+  var p = function (n) { return (n < 10 ? "0" : "") + n; };
+  return v.getFullYear() + "-" + p(v.getMonth() + 1) + "-" + p(v.getDate());
+}
+
+/**
+ * A time cell as `9:00 AM ET`, whether it arrived as text or as a Date.
+ *
+ * ET is appended to anything that reads as a clock time, including text the
+ * script wrote itself, because a cleaner reading "9–11 AM" on a phone in
+ * another timezone has no way to know which 9 is meant. A cell that is not a
+ * time at all — "Morning preferred" — is left exactly alone.
+ */
+function timeCellText(v) {
+  if (isDateValue(v)) {
+    var h24 = v.getHours(), m = v.getMinutes();
+    var h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+    return h12 + ":" + (m < 10 ? "0" : "") + m + " " + (h24 < 12 ? "AM" : "PM") + " ET";
+  }
+  var s = String(v || "").trim();
+  if (!s) return "";
+  if (/\bET\b|eastern/i.test(s)) return s;              // already said so
+  return /\d\s*(:|am|pm)/i.test(s) ? s + " ET" : s;     // a clock time, or prose
 }
 
 /** Split a flat instruction list into the three shapes a ticket renders. */
