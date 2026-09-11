@@ -94,7 +94,9 @@ function build() {
   const propStore = { TICKET_SECRET: 'test-secret-value', ACCESS_SPREADSHEET_ID: 'private-access-book', ACCESS_CODES_TAB: 'ACCESS' };
   const privateTabs = { ACCESS: makeSheet('ACCESS', ['property_id', 'access_secret', 'access_secret_set_at']) };
   const privateBook = { getId: () => 'private-access-book', getSheetByName: n => privateTabs[n] || null,
-    insertSheet: n => (privateTabs[n] = makeSheet(n, null)) };
+    insertSheet: n => (privateTabs[n] = makeSheet(n, null)),
+    /* r30: the diagnosis lists the tabs a workbook really has. */
+    getSheets: () => Object.keys(privateTabs).map(n => privateTabs[n]) };
   const fetches = [];
   let nextFetchReply = { code: 201, text: '{"sid":"SM123","status":"queued"}' };
   const ss = {
@@ -117,6 +119,7 @@ function build() {
       getScriptProperties: () => ({
         getProperty: k => (k in propStore ? propStore[k] : null),
         setProperty: (k, v) => { propStore[k] = v; },
+        getKeys: () => Object.keys(propStore),
       }),
     },
     Utilities: {
@@ -461,6 +464,55 @@ t('after a migration, the check reports the legacy column as gone',
 t('and still finds a date that was copied in as a code',
   /dates rather than codes: PROP-0010/.test(migratedReport), migratedReport);
 t('without printing it', !/Dec 25|GMT/.test(migratedReport), migratedReport);
+
+head('5d. r30 — NOT READY names the fault');
+/* One sentence used to cover seven causes, and the founder hit it twice with
+   the properties apparently set and no way to tell which. Each case builds one
+   fault on purpose and checks that the check names THAT fault. */
+const diag = (setup) => { const m = legacyFixture(''); setup(m); return m.box.checkAccessMigration(); };
+let dr;
+
+dr = diag(m => { delete m.propStore.ACCESS_SPREADSHEET_ID; });
+t('an unset ID is named as unset', /ACCESS_SPREADSHEET_ID is not set/.test(dr), dr);
+t('and the two likely reasons are given', /not saved/.test(dr) && /different Apps Script project/.test(dr), dr);
+
+dr = diag(m => { delete m.propStore.ACCESS_SPREADSHEET_ID; m.propStore['ACCESS_SPREADSHEET_ID '] = 'private-access-book'; });
+t('a property saved under a name with a trailing space is pointed out',
+  /similar names ARE set: "ACCESS_SPREADSHEET_ID "/.test(dr), dr);
+
+dr = diag(m => { delete m.propStore.ACCESS_CODES_TAB; });
+t('an unset tab name is named as unset', /ACCESS_CODES_TAB is not set/.test(dr), dr);
+
+dr = diag(m => { m.propStore.ACCESS_SPREADSHEET_ID = 'https://docs.google.com/spreadsheets/d/abc123/edit#gid=0'; });
+t('a pasted URL is recognised as a URL', /characters a spreadsheet ID never has/.test(dr), dr);
+t('without echoing the URL back', !/docs\.google\.com|abc123/.test(dr), dr);
+
+dr = diag(m => { m.propStore.ACCESS_SPREADSHEET_ID = 'leads-book'; });
+t('Leads given by mistake is named', /is Leads MASTER itself/.test(dr), dr);
+
+dr = diag(m => {
+  m.propStore.ACCESS_SPREADSHEET_ID = 'no-such-book';
+  const open = m.box.SpreadsheetApp.openById;
+  m.box.SpreadsheetApp.openById = id => { if (id === 'no-such-book') throw new Error('not found'); return open(id); };
+});
+t('an ID that will not open is named, with its length and the two likely reasons',
+  /No spreadsheet opens with that ID \(12 characters\)/.test(dr) && /cannot open Access MASTER/.test(dr), dr);
+
+dr = diag(m => { m.propStore.ACCESS_CODES_TAB = 'access'; });
+t('a tab name differing only in capitals is shown with its nearest match',
+  /no tab named "access"/.test(dr) && /Nearest: "ACCESS"/.test(dr), dr);
+t('and the tabs that do exist are listed', /Its tabs are: "ACCESS"/.test(dr), dr);
+
+dr = diag(m => { m.privateTabs.ACCESS = makeSheet('ACCESS', ['property_id', 'access_secret']); });
+t('a missing header is named individually', /row 1 is missing: access_secret_set_at/.test(dr), dr);
+
+dr = diag(m => { m.privateTabs.ACCESS = makeSheet('ACCESS', ['Property_ID', 'access_secret', 'access_secret_set_at']); });
+t('a header in the wrong case is shown with what it should be',
+  /"Property_ID" should be property_id/.test(dr) && /case-sensitive/.test(dr), dr);
+
+/* It reads Access MASTER's tab names and header row, never a stored code. */
+dr = diag(m => { m.privateTabs.ACCESS.appendRow(['PROP-0001', 'SECRET-9911', '']); m.propStore.ACCESS_CODES_TAB = 'nope'; });
+t('the diagnosis never prints a value from inside Access MASTER', !/SECRET-9911/.test(dr), dr);
 
 function q2(model, field) {
   return (model.homes[0].questions || []).filter(x => x.field === field)[0] || {};

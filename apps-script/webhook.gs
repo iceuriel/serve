@@ -1,7 +1,19 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-11  ·  master  ·  r29 — the access migration checks what the sheet actually kept
+ * VERSION STAMP:  2026-09-11  ·  master  ·  r30 — NOT READY says which one
+ *
+ * r30 = "NOT READY" NOW SAYS WHICH ONE. checkAccessMigration reported every
+ *      Access MASTER fault in one sentence covering seven causes — properties
+ *      unset or saved in another project, a property name mistyped, a URL
+ *      pasted where the ID belongs, Leads or Ops given by mistake, an ID that
+ *      will not open, a tab name that does not match, headers missing or in
+ *      the wrong case — and the founder hit it twice with no way to tell
+ *      which. After privateAccessStore refuses, privateAccessDiagnosis()
+ *      retraces it step by step and names the first fault it finds: property
+ *      NAMES, tab NAMES, header names and the length of the ID, never a value
+ *      from inside Access MASTER. Only the editor-run check changed; nothing a
+ *      customer or the web app touches is different from r29.
  *
  * r29 = THE MIGRATION CHECKS WHAT THE SHEET KEPT, NOT WHAT WAS SENT. Before
  *      r28 a door code was written with a plain setValue into an
@@ -1119,7 +1131,7 @@ function doGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-11 r29" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-11 r30" });
 }
 
 
@@ -2359,6 +2371,90 @@ function probeAccessWrite(ss, store) {
 }
 
 /**
+ * Why privateAccessStore refused, in words an operator can act on. r30.
+ *
+ * Called only AFTER it has refused, and retraces its checks in the same order,
+ * so the first fault named here is the one that stopped it. Reports property
+ * NAMES, tab NAMES, header names and the LENGTH of the ID. It reads nothing in
+ * Access MASTER except its tab names and header row, so it cannot print a code.
+ *
+ * The name check matters more than it looks. A property saved as
+ * "ACCESS_SPREADSHEET_ID " — trailing space — or saved in a different Apps
+ * Script project reads as simply not set, and nothing else would say why.
+ * Headers are compared exactly as sheetHeaders returns them: trimmed, NOT
+ * lowercased, so "Property_ID" is a miss and is reported as one.
+ */
+function privateAccessDiagnosis(leads) {
+  var props = PropertiesService.getScriptProperties();
+  var rawId = props.getProperty("ACCESS_SPREADSHEET_ID");
+  var rawTab = props.getProperty("ACCESS_CODES_TAB");
+
+  var near = [];
+  try {
+    near = (props.getKeys() || []).filter(function (k) {
+      return /access/i.test(k) && k !== "ACCESS_SPREADSHEET_ID" && k !== "ACCESS_CODES_TAB";
+    });
+  } catch (_) {}
+  var hint = near.length
+    ? " Properties with similar names ARE set: " +
+      near.map(function (k) { return JSON.stringify(k); }).join(", ") +
+      ". A name must match exactly, with no spaces."
+    : " If you did set it, it was probably not saved (Save script properties), " +
+      "or it was saved in a different Apps Script project than this one.";
+
+  if (rawId === null || String(rawId).trim() === "") {
+    return "ACCESS_SPREADSHEET_ID is not set in this project's Script Properties." + hint;
+  }
+  if (rawTab === null || String(rawTab).trim() === "") {
+    return "ACCESS_CODES_TAB is not set in this project's Script Properties." + hint;
+  }
+
+  var id = String(rawId).trim(), tab = String(rawTab).trim();
+  if (/[^A-Za-z0-9_-]/.test(id)) {
+    return "ACCESS_SPREADSHEET_ID contains characters a spreadsheet ID never has " +
+           "(" + id.length + " characters in all) — usually a pasted URL, /edit or #gid=. " +
+           "Use only the long ID between /d/ and /edit.";
+  }
+  if (id === leads.getId()) return "ACCESS_SPREADSHEET_ID is Leads MASTER itself. It must be Access MASTER.";
+  if (id === OPS_SPREADSHEET_ID) return "ACCESS_SPREADSHEET_ID is the Ops workbook. It must be Access MASTER.";
+
+  var book;
+  try {
+    book = SpreadsheetApp.openById(id);
+  } catch (_) {
+    return "No spreadsheet opens with that ID (" + id.length + " characters). Either it is mistyped, " +
+           "or the Google account running this editor cannot open Access MASTER.";
+  }
+  if (book.getId() === leads.getId()) return "That ID opens Leads MASTER. It must be Access MASTER.";
+
+  var names = [];
+  try { names = book.getSheets().map(function (s) { return s.getName(); }); } catch (_) {}
+  var sheet = book.getSheetByName(tab);
+  if (!sheet) {
+    var close = names.filter(function (n) { return n.trim().toLowerCase() === tab.toLowerCase(); });
+    return "Access MASTER opened, but it has no tab named " + JSON.stringify(tab) + ". " +
+           (close.length ? "Nearest: " + JSON.stringify(close[0]) +
+                           " — the name must match exactly, capitals and spaces included. " : "") +
+           "Its tabs are: " +
+           (names.length ? names.map(function (n) { return JSON.stringify(n); }).join(", ") : "(none readable)") + ".";
+  }
+
+  var h = sheetHeaders(sheet);
+  var need = ["property_id", "access_secret", "access_secret_set_at"];
+  var missing = need.filter(function (k) { return h.indexOf(k) === -1; });
+  if (missing.length) {
+    var wrongCase = missing.map(function (k) {
+      var hit = h.filter(function (x) { return String(x).toLowerCase() === k; })[0];
+      return hit ? JSON.stringify(hit) + " should be " + k : "";
+    }).filter(Boolean);
+    return "The tab " + JSON.stringify(tab) + " exists but row 1 is missing: " + missing.join(", ") + "." +
+           (wrongCase.length ? " Found " + wrongCase.join("; ") + " — header names are case-sensitive." : "") +
+           " Row 1 needs exactly property_id, access_secret and access_secret_set_at, lowercase, one per cell.";
+  }
+  return "Every step checks out on a second look — run the check again, and if it repeats, bring this line back.";
+}
+
+/**
  * RUN THIS BEFORE migratePropertyAccessCodes, AND AGAIN AFTER. Editor-only.
  *
  * Changes nothing in Leads. Prints counts and property IDs, never a code.
@@ -2384,9 +2480,11 @@ function checkAccessMigration() {
       store = privateAccessStore(ss, false);
       say("Access MASTER: configured, separate from Leads and Ops, required columns present.");
     } catch (e) {
-      say("Access MASTER: NOT READY (" + (String(e && e.message || e) === "private_access_schema"
-        ? "its tab is missing property_id, access_secret or access_secret_set_at"
-        : "ACCESS_SPREADSHEET_ID or ACCESS_CODES_TAB is unset, unreachable, or points at Leads or Ops") + ").");
+      /* r30 — name the actual fault. "NOT READY" used to cover seven causes in
+         one sentence, and the founder hit it twice with no way to tell which. */
+      var why;
+      try { why = privateAccessDiagnosis(ss); } catch (_) { why = "the reason could not be narrowed down any further."; }
+      say("Access MASTER: NOT READY. " + why);
     }
 
     var sheet = ss.getSheetByName(PROPERTY_ACCESS_TAB);

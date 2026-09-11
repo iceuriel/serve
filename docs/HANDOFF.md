@@ -13,6 +13,42 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-11, Claude Code: r30, and what the live check showed
+
+**r30 is committed and pushed, NOT deployed.** It changes only the editor-run
+`checkAccessMigration`: when Access MASTER is not ready, it now names the fault
+instead of one sentence covering seven causes. Nothing a customer or the web app
+touches differs from r29. A function run from the editor uses the saved source,
+so r30's check works as soon as it is pasted and saved; deploy it to the
+EXISTING deployment afterwards so the live version string matches the repo.
+
+**Production observations, 2026-09-11 — the founder ran the check on r29 twice
+(15:42 and 15:50 ET on their clock):**
+- Leads PROPERTY_ACCESS holds **2 homes and ZERO legacy codes** — no codes kept
+  as text, numbers or dates. The migration has nothing to transfer and nothing
+  to corrupt; it only swaps the legacy `entry_code` column for
+  `entry_code_saved`. The date and number risks r29 guards against do not apply
+  to this data.
+- Access MASTER reported NOT READY both times, the second after the founder had
+  been given the setup steps. Cause unknown — which is why r30 exists. Not yet
+  resolved.
+- The migration has NOT run, so r28's gate still refuses every portal entry
+  save. Occupancy, parking and pets save normally.
+- Between the two runs the webhook `/exec` URL returned `HTTP 404` ("Sorry,
+  unable to open the file at this time") on two attempts about a minute apart,
+  lining up with the founder deploying r29. It recovered by itself and then
+  reported r29; a portal read through servecleaning.com returned the healthy
+  `not_found`, and the separate availability feed answered normally. Cause not
+  proven. A booking attempted in that window would have been shown an error,
+  never a false confirmation.
+
+**Next:** paste r30 and save, run `checkAccessMigration`, fix whatever it names,
+and repeat until it prints `Write round trip: OK`. Then run
+`migratePropertyAccessCodes` (expect `codes transferred: 0`), the check once
+more (`ABSENT (already migrated)`), and one real entry save from a portal.
+
+---
+
 ## Current work — 2026-09-11, Claude Code: r29, a review of r28's access-code migration
 
 **r28 IS LIVE — this supersedes the "NOT LIVE" line in Codex's entry below.**
