@@ -225,6 +225,45 @@ t('and not their own internal contact details either',
 t('nor the payout rate Serve negotiated', !vJson.includes('"defaultPayoutRate"'));
 
 /* ------------------------------------------------------------------ */
+head('4b. r24 — THE DERIVED SHARE, AND ONLY THE DERIVED SHARE');
+/* The question this answers: does a partner see the 85% figure and nothing
+   from which the customer's price could be read straight off? The test above
+   covers a job with a hand-set payout. This one covers the normal case, where
+   nobody typed anything and the number comes from the stamped rate.
+
+   IT NEEDS A HARNESS WITH quote_meta. webhook-routing.test.js runs a
+   32-column JOBS fixture that predates that column, so payout_rate has nowhere
+   to land there and its "payout is blank" assertion passes for the wrong
+   reason. Nothing proved derivation reached a partner at all until this. */
+seedJob('SRV-DERIVED', 'VEN-0001', {
+  quoted_price: 279,
+  partner_payout: '',                                   // nobody typed one
+  quote_meta: JSON.stringify({ payout_rate: 0.85 }),    // stamped at booking
+});
+const D = get({ vendor: 'VEN-0001', t: MINE });
+const derived = (D.bookings || []).find(b => b.bookingId === 'SRV-DERIVED');
+const dJson = JSON.stringify(derived);
+
+t('the partner is shown 85% of the ticket', derived && derived.payout === 237.15,
+  derived && derived.payout);
+t('and the ticket price itself appears NOWHERE in what they receive',
+  !dJson.includes('279'), dJson);
+t('nor the rate that produced it — a number they can divide by',
+  !/0\.85|payoutRate|payout_rate/.test(dJson), dJson);
+
+/* The margin is inferable from 237.15 the moment a partner is TOLD the rate is
+   85%. That is arithmetic done in their head, not data we hand over, and no
+   code change can prevent it — only the decision to publish the rate can. */
+seedJob('SRV-OVERRIDE', 'VEN-0001', {
+  quoted_price: 279, partner_payout: 200,
+  quote_meta: JSON.stringify({ payout_rate: 0.85 }),
+});
+const O = get({ vendor: 'VEN-0001', t: MINE });
+const over = (O.bookings || []).find(b => b.bookingId === 'SRV-OVERRIDE');
+t('a hand-set payout still beats the formula', over && over.payout === 200,
+  over && over.payout);
+
+/* ------------------------------------------------------------------ */
 head('5. THE WRITE WHITELIST');
 t('they can set their display name',
   write({ kind: 'profile', field: 'display_name', value: 'Beacon Hill Cleaning' }).ok === true);

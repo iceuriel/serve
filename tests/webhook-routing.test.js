@@ -488,7 +488,15 @@ t('and the client view does not gain a partner-shaped name field',
 t('partner is NOT given the customer price',
   !/"price"|quoted|final_price|add_on_rev/.test(partnerJson), partnerJson.slice(0, 200));
 t('partner IS given a payout field', 'payout' in partner.booking, Object.keys(partner.booking));
-t('the payout is blank until an operator sets it — never a guessed number',
+/* CAREFUL — THIS PASSES FOR A REASON THAT IS NOT THE ONE IT LOOKS LIKE.
+   JOBS_HEADERS in this file is the 32-column fixture, which predates
+   `quote_meta`, so r24's stamped payout_rate has nowhere to land here and no
+   payout can be derived whatever the code does. It still proves the thing it
+   was written for — no number is invented out of nothing — but it proves
+   nothing about r24 either way.
+   The derived share is covered where a fixture actually has the column:
+   vendor-portal.test.js, "4b. THE DERIVED SHARE". */
+t('the payout is blank with no override and no column to stamp a rate into',
   !partner.booking.payout, partner.booking.payout);
 t('and the client is never shown the payout', !/payout/i.test(clientJson));
 
