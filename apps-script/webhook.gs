@@ -1,7 +1,26 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-11  ·  master  ·  r28 — portal codes live in Access MASTER
+ * VERSION STAMP:  2026-09-11  ·  master  ·  r29 — the access migration checks what the sheet actually kept
+ *
+ * r29 = THE MIGRATION CHECKS WHAT THE SHEET KEPT, NOT WHAT WAS SENT. Before
+ *      r28 a door code was written with a plain setValue into an
+ *      Automatic-format cell, and Sheets converts what it is given: "0042" was
+ *      kept as the NUMBER 42, and "12/25" could become a DATE. r28's migration
+ *      copied the cell's string, so a date would have landed in Access MASTER
+ *      as "Fri Dec 25 2026 00:00:00 GMT-0500" — kept as the door code while the
+ *      source column was deleted. Its tests could not see this: their fake
+ *      sheet stores '0042' as a string, which is what the old code SENT, not
+ *      what a real sheet KEPT. The migration now refuses any date (home named,
+ *      value never printed) and names every number-coded home for
+ *      re-confirmation, since a lost leading zero cannot be recovered.
+ *
+ *      checkAccessMigration() is a pre-flight. Run it before the migration and
+ *      again after. It changes nothing in Leads and prints counts and property
+ *      IDs only. Its one write is a synthetic "0042" round-tripped through the
+ *      real save path under __serve_probe__ and then removed, because whether
+ *      Sheets keeps r28's leading apostrophe in a plain-text cell could not be
+ *      proved outside a real workbook — and if it does, every code save fails.
  *
  * r28 = Codes are written only to a configured separate Access MASTER file.
  *      Leads PROPERTY_ACCESS holds a saved flag and timestamp. Entry saves
@@ -1100,7 +1119,7 @@ function doGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-11 r28" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-11 r29" });
 }
 
 
@@ -2229,6 +2248,21 @@ function migratePropertyAccessCodes() {
     var count = Math.max(0, sheet.getLastRow() - 1);
     var rows = count ? sheet.getRange(2, 1, count, h.length).getValues() : [];
     var seen = {}, copied = 0;
+    /* r29 — A LEGACY CELL IS NOT NECESSARILY THE CODE THAT WAS TYPED. Before
+       r28 codes were written with a plain setValue into an Automatic-format
+       cell, and Sheets converts what it is given: "0042" was kept as the
+       NUMBER 42, and something like "12/25" could become a DATE. A date's
+       string is not a door code, so any date stops the migration with the
+       source intact and the home named. A number is copied, because nothing
+       better survives in the sheet, and is named in the completion log so the
+       code can be re-confirmed with the customer. Never a value. */
+    var legacy = legacyCodeKinds(rows, pi, ci);
+    if (legacy.dates.length) {
+      console.log("Access migration refused: codes stored as DATES, not codes, for " +
+                  legacy.dates.join(", ") + ". Confirm those codes with the customer, " +
+                  "retype each as text (start it with an apostrophe), then retry.");
+      throw new Error("migration_date_coded");
+    }
     // Preflight all conflicts before changing any secret.
     var dest = store.sheet.getDataRange().getValues();
     var dpi = store.headers.indexOf("property_id"), dci = store.headers.indexOf("access_secret");
@@ -2257,12 +2291,165 @@ function migratePropertyAccessCodes() {
     SpreadsheetApp.flush();
     if (sheetHeaders(sheet).indexOf("entry_code") !== -1) throw new Error("migration_verification");
     console.log("Access migration complete. Properties checked: " + rows.length + "; codes transferred: " + copied + "; legacy code columns: 0.");
+    if (legacy.numbers.length) {
+      console.log("Codes that had been stored as NUMBERS, so any leading zeros were lost when they were first saved, before this migration. Re-confirm these with the customer: " +
+                  legacy.numbers.join(", ") + ".");
+    }
   } catch (err) {
     // Deliberately suppress service exception detail: it may contain cell data.
     throw new Error("Access migration stopped. Source codes retained unless column removal already completed. Check private workbook configuration, schema and duplicate/conflicting property records.");
   } finally {
     lock.releaseLock();
   }
+}
+
+/* ============================================================
+   ACCESS MIGRATION PRE-FLIGHT  —  r29
+   ============================================================ */
+
+/**
+ * Sort legacy entry_code cells by what Sheets actually KEPT in them, which
+ * before r28 was not necessarily what the customer typed. Property IDs only,
+ * never a code. `dates` cannot be migrated as codes; `numbers` can, but may
+ * have lost leading zeros when they were first saved.
+ */
+function legacyCodeKinds(rows, pi, ci) {
+  var out = { dates: [], numbers: [], text: 0 };
+  if (ci === -1) return out;
+  rows.forEach(function (r) {
+    var v = r[ci];
+    if (v === "" || v == null) return;
+    var id = String(r[pi] || "").trim() || "(no property_id)";
+    if (isDateValue(v)) out.dates.push(id);
+    else if (typeof v === "number") out.numbers.push(id);
+    else out.text++;
+  });
+  return out;
+}
+
+/**
+ * One synthetic code through the exact path a portal save takes, under a
+ * property ID no real home can have, read back, then removed. r28 writes codes
+ * as text with a leading apostrophe and verifies what comes back; whether
+ * Sheets keeps that apostrophe in a plain-text cell could not be proved outside
+ * a real workbook, and if it does, EVERY portal code save is refused. Better the
+ * probe finds out than the first customer. Never throws.
+ */
+function probeAccessWrite(ss, store) {
+  var PROBE = "__serve_probe__";
+  var result;
+  try {
+    var saved = savePrivateEntryCode(ss, PROBE, "0042", new Date(), false);
+    result = saved.saved ? "OK, a code written the r28 way reads back exactly"
+                         : "FAILED, the probe code did not persist";
+  } catch (e) {
+    result = String(e && e.message || e) === "private_access_verification"
+      ? "FAILED, a code read back differently from what was written, so every portal code save would be refused. Do not migrate"
+      : "FAILED, the private write path is unavailable";
+  }
+  try {
+    var h = sheetHeaders(store.sheet), pi = h.indexOf("property_id");
+    for (var r = store.sheet.getLastRow(); r >= 2; r--) {
+      if (String(store.sheet.getRange(r, pi + 1).getValues()[0][0]).trim() === PROBE) store.sheet.deleteRow(r);
+    }
+  } catch (_) {
+    result += "; the probe row could not be removed, so delete the row keyed __serve_probe__ by hand";
+  }
+  return result;
+}
+
+/**
+ * RUN THIS BEFORE migratePropertyAccessCodes, AND AGAIN AFTER. Editor-only.
+ *
+ * Changes nothing in Leads. Prints counts and property IDs, never a code.
+ * Answers the questions a one-way migration cannot afford to get wrong: is
+ * Access MASTER configured and separate, is the legacy column still there, did
+ * Sheets keep any code as a number or a date, would any collide with a
+ * different code already in Access MASTER, and does a code written the r28
+ * way come back exactly (the probe above — its one write, removed afterwards).
+ *
+ * After a migration it still earns its keep: a date copied in as a code by
+ * r28 is still findable in Access MASTER, and this names the home.
+ */
+function checkAccessMigration() {
+  var lines = [];
+  var say = function (s) { lines.push(s); };
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(20000);
+    var ss = SPREADSHEET_ID ? SpreadsheetApp.openById(SPREADSHEET_ID) : SpreadsheetApp.getActiveSpreadsheet();
+
+    var store = null;
+    try {
+      store = privateAccessStore(ss, false);
+      say("Access MASTER: configured, separate from Leads and Ops, required columns present.");
+    } catch (e) {
+      say("Access MASTER: NOT READY (" + (String(e && e.message || e) === "private_access_schema"
+        ? "its tab is missing property_id, access_secret or access_secret_set_at"
+        : "ACCESS_SPREADSHEET_ID or ACCESS_CODES_TAB is unset, unreachable, or points at Leads or Ops") + ").");
+    }
+
+    var sheet = ss.getSheetByName(PROPERTY_ACCESS_TAB);
+    var h = sheet ? sheetHeaders(sheet) : [];
+    var pi = h.indexOf("property_id"), ci = h.indexOf("entry_code");
+    var rows = (sheet && pi !== -1 && sheet.getLastRow() > 1)
+      ? sheet.getRange(2, 1, sheet.getLastRow() - 1, h.length).getValues() : [];
+    say("Leads PROPERTY_ACCESS: " + rows.length + " home(s); legacy entry_code column " +
+        (ci === -1 ? "ABSENT (already migrated)" : "PRESENT (not yet migrated)") +
+        "; entry_code_saved column " + (h.indexOf("entry_code_saved") === -1 ? "absent" : "present") + ".");
+
+    if (ci !== -1) {
+      var kinds = legacyCodeKinds(rows, pi, ci);
+      say("Codes stored as text: " + kinds.text + ".");
+      say("Codes stored as NUMBERS (leading zeros may already be lost): " +
+          (kinds.numbers.length ? kinds.numbers.join(", ") : "none") + ".");
+      say("Codes stored as DATES (the migration will refuse these): " +
+          (kinds.dates.length ? kinds.dates.join(", ") : "none") + ".");
+
+      var seen = {}, dups = [];
+      rows.forEach(function (r) {
+        var id = String(r[pi] || "").trim();
+        if (!id) return;
+        if (seen[id]) dups.push(id);
+        seen[id] = true;
+      });
+      say("Duplicate homes in Leads: " + (dups.length ? dups.join(", ") : "none") + ".");
+
+      if (store) {
+        var dest = store.sheet.getDataRange().getValues();
+        var dpi = store.headers.indexOf("property_id"), dci = store.headers.indexOf("access_secret");
+        var conflicts = [];
+        rows.forEach(function (r) {
+          var id = String(r[pi] || "").trim(), code = String(r[ci] == null ? "" : r[ci]);
+          if (!id || !code) return;
+          var m = dest.slice(1).filter(function (d) { return String(d[dpi]).trim() === id; });
+          if (m.length > 1 || (m.length && String(m[0][dci] || "") && String(m[0][dci]) !== code)) conflicts.push(id);
+        });
+        say("Would clash with a different code already in Access MASTER: " +
+            (conflicts.length ? conflicts.join(", ") : "none") + ".");
+      }
+    }
+
+    if (store) {
+      var dv = store.sheet.getDataRange().getValues();
+      var di = store.headers.indexOf("property_id"), dc = store.headers.indexOf("access_secret");
+      var dated = [];
+      dv.slice(1).forEach(function (d) {
+        var v = d[dc];
+        if (isDateValue(v) || /GMT[+-][0-9]{4}/.test(String(v))) {
+          dated.push(String(d[di] || "").trim() || "(no property_id)");
+        }
+      });
+      say("Access MASTER values that are dates rather than codes: " + (dated.length ? dated.join(", ") : "none") + ".");
+      say("Write round trip: " + probeAccessWrite(ss, store) + ".");
+    }
+  } catch (err) {
+    say("Check stopped before finishing. Details are suppressed because service errors can contain cell data.");
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
+  }
+  lines.forEach(function (l) { console.log(l); });
+  return lines.join(" | ");
 }
 
 /** The questions, with this home's answers filled in. Drives the portal form. */

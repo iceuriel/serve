@@ -317,6 +317,17 @@ and `access_secret_set_at`; other existing columns are preserved. Codes are
 stored as literal text so leading zeroes and formula-looking input survive.
 New codes are verified before Leads' saved marker and timestamp are updated.
 
+**r29 — run `checkAccessMigration()` first, and again after.** Editor-only; it
+changes nothing in Leads and prints counts and property IDs, never a code. It
+reports whether Access MASTER is configured, whether the legacy `entry_code`
+column is still present, and how the legacy cells were KEPT: before r28 codes
+were written into Automatic-format cells, so Sheets may hold `0042` as the
+number 42 and `12/25` as a date. Its one write is a synthetic `0042` sent
+through the real save path under `__serve_probe__`, read back, and removed — it
+proves whether a plain-text cell keeps r28's leading apostrophe, which would
+make every code save fail. The migration refuses any date-coded home and names
+every number-coded one for re-confirmation with the customer.
+
 Run editor-only `migratePropertyAccessCodes()` after configuring the destination.
 It verifies transferred codes before deleting Leads' legacy `entry_code` column,
 preserves unrelated answers, and stops on conflicting or duplicate records.

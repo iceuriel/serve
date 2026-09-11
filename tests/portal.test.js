@@ -55,6 +55,7 @@ function makeSheet(name, headers) {
     appendRow: r => rows.push(r.slice()),
     setFrozenRows: () => {},
     deleteColumn: c => rows.forEach(r => r.splice(c - 1, 1)),
+    deleteRow: r => rows.splice(r - 1, 1),
     getDataRange: () => ({ getValues: () => rows.map(r => r.slice()) }),
     getRange: (r, c, nr, nc) => ({
       getValues: () => {
@@ -366,6 +367,100 @@ t('failed destination verification preserves the source code and column', corrup
 const timedOut = build();
 timedOut.box.LockService.getScriptLock = () => ({ waitLock: () => { throw new Error('busy'); }, releaseLock: () => {} });
 t('portal writes fail closed when the script lock is busy', JSON.parse(timedOut.box.doPost({ postData: { contents: JSON.stringify({ event_type: 'portal_write' }) } }).getContent()).ok === false);
+
+head('5c. r29 — a legacy cell is not necessarily the code that was typed');
+/* Before r28 a code was written with a plain setValue into an Automatic-format
+   cell, and Sheets converts what it is given: "0042" was kept as the NUMBER 42,
+   and "12/25" could become a DATE. The migration fixture above stores '0042' as
+   a string, which is what the old code SENT, not what the sheet KEPT. These
+   fixtures hold what a real sheet would hold. */
+function legacyFixture(codeCell) {
+  const m = build();
+  m.tabs.PROPERTY_ACCESS = makeSheet('PROPERTY_ACCESS',
+    ['property_id', 'entry_choice', 'entry_detail', 'entry_code', 'entry_code_set_at', 'pet_notes']);
+  m.tabs.PROPERTY_ACCESS.appendRow(['PROP-0007', 'CODE', '', codeCell, '2026-09-01', 'Keep this note']);
+  return m;
+}
+
+/* A DATE stands in for the code: refuse, keep the source, name the home. */
+const asDate = legacyFixture(new Date(2026, 11, 25));
+let dateStopped = false;
+try { asDate.box.migratePropertyAccessCodes(); } catch (_) { dateStopped = true; }
+t('a code Sheets turned into a DATE stops the migration', dateStopped);
+t('with the legacy column and its value still in Leads',
+  asDate.tabs.PROPERTY_ACCESS._rows[0].includes('entry_code') &&
+  asDate.tabs.PROPERTY_ACCESS._rows[1][3] instanceof Date);
+t('and nothing written to Access MASTER', asDate.privateTabs.ACCESS._rows.length === 1,
+  asDate.privateTabs.ACCESS._rows.length);
+t('the log names the home so the code can be re-entered',
+  asDate.logs.join(' | ').includes('PROP-0007'), asDate.logs.join(' | ').slice(-200));
+t('and never prints the date that was standing in for the code',
+  !/Dec 25|2026-12-25|GMT/.test(asDate.logs.join(' | ')));
+
+/* A NUMBER is copied, because nothing better survives, and flagged. */
+const asNumber = legacyFixture(42);
+asNumber.box.migratePropertyAccessCodes();
+t('a code Sheets turned into a NUMBER is still migrated',
+  asNumber.privateTabs.ACCESS._rows[1][1] === '42', asNumber.privateTabs.ACCESS._rows[1]);
+t('but the completion log names it for re-confirmation',
+  /stored as NUMBERS[^|]*PROP-0007/.test(asNumber.logs.join(' | ')), asNumber.logs.join(' | ').slice(-260));
+t('and never prints the code itself',
+  !/(^|[^0-9])42([^0-9]|$)/.test(asNumber.logs.join(' | ').replace(/PROP-[0-9]+/g, '')));
+
+/* The pre-flight: counts and property IDs, never a value, nothing changed. */
+const pre = legacyFixture(42);
+pre.tabs.PROPERTY_ACCESS.appendRow(['PROP-0008', 'CODE', '', '0513', '2026-09-02', '']);
+pre.tabs.PROPERTY_ACCESS.appendRow(['PROP-0009', 'CODE', '', new Date(2026, 3, 5), '2026-09-03', '']);
+const report = pre.box.checkAccessMigration();
+t('the check says the legacy column is still there', /entry_code column PRESENT/.test(report), report);
+t('it counts the codes kept as text', /stored as text: 1\./.test(report), report);
+t('it names the homes whose code was kept as a number', /NUMBERS[^|]*PROP-0007/.test(report), report);
+t('it names the homes whose code was kept as a date', /DATES[^|]*PROP-0009/.test(report), report);
+t('it never prints a code',
+  !report.includes('0513') && !/(^|[^0-9])42([^0-9]|$)/.test(report.replace(/PROP-[0-9]+/g, '')), report);
+t('it changes nothing in Leads',
+  pre.tabs.PROPERTY_ACCESS._rows[0].includes('entry_code') && pre.tabs.PROPERTY_ACCESS._rows.length === 4);
+t('its write probe round-trips and says so', /Write round trip: OK/.test(report), report);
+t('and removes the probe row afterwards',
+  !JSON.stringify(pre.privateTabs.ACCESS._rows).includes('__serve_probe__'), pre.privateTabs.ACCESS._rows);
+
+/* If a real sheet KEEPS r28's leading apostrophe, every code save is refused.
+   The stub strips one apostrophe, as r28 assumed Sheets does; this one keeps
+   it, and the probe has to be the thing that says so. */
+const sticky = legacyFixture('');
+const stickyRange = sticky.privateTabs.ACCESS.getRange;
+sticky.privateTabs.ACCESS.getRange = (...args) => {
+  const cell = stickyRange(...args);
+  const set = cell.setValue;
+  cell.setValue = v => set(typeof v === 'string' && v.startsWith("'") ? "'" + v : v);
+  return cell;
+};
+const stickyReport = sticky.box.checkAccessMigration();
+t('if Sheets keeps the apostrophe, the probe says do not migrate',
+  /Write round trip: FAILED[^|]*Do not migrate/.test(stickyReport), stickyReport);
+t('and still removes its probe row',
+  !JSON.stringify(sticky.privateTabs.ACCESS._rows).includes('__serve_probe__'), sticky.privateTabs.ACCESS._rows);
+
+/* Unconfigured is reported, not thrown. */
+const noStore = legacyFixture('0042');
+delete noStore.propStore.ACCESS_SPREADSHEET_ID;
+const noStoreReport = noStore.box.checkAccessMigration();
+t('an unconfigured Access MASTER is reported as NOT READY',
+  /Access MASTER: NOT READY/.test(noStoreReport), noStoreReport);
+t('and the check still finishes the Leads side', /stored as text: 1\./.test(noStoreReport), noStoreReport);
+
+/* After an r28 migration, a date copied in as a code is still findable. */
+const migrated = build();
+migrated.tabs.PROPERTY_ACCESS = makeSheet('PROPERTY_ACCESS',
+  ['property_id', 'entry_choice', 'entry_detail', 'entry_code_saved', 'entry_code_set_at', 'pet_notes']);
+migrated.tabs.PROPERTY_ACCESS.appendRow(['PROP-0010', 'CODE', '', true, '2026-09-01', '']);
+migrated.privateTabs.ACCESS.appendRow(['PROP-0010', 'Fri Dec 25 2026 00:00:00 GMT-0500 (Eastern Standard Time)', '2026-09-01']);
+const migratedReport = migrated.box.checkAccessMigration();
+t('after a migration, the check reports the legacy column as gone',
+  /ABSENT \(already migrated\)/.test(migratedReport), migratedReport);
+t('and still finds a date that was copied in as a code',
+  /dates rather than codes: PROP-0010/.test(migratedReport), migratedReport);
+t('without printing it', !/Dec 25|GMT/.test(migratedReport), migratedReport);
 
 function q2(model, field) {
   return (model.homes[0].questions || []).filter(x => x.field === field)[0] || {};

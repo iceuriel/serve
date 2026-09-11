@@ -13,6 +13,80 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-11, Claude Code: r29, a review of r28's access-code migration
+
+**r28 IS LIVE — this supersedes the "NOT LIVE" line in Codex's entry below.**
+`curl -sL` on the webhook URL returned `"version":"2026-09-11 r28"` on
+2026-09-11, after Codex wrote that entry. r28 contains r26 and r27, so the
+booking text is live too, and inert until the three Twilio Script Properties
+exist.
+
+**What that means while the migration has not run:** r28's gate refuses every
+save to the portal's entry question — "I'll let you in" as well as codes —
+because every entry save goes through the private store, and it refuses while
+Leads still has the legacy `entry_code` column or Access MASTER is not
+configured. No customer can reach "Complete" on Arrival & access until this is
+finished. Whether the Script Properties are set, or the migration has run, is
+UNVERIFIED from here: neither is visible without the founder's Google sign-in.
+
+**What the review found, and r29 fixes (committed and pushed, NOT deployed):**
+- Before r28 a code was saved with a plain `setValue` into an Automatic-format
+  cell, and Sheets converts what it is given: `0042` was kept as the NUMBER 42,
+  and `12/25` could become a DATE. r28's migration copied the cell's string, so
+  a date would have been written into Access MASTER as "Fri Dec 25 … GMT-0500"
+  and kept as the door code while the source column was deleted. r28's tests
+  could not see it: their fake sheet stores '0042' as a string, which is what
+  the old code SENT, not what a real sheet KEPT. The migration now refuses any
+  date (home named, value never printed) and names every number-coded home,
+  because a lost leading zero cannot be recovered from the sheet.
+- r28 writes codes as text with a leading apostrophe and verifies the read-back.
+  The fake sheet strips that apostrophe, which is r28's assumption about real
+  Sheets; nothing local can prove a plain-text cell does. If it keeps it, every
+  portal code save is refused — safely, because the verification catches it,
+  but refused. New editor-only `checkAccessMigration()` settles it on the real
+  workbook with one synthetic `0042` written through the real save path under
+  `__serve_probe__`, read back, and removed. Otherwise it changes nothing in
+  Leads and prints counts and property IDs only: configuration, the legacy
+  column present or gone, codes kept as text / numbers / dates, duplicates,
+  clashes with Access MASTER, and — after a migration — any date already
+  copied in.
+- Codex's entry committed the founder's personal email address, which failed
+  `privacy.test.js`. Removed. History was not rewritten; the repo is private.
+
+**Verification:** 26/26 files pass. 23 new assertions in portal.test.js "5c",
+driven with the values a real sheet holds — the number 42 and real Date objects,
+not strings. Five deliberate mutations each failed a specific assertion (the
+date guard removed, the probe row left behind, the pre-flight printing codes,
+number-coded homes not named, the probe ignoring a failed read-back) and the
+file was restored. Nothing here has touched a real sheet.
+
+**Run order for the founder. Nothing in it prints a code.**
+1. Paste r29 → Deploy → Manage deployments → edit the EXISTING deployment →
+   New version. `curl -sL` on the webhook URL should show
+   `"version":"2026-09-11 r29"`.
+2. In Access MASTER, pick the tab that will hold codes; it needs (or will be
+   given) `property_id`, `access_secret`, `access_secret_set_at`. Confirm the
+   workbook is shared with nobody who routinely reads Leads.
+3. Script Properties: `ACCESS_SPREADSHEET_ID` (from the Access MASTER URL, the
+   part between `/d/` and `/edit`) and `ACCESS_CODES_TAB` (that tab's name).
+4. Run `checkAccessMigration` from the editor and read the execution log.
+   - "Write round trip: FAILED … Do not migrate" → stop, and bring the log line
+     back to whichever agent is working; the save path has to change first.
+   - Homes under DATES → get the real code from that customer, retype it in
+     PROPERTY_ACCESS as text (start it with an apostrophe), run the check again.
+   - Homes under NUMBERS → fine to migrate, but confirm those codes with the
+     customer; a leading zero may already be gone.
+   - Anything under "clash" or "Duplicate" → resolve by hand first.
+5. Run `migratePropertyAccessCodes`, then `checkAccessMigration` again: legacy
+   column ABSENT, no dates in Access MASTER.
+6. Save one entry answer in a portal for a property you control, to confirm
+   saves work end to end.
+
+Clearing cells does not erase a spreadsheet's version history; Codex's note on
+remaining exposure stands.
+
+---
+
 ## Current work — 2026-09-11, Codex: isolate portal entry codes
 
 Local r28 implementation complete. Founder explicitly authorized routing portal
@@ -24,7 +98,7 @@ caught. Preserved the other agent's now-committed r27 SMS changes.
 
 **NOT LIVE: no Google Sheets edits, migration, or Apps Script deployment.**
 Google Drive in the browser panel is signed out; Chrome is unavailable through
-the browser tool. Asked founder to sign in to uriel@servecos.com. Last verified
+the browser tool. Asked the founder to sign in to the Serve Google account. Last verified
 live backend remains r25 (see prior entry). Do not claim code separation is live.
 
 Next: inspect Access MASTER's existing tab and header names WITHOUT printing
