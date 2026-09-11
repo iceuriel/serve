@@ -49,6 +49,90 @@ checks were used instead. Daily cleanup is configured by the deployed Worker.
 The temporary local setup server was stopped and its secret file removed.
 Concurrent Stripe, continuity-file, and logo changes remain uncommitted in Code.
 
+> **Superseded 2026-09-11:** the Stripe work was committed and pushed as
+> `c22d360` and is live. Still uncommitted: the shared continuity section in
+> AGENTS.md / CLAUDE.md (unclaimed across three sessions now) and
+> `images/serve-logo-boston-9-09.svg`. Apps Script is **r21**, not r20 — the
+> photo revision landed on top of the signed-quote one.
+
+---
+
+## NEXT UP — payments. Queued 2026-09-11 (Claude Code)
+
+Nothing here is started. The payment path is LIVE in Stripe TEST mode from
+`c22d360`; `/api/health` reports `can_price`, `can_sign`, `can_charge` true and
+`stripe_mode: "test"`. These are the known gaps, worst first.
+
+**Do not treat any of this as authorized to go live.** The key is `sk_test_`,
+and the items under "founder decisions" below are unanswered.
+
+### 1. Payment state is never written back — the biggest gap
+
+Nothing records that a link was issued, opened, or authorized. `/api/checkout`
+writes to no sheet; the only trace anywhere is one Worker log line,
+`checkout session created: <job> <cents> TEST`, which Cloudflare keeps briefly.
+
+**The visible consequence:** `payment_status` is OPS-owned and typed by hand
+(SCHEMA #20), so both customer surfaces can show "Not yet authorized" to
+somebody who has already paid.
+
+The fix is a Stripe webhook — a new Worker route verifying Stripe's signature
+against a `STRIPE_WEBHOOK_SECRET`, keyed on `metadata[job_id]`, writing status
+back through Apps Script. **That makes `payment_status` script-written, which
+is a SCHEMA change and a real decision**, since it is currently promised to
+never be touched by the script. Either that promise changes in SCHEMA.md in the
+same commit, or the webhook writes a new column instead.
+
+### 2. The idempotency key outlives the session it created
+
+In `handleCheckout`, the key is `serve-<job>-<cents>`. Stripe caches the
+**response body** against a key for 24 hours, so expiring a link and reissuing
+it for the same job and amount replays the original — and the customer gets a
+dead link. This is exactly the recovery path an operator reaches for after a
+test booking.
+
+**The obvious fix does not work.** Checking `session.status === "open"` reads
+the cached body, which reports the status as it was at creation, not now. Use a
+short time bucket in the key (a double-click needs seconds of protection, not a
+day), or follow the create with a `GET /v1/checkout/sessions/{id}` to read the
+current status and retry with a salted key when it is not open.
+
+### 3. Nothing captures the hold
+
+`capture_method: manual` places the hold and there is no capture anywhere in
+the system. The founder's decision is capture-on-partner-acceptance, so this
+needs an operator action, not an automatic one.
+
+### 4. The seven-day window is now a live constraint, not a hypothesis
+
+An authorization lapses after roughly seven days. Once a customer authorizes, a
+partner has to accept inside that window or the hold has to be retaken, and
+**nothing watches for this.** No deadline has been set — see founder decisions.
+
+### 5. The customer-facing payment copy is mine, not the founder's
+
+Both surfaces now read "We place a hold on your card for $X now, and only
+charge it once your cleaner has confirmed the job." That is a promise about
+money written by an agent. It replaced "Due at service", which stopped being
+true, and a test fails if that old phrase returns to either page's rendered
+text — but the replacement still needs the founder's wording.
+
+### Still unproven in production
+
+No booking has been made and paid through the live path. The sequence that
+would prove it: book on the live site with the Worker log stream open and watch
+for `price authenticated: <id>`; confirm `quote_sig` / `quote_scope` /
+`quote_version` land in the row; open the portal link from the confirmation
+email; pay with `4242 4242 4242 4242`; then confirm Stripe shows an
+**UNCAPTURED** payment rather than a charge. That last step is the one that
+proves authorize-not-charge actually took effect.
+
+### Founder decisions still open
+
+Deposit versus full amount. Refund and cancellation terms. What the customer is
+told about when their card is charged. A partner response deadline, now that
+the seven-day window is real. None is a coding decision.
+
 ## Session 2026-09-10 — signed quotes, step 1 of Stripe (Claude Code)
 
 **Status: LIVE on Cloudflare from commit `527d3cf` (2026-09-10).** No Apps Script
