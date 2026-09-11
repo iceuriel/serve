@@ -1,7 +1,12 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-11  ·  master  ·  r27 — the booking text bills as two segments, not three
+ * VERSION STAMP:  2026-09-11  ·  master  ·  r28 — portal codes live in Access MASTER
+ *
+ * r28 = Codes are written only to a configured separate Access MASTER file.
+ *      Leads PROPERTY_ACCESS holds a saved flag and timestamp. Entry saves
+ *      fail closed if private storage or the write lock is unavailable.
+ *      Editor-only migration verifies copies before removing the old column.
  *
  * r27 = ONE CHARACTER, ONE EXTRA BILLED SEGMENT ON EVERY BOOKING. r26 greeted
  *      the customer with "Hi Uriel — your Serve clean is booked". The em
@@ -754,16 +759,14 @@ const INSTRUCTIONS_HEADERS = [
    latch. This tab is the customer's own answers; the partner ticket shows
    both, labelled, and never merges them.
 
-   `entry_code` IS WRITE-ONLY. No view model returns it, nothing logs it, and
-   two tests assert both. The portal reports only the date it was saved. If
-   Leads MASTER is ever shared with anyone outside the business, hide that one
-   column — moving this tab to Access MASTER later is a spreadsheet-id change,
-   not a redesign. */
+   Codes live only in the separate Access MASTER workbook. Leads stores a
+   nonsecret saved flag and timestamp. Hiding a column is not access control.
+   No view model reads the private workbook or returns a code. */
 const PROPERTY_ACCESS_TAB = "PROPERTY_ACCESS";
 const PROPERTY_ACCESS_HEADERS = [
   "property_id",
   "occupancy_choice", "occupancy_detail",
-  "entry_choice", "entry_detail", "entry_code", "entry_code_set_at",
+  "entry_choice", "entry_detail", "entry_code_saved", "entry_code_set_at",
   "parking_choice", "parking_detail",
   "pet_notes", "updated_at",
 ];
@@ -823,7 +826,8 @@ const EVENTS_HEADERS = [
 
 function doPost(e) {
   const lock = LockService.getScriptLock();
-  try { lock.waitLock(20000); } catch (lockErr) { /* proceed rather than drop a lead */ }
+  var writeLockHeld = false;
+  try { lock.waitLock(20000); writeLockHeld = true; } catch (lockErr) { /* ordinary lead intake keeps its existing fallback */ }
 
   try {
     const data = parseBody(e);
@@ -850,7 +854,10 @@ function doPost(e) {
 
     /* Portal writes. Authorised by a portal token and an ownership check
        rather than by a per-job ticket token — see handlePortalWrite. */
-    if (eventType === "portal_write") return handlePortalWrite(ss, data);
+    if (eventType === "portal_write") {
+      if (!writeLockHeld) return json({ ok: false, error: "save_failed" });
+      return handlePortalWrite(ss, data);
+    }
 
     /* Vendor portal writes. Authorised by a vendor token, and every field
        checked against a whitelist — a partner may describe themselves, not
@@ -1093,7 +1100,7 @@ function doGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-11 r27" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-11 r28" });
 }
 
 
@@ -2084,8 +2091,8 @@ function getContactProperties(bookings) {
 /**
  * How to get into one home, as the customer answered it.
  *
- * THE CODE NEVER COMES BACK. `entry_code` is read here and deliberately
- * discarded; what is returned is whether one exists and when it was saved, so
+ * THE CODE NEVER COMES BACK. Only the nonsecret saved marker is read here;
+ * what is returned is whether one exists and when it was saved, so
  * the portal can say "saved 8 Sep" and offer to replace it. A leaked portal
  * link exposes no code, which is the property that made collecting one
  * acceptable in the first place.
@@ -2117,7 +2124,7 @@ function getPropertyAccess(ss, propertyId) {
         occupancyDetail: String(v.occupancy_detail || ""),
         entryChoice:     String(v.entry_choice || ""),
         entryDetail:     String(v.entry_detail || ""),
-        entryCodeSet:    String(v.entry_code || "").trim() !== "",
+        entryCodeSet:    v.entry_code_saved === true || String(v.entry_code_saved).toLowerCase() === "true",
         entryCodeSetAt:  String(v.entry_code_set_at || ""),
         parkingChoice:   String(v.parking_choice || ""),
         parkingDetail:   String(v.parking_detail || ""),
@@ -2142,6 +2149,120 @@ function ensurePropertyAccessTab(ss) {
     console.log("Created the " + PROPERTY_ACCESS_TAB + " tab.");
   }
   return sheet;
+}
+
+/** Private workbook configuration is deliberately required; no Leads fallback. */
+function privateAccessStore(leads, setup) {
+  var props = PropertiesService.getScriptProperties();
+  var id = String(props.getProperty("ACCESS_SPREADSHEET_ID") || "").trim();
+  var tab = String(props.getProperty("ACCESS_CODES_TAB") || "").trim();
+  if (!id || !tab || id === leads.getId() || id === OPS_SPREADSHEET_ID) throw new Error("private_access_unavailable");
+  var book = SpreadsheetApp.openById(id);
+  if (book.getId() === leads.getId()) throw new Error("private_access_unavailable");
+  var sheet = book.getSheetByName(tab);
+  if (!sheet && setup) {
+    sheet = book.insertSheet(tab);
+    sheet.appendRow(["property_id", "access_secret", "access_secret_set_at"]);
+    sheet.setFrozenRows(1);
+  }
+  if (!sheet) throw new Error("private_access_unavailable");
+  var h = sheetHeaders(sheet);
+  if (setup && h.indexOf("property_id") !== -1 && h.indexOf("access_secret") !== -1 && h.indexOf("access_secret_set_at") === -1) {
+    sheet.getRange(1, h.length + 1).setValue("access_secret_set_at");
+    h = sheetHeaders(sheet);
+  }
+  ["property_id", "access_secret", "access_secret_set_at"].forEach(function (key) {
+    if (h.indexOf(key) === -1) throw new Error("private_access_schema");
+  });
+  return { sheet: sheet, headers: h };
+}
+
+/** Internal only. The caller holds the script lock. Never return the secret. */
+function savePrivateEntryCode(leads, propertyId, code, when, keepExisting) {
+  var store = privateAccessStore(leads, false);
+  var sheet = store.sheet, h = store.headers;
+  var pi = h.indexOf("property_id"), ci = h.indexOf("access_secret"), ti = h.indexOf("access_secret_set_at");
+  var matches = [], last = sheet.getLastRow();
+  if (last > 1) {
+    sheet.getRange(2, pi + 1, last - 1, 1).getValues().forEach(function (r, i) {
+      if (String(r[0]).trim() === propertyId) matches.push(i + 2);
+    });
+  }
+  if (matches.length > 1) throw new Error("private_access_duplicate");
+  var row = matches[0];
+  if (!row && (!code || keepExisting)) return { saved: false, savedAt: "" };
+  if (!row) {
+    row = last + 1;
+    sheet.getRange(row, pi + 1).setValue(propertyId);
+  }
+  var cell = sheet.getRange(row, ci + 1);
+  if (!keepExisting) {
+    // Text formatting preserves leading zeroes. Escape formula-looking input.
+    cell.setNumberFormat("@");
+    cell.setValue(code ? "'" + code : "");
+    SpreadsheetApp.flush();
+    if (String(cell.getValues()[0][0]) !== code) throw new Error("private_access_verification");
+    sheet.getRange(row, ti + 1).setValue(code ? when : "");
+  }
+  var present = String(cell.getValues()[0][0] || "").trim() !== "";
+  return { saved: present, savedAt: present ? sheet.getRange(row, ti + 1).getValues()[0][0] : "" };
+}
+
+/** Run once from the editor, after configuring Access MASTER. Counts only.
+ * Copies and verifies ALL codes before removing the legacy column. A conflict
+ * stops the migration with the source intact; retries are safe after a failure.
+ * This is intentionally not reachable through doGet/doPost.
+ */
+function migratePropertyAccessCodes() {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var ss = SPREADSHEET_ID ? SpreadsheetApp.openById(SPREADSHEET_ID) : SpreadsheetApp.getActiveSpreadsheet();
+    var store = privateAccessStore(ss, true);
+    var sheet = ensurePropertyAccessTab(ss), h = sheetHeaders(sheet);
+    var ci = h.indexOf("entry_code"), pi = h.indexOf("property_id");
+    if (pi === -1) throw new Error("migration_schema");
+    if (h.indexOf("entry_code_saved") === -1) {
+      sheet.getRange(1, h.length + 1).setValue("entry_code_saved");
+      h = sheetHeaders(sheet);
+    }
+    var count = Math.max(0, sheet.getLastRow() - 1);
+    var rows = count ? sheet.getRange(2, 1, count, h.length).getValues() : [];
+    var seen = {}, copied = 0;
+    // Preflight all conflicts before changing any secret.
+    var dest = store.sheet.getDataRange().getValues();
+    var dpi = store.headers.indexOf("property_id"), dci = store.headers.indexOf("access_secret");
+    rows.forEach(function (r) {
+      var id = String(r[pi] || "").trim();
+      var code = ci === -1 ? "" : String(r[ci] == null ? "" : r[ci]);
+      if (!id && !code) return;
+      if (!id || seen[id]) throw new Error("migration_duplicate_or_missing_property");
+      seen[id] = true;
+      var matches = dest.slice(1).filter(function (d) { return String(d[dpi]).trim() === id; });
+      if (matches.length > 1 || (code && matches.length && String(matches[0][dci] || "") && String(matches[0][dci]) !== code)) {
+        throw new Error("migration_conflict_source_retained");
+      }
+    });
+    rows.forEach(function (r, i) {
+      var id = String(r[pi] || "").trim();
+      if (!id) return;
+      var code = ci === -1 ? "" : String(r[ci] == null ? "" : r[ci]);
+      var saved = savePrivateEntryCode(ss, id, code, r[h.indexOf("entry_code_set_at")] || new Date(), !code);
+      sheet.getRange(i + 2, h.indexOf("entry_code_saved") + 1).setValue(saved.saved);
+      sheet.getRange(i + 2, h.indexOf("entry_code_set_at") + 1).setValue(saved.savedAt);
+      if (code) copied++;
+    });
+    SpreadsheetApp.flush();
+    if (ci !== -1) sheet.deleteColumn(ci + 1);
+    SpreadsheetApp.flush();
+    if (sheetHeaders(sheet).indexOf("entry_code") !== -1) throw new Error("migration_verification");
+    console.log("Access migration complete. Properties checked: " + rows.length + "; codes transferred: " + copied + "; legacy code columns: 0.");
+  } catch (err) {
+    // Deliberately suppress service exception detail: it may contain cell data.
+    throw new Error("Access migration stopped. Source codes retained unless column removal already completed. Check private workbook configuration, schema and duplicate/conflicting property records.");
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /** The questions, with this home's answers filled in. Drives the portal form. */
@@ -2355,10 +2476,8 @@ function handlePortalWrite(ss, data) {
  * One access answer: a choice, and the detail that choice allows.
  *
  * THE SECRET GOES SOMEWHERE ELSE. A choice flagged `secret` in
- * ACCESS_QUESTIONS writes its detail to `entry_code`, never to
- * `entry_detail` — so the field a view model reads and the field holding a
- * door code are different cells, and no future edit to the read path can
- * accidentally return one.
+ * ACCESS_QUESTIONS writes its detail to Access MASTER, never to Leads.
+ * The private write is verified before updating the public saved marker.
  */
 function writeAccess(ss, propertyId, data) {
   var field = String(data.field || "").toLowerCase();
@@ -2409,26 +2528,33 @@ function writeAccess(ss, propertyId, data) {
   if (!choice) return json({ ok: false, error: "unknown_choice" });
 
   var detail = String(data.detail || "").trim().slice(0, 500);
+  if (field === "entry") {
+    // Migration must finish first. Never accept a code against the old schema.
+    if (col("entry_code") !== -1 || col("entry_code_saved") === -1) {
+      return json({ ok: false, error: "save_failed" });
+    }
+    try {
+      var saved = savePrivateEntryCode(ss, propertyId, choice.secret ? detail : "", now, !!choice.secret && !detail);
+      set("entry_code_saved", saved.saved);
+      set("entry_code_set_at", saved.savedAt);
+    } catch (privateErr) {
+      // Service exceptions may contain request data: never log the exception.
+      console.warn("Private access storage unavailable; entry answer was not saved.");
+      return json({ ok: false, error: "save_failed" });
+    }
+  }
   set(field + "_choice", choice.key);
 
   if (choice.secret) {
     /* An empty detail on a secret choice leaves the stored code alone —
        selecting "Access code" again should not wipe a code they set last
        month just because the box renders blank, which it always does. */
-    if (detail) {
-      set("entry_code", detail);
-      set("entry_code_set_at", now);
-    }
     set(field + "_detail", "");
   } else {
     set(field + "_detail", choice.detail ? detail : "");
     /* Moving off the code option clears the code. Leaving it behind would
        mean a home whose access says "I'll let you in" still has a live door
        code sitting in the sheet. */
-    if (field === "entry") {
-      set("entry_code", "");
-      set("entry_code_set_at", "");
-    }
   }
 
   set("updated_at", now);

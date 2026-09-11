@@ -17,8 +17,7 @@ function harness(file, marker, exports) {
 const H = harness('portal.test.js', 'const T = build();', '{ build, JOBS_HEADERS, LEADS_HEADERS }');
 const W = harness('worker-proxy.test.js', 'const ASSETS =', '{ loadWorker }');
 const T = H.build(), S = T.box;
-S.PropertiesService = { getScriptProperties: () => ({ getProperty: k =>
-    ({ TICKET_SECRET: 'test-secret-value', PHOTO_BRIDGE_SECRET: 'test-photo-bridge' })[k] || null }) };
+T.propStore.PHOTO_BRIDGE_SECRET = 'test-photo-bridge';
 function seed(tab, headers, values) { tab.appendRow(headers.map(h => values[h] === undefined ? '' : values[h])); }
 seed(T.tabs.LEADS, H.LEADS_HEADERS, { lead_id: 'LEAD-A', contact_id: 'CONTACT-A', name: 'Customer A' });
 seed(T.tabs.LEADS, H.LEADS_HEADERS, { lead_id: 'LEAD-B', contact_id: 'CONTACT-B', name: 'Customer B' });
@@ -103,7 +102,9 @@ const portal = () => JSON.parse(S.handlePortal({ portal: 'CONTACT-A', t: S.porta
         assert.ok(partner().access.fromPortal.some(f=>f.key===q.field && f.value.includes(choice.label)));
     }
     const entry = accessQuestions.find(q=>q.field==='entry').choices.find(c=>c.secret);
-    write({kind:'access', property_id:'PROPERTY-A', field:'entry', choice:entry.key, detail:'SECRET-DO-NOT-RETURN'});
+    assert.equal(write({kind:'access', property_id:'PROPERTY-A', field:'entry', choice:entry.key, detail:'SECRET-DO-NOT-RETURN'}).ok, true);
+    assert.ok(JSON.stringify(T.privateTabs).includes('SECRET-DO-NOT-RETURN'));
+    assert.ok(!JSON.stringify(T.tabs).includes('SECRET-DO-NOT-RETURN'));
     assert.ok(!JSON.stringify(partner()).includes('SECRET-DO-NOT-RETURN'));
     assert.ok(!JSON.stringify(portal()).includes('SECRET-DO-NOT-RETURN'));
     write({kind:'access', property_id:'PROPERTY-A', field:'pets', detail:''});

@@ -13,6 +13,31 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-11, Codex: isolate portal entry codes
+
+Local r28 implementation complete. Founder explicitly authorized routing portal
+codes to the existing Access MASTER workbook and removing the code column from
+Leads PROPERTY_ACCESS. All 26 test files passed; the added verification-failure
+case also passed on a focused rerun. Two deliberate mutations (skip private
+write verification, overwrite conflicting private code during migration) were
+caught. Preserved the other agent's now-committed r27 SMS changes.
+
+**NOT LIVE: no Google Sheets edits, migration, or Apps Script deployment.**
+Google Drive in the browser panel is signed out; Chrome is unavailable through
+the browser tool. Asked founder to sign in to uriel@servecos.com. Last verified
+live backend remains r25 (see prior entry). Do not claim code separation is live.
+
+Next: inspect Access MASTER's existing tab and header names WITHOUT printing
+codes. Configure Script Properties ACCESS_SPREADSHEET_ID and ACCESS_CODES_TAB
+to that separate workbook and its appropriate tab (schema below). Back up and
+compare the live editor before pasting r28. Update the existing deployment,
+then run editor-only migratePropertyAccessCodes. It verifies all copies before
+removing the legacy column, rejects conflicts and logs counts only. Entry writes
+against the legacy schema temporarily fail safely until migration completes.
+Verify the health revision, private destination schema, zero legacy columns,
+and saved flags without exposing codes. Clearing cells does not erase version
+history; if real codes were present, explain that remaining exposure.
+
 ## Current work — 2026-09-11, Claude Code: partner surfaces, the 85% share, unassigned capacity, the booking text
 
 **Deployment state, exactly.** r22–r27 are committed and pushed. **Apps Script

@@ -54,6 +54,7 @@ function makeSheet(name, headers) {
     getLastRow: () => rows.length,
     appendRow: r => rows.push(r.slice()),
     setFrozenRows: () => {},
+    deleteColumn: c => rows.forEach(r => r.splice(c - 1, 1)),
     getDataRange: () => ({ getValues: () => rows.map(r => r.slice()) }),
     getRange: (r, c, nr, nc) => ({
       getValues: () => {
@@ -68,8 +69,9 @@ function makeSheet(name, headers) {
       setValue: v => {
         while (rows.length < r) rows.push([]);
         while (rows[r - 1].length < c) rows[r - 1].push('');
-        rows[r - 1][c - 1] = v;
+        rows[r - 1][c - 1] = typeof v === 'string' && v.startsWith("'") ? v.slice(1) : v;
       },
+      setNumberFormat: () => {},
     }),
   };
 }
@@ -88,20 +90,24 @@ function build() {
   /* Harness state the stubs below share and the tests reach through the return
      value: script properties that survive a set, recorded outbound HTTP, and a
      one-shot reply so a test can make the next Twilio call fail. */
-  const propStore = { TICKET_SECRET: 'test-secret-value' };
+  const propStore = { TICKET_SECRET: 'test-secret-value', ACCESS_SPREADSHEET_ID: 'private-access-book', ACCESS_CODES_TAB: 'ACCESS' };
+  const privateTabs = { ACCESS: makeSheet('ACCESS', ['property_id', 'access_secret', 'access_secret_set_at']) };
+  const privateBook = { getId: () => 'private-access-book', getSheetByName: n => privateTabs[n] || null,
+    insertSheet: n => (privateTabs[n] = makeSheet(n, null)) };
   const fetches = [];
   let nextFetchReply = { code: 201, text: '{"sid":"SM123","status":"queued"}' };
   const ss = {
     getSheetByName: n => tabs[n] || null,
     insertSheet: n => (tabs[n] = makeSheet(n, null)),
     getName: () => 'Leads MASTER',
+    getId: () => 'leads-book',
   };
 
   const box = {
     console: { log: m => logs.push(String(m)), warn: m => logs.push(String(m)),
                error: m => logs.push(String(m)), info: () => {} },
     JSON, Date, Math, String, Number, Boolean, Array, Object, RegExp, isNaN, parseInt, parseFloat,
-    SpreadsheetApp: { openById: () => ss, getActiveSpreadsheet: () => ss },
+    SpreadsheetApp: { openById: id => id === 'private-access-book' ? privateBook : ss, getActiveSpreadsheet: () => ss, flush: () => {} },
     /* ONE store for the whole harness, not a fresh one per call. It used to be
        rebuilt inside getScriptProperties, which meant a property set from a
        test never survived to be read back — fine while TICKET_SECRET was the
@@ -145,7 +151,7 @@ function build() {
   box.globalThis = box;
   vm.createContext(box);
   vm.runInContext(SRC, box);
-  return { box, tabs, ss, logs, propStore, fetches,
+  return { box, tabs, ss, logs, propStore, fetches, privateTabs,
            setFetchReply: (code, text) => { nextFetchReply = { code, text }; } };
 }
 
@@ -304,8 +310,62 @@ t('and no log line contains it', !T.logs.some(l => String(l).includes('4417')));
    "I'll let you in" still has a live code sitting in the sheet. */
 write({ kind: 'access', property_id: 'PROP-0001', field: 'entry', choice: 'LET_IN' });
 const codeCol = (T.tabs.PROPERTY_ACCESS._rows[0] || []).indexOf('entry_code');
-const codeCell = String((T.tabs.PROPERTY_ACCESS._rows[1] || [])[codeCol] || '');
-t('choosing a different entry method clears the stored code', codeCell === '', codeCell);
+const codeCell = String(T.privateTabs.ACCESS._rows[1][1] || '');
+t('choosing a different entry method clears the private stored code', codeCell === '');
+t('Leads has no code column', codeCol === -1);
+t('Leads contains no saved code value', !JSON.stringify(T.tabs).includes('4417'));
+
+head('5b. Private storage failures and migration');
+write({ kind: 'access', property_id: 'PROP-0001', field: 'entry', choice: 'CODE', detail: '0042' });
+t('leading zeroes reach the separate workbook intact', T.privateTabs.ACCESS._rows[1][1] === '0042');
+write({ kind: 'access', property_id: 'PROP-0001', field: 'entry', choice: 'CODE', detail: '' });
+t('an empty code edit keeps the private value', T.privateTabs.ACCESS._rows[1][1] === '0042');
+const beforeFailure = JSON.stringify(T.tabs.PROPERTY_ACCESS._rows);
+delete T.propStore.ACCESS_SPREADSHEET_ID;
+t('missing private configuration rejects the save', write({ kind: 'access', property_id: 'PROP-0001', field: 'entry', choice: 'CODE', detail: '9999' }).ok === false);
+t('portal reads use only public markers even when private storage is unavailable', q2(get({ portal: 'CON-0001', t: MINE }), 'entry').secretSet === true);
+t('failure does not change the public answer or claim success', JSON.stringify(T.tabs.PROPERTY_ACCESS._rows) === beforeFailure);
+t('failure never falls back to Leads', !JSON.stringify(T.tabs).includes('9999'));
+T.propStore.ACCESS_SPREADSHEET_ID = 'leads-book';
+t('configuration pointing at Leads is rejected', write({ kind: 'access', property_id: 'PROP-0001', field: 'entry', choice: 'CODE', detail: '9999' }).ok === false);
+T.propStore.ACCESS_SPREADSHEET_ID = 'private-access-book';
+
+function migrationFixture() {
+  const m = build();
+  m.tabs.PROPERTY_ACCESS = makeSheet('PROPERTY_ACCESS', ['property_id', 'entry_choice', 'entry_detail', 'entry_code', 'entry_code_set_at', 'pet_notes']);
+  m.tabs.PROPERTY_ACCESS.appendRow(['PROP-0001', 'CODE', '', '0042', '2026-09-01', 'Keep this note']);
+  return m;
+}
+const migration = migrationFixture();
+migration.box.migratePropertyAccessCodes();
+t('migration copies exact code into Access MASTER', migration.privateTabs.ACCESS._rows[1][1] === '0042');
+t('migration removes the source column and values', !JSON.stringify(migration.tabs).includes('0042') && !migration.tabs.PROPERTY_ACCESS._rows[0].includes('entry_code'));
+t('migration preserves unrelated customer notes', migration.tabs.PROPERTY_ACCESS._rows[1].includes('Keep this note'));
+migration.box.migratePropertyAccessCodes();
+t('migration retry preserves one destination record', migration.privateTabs.ACCESS._rows.length === 2);
+t('migration logs never contain a code', !migration.logs.join(' ').includes('0042'));
+const conflict = migrationFixture();
+conflict.privateTabs.ACCESS.appendRow(['PROP-0001', 'different-private-code', '']);
+let stopped = false;
+try { conflict.box.migratePropertyAccessCodes(); } catch (_) { stopped = true; }
+t('conflicting private value stops migration without erasing either code', stopped && conflict.tabs.PROPERTY_ACCESS._rows[1][3] === '0042' && conflict.privateTabs.ACCESS._rows[1][1] === 'different-private-code');
+const unavailable = migrationFixture();
+delete unavailable.propStore.ACCESS_SPREADSHEET_ID;
+try { unavailable.box.migratePropertyAccessCodes(); } catch (_) {}
+t('missing Access MASTER leaves the source intact', unavailable.tabs.PROPERTY_ACCESS._rows[1][3] === '0042');
+const corrupt = migrationFixture();
+const privateRange = corrupt.privateTabs.ACCESS.getRange;
+corrupt.privateTabs.ACCESS.getRange = (...args) => {
+  const cell = privateRange(...args);
+  if (args[0] > 1 && args[1] === 2) cell.setValue = () => {};
+  return cell;
+};
+let corruptStopped = false;
+try { corrupt.box.migratePropertyAccessCodes(); } catch (_) { corruptStopped = true; }
+t('failed destination verification preserves the source code and column', corruptStopped && corrupt.tabs.PROPERTY_ACCESS._rows[1][3] === '0042' && corrupt.tabs.PROPERTY_ACCESS._rows[0].includes('entry_code'));
+const timedOut = build();
+timedOut.box.LockService.getScriptLock = () => ({ waitLock: () => { throw new Error('busy'); }, releaseLock: () => {} });
+t('portal writes fail closed when the script lock is busy', JSON.parse(timedOut.box.doPost({ postData: { contents: JSON.stringify({ event_type: 'portal_write' }) } }).getContent()).ok === false);
 
 function q2(model, field) {
   return (model.homes[0].questions || []).filter(x => x.field === field)[0] || {};

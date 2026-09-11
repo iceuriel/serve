@@ -274,7 +274,7 @@ Every booking also carries its own consent snapshot in the JOBS `quote_meta` JSO
 Auto-created on first save, like `BOOKING_INSTRUCTIONS`. No setup step.
 
 `property_id · occupancy_choice · occupancy_detail · entry_choice ·
-entry_detail · entry_code · entry_code_set_at · parking_choice ·
+entry_detail · entry_code_saved · entry_code_set_at · parking_choice ·
 parking_detail · pet_notes · updated_at`
 
 **PROPERTY-scoped, not booking-scoped.** The lockbox is in the same place next
@@ -303,16 +303,28 @@ missing question data. No homes also shows incomplete until a home is available.
 This is a completion indicator, not a new server-side restriction on saving
 partial answers; the column contract and API payload are unchanged.
 
-> **`entry_code` IS WRITE-ONLY.** No view model returns it — not the portal,
-> not the client ticket, not the partner ticket — and nothing logs it. The
-> portal reports only whether one is saved and the date. Choosing a different
-> entry method clears it, so a home whose access reads "I will let you in" is
-> never left with a live code sitting in the sheet.
->
-> This does put codes in Leads MASTER, where the older policy kept them in a
-> separate Access MASTER file. If Leads MASTER is ever shared outside the
-> business, hide that column. Moving the tab to Access MASTER later is a
-> spreadsheet-id change, not a redesign.
+**r28 contract (deployment status in HANDOFF):** `entry_code_saved` is a boolean,
+never the code. The actual value goes to the separate **Access MASTER** workbook.
+No view model reads that workbook or returns a code, and nothing logs one.
+Choosing a different entry method clears the private code; an empty submission
+while keeping CODE retains the existing code. Saving fails if private storage
+is unavailable, misconfigured, or has duplicate property records.
+
+Script Properties `ACCESS_SPREADSHEET_ID` and `ACCESS_CODES_TAB` identify the
+existing private workbook and its code tab. Neither has a fallback. The target
+must differ from Leads and Ops. The private tab has `property_id`, `access_secret`
+and `access_secret_set_at`; other existing columns are preserved. Codes are
+stored as literal text so leading zeroes and formula-looking input survive.
+New codes are verified before Leads' saved marker and timestamp are updated.
+
+Run editor-only `migratePropertyAccessCodes()` after configuring the destination.
+It verifies transferred codes before deleting Leads' legacy `entry_code` column,
+preserves unrelated answers, and stops on conflicting or duplicate records.
+It logs counts only and can be retried. Deploy r28 before migration; entry saves
+against the unmigrated schema fail safely until migration completes.
+Removing current cells does not erase spreadsheet version history. Hidden or
+protected columns are not confidentiality controls; Access MASTER sharing and
+automation credentials must exclude routine Leads readers.
 
 **Not `PROPERTY_MEMORY`.** That tab is the crew's curated record and sits on
 `PROTECTED_TABS` — a form submission knows nothing about a sticky gate latch.
