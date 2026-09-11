@@ -231,6 +231,64 @@ console.log('\n=== 2d. an inactive declaration does not count ===');
   t('inactive row ignored, sheet order stands', bookedVendor(C) === 'VEN-0001', bookedVendor(C));
 }
 
+/* ============================================================
+   2f. r25 — UNASSIGNED CAPACITY
+   ------------------------------------------------------------
+   A row with an empty vendor_id is a time Serve is willing to promise before
+   anybody is booked to work it. The customer picks it, the slot is held, and
+   the search for a partner starts from a time they have already chosen.
+
+   The rule that matters: it must LOSE to any real vendor who is free at that
+   hour, and WIN over nobody at all. Until r25 it tied with an ordinary vendor
+   and ties keep sheet order, so an empty row could beat a company sitting free
+   purely for being higher up the tab. */
+console.log('\n=== 2f. unassigned capacity ===');
+{
+  /* Unassigned first in the sheet, a real vendor second. Sheet order would
+     give it to nobody; rank has to give it to the vendor. */
+  const C = build({ availSeed: [
+    [cellDate(2026, 8, 14), '9:00 AM', '',          'open', '', '', ''],
+    [cellDate(2026, 8, 14), '9:00 AM', 'VEN-0001',  'open', '', '', ''],
+  ] });
+  post(C);
+  t('a real vendor beats an unassigned row even from lower in the sheet',
+    bookedVendor(C) === 'VEN-0001', bookedVendor(C));
+}
+{
+  /* The case the feature exists for: nobody is free, but the time is offered
+     anyway and the customer's slot is still secured. */
+  const C = build({ availSeed: [
+    [cellDate(2026, 8, 14), '9:00 AM', '', 'open', '', '', ''],
+  ] });
+  const res = post(C);
+  t('an unassigned row still takes the booking', res.slot_action === 'booked',
+    res.slot_action);
+  t('and the slot is marked booked, so the time is genuinely held',
+    C.opsTabs.AVAILABILITY._rows[1][3] === 'booked',
+    C.opsTabs.AVAILABILITY._rows[1][3]);
+  t('the job carries no vendor, which is what shows "coordinating"',
+    !jobsVendor(C), jobsVendor(C));
+
+  /* The operator notification for this case is asserted in portal.test.js,
+     "ticketBlock tells three stories": this harness stubs TICKET_SECRET as
+     null, so ticketBlock throws, is caught, and contributes nothing to the
+     email at all. Asserting it here would have tested the stub. */
+}
+{
+  /* An unassigned row is still better than sending work to a company that
+     declared it does not do this service. */
+  const C = build({
+    availSeed: [
+      [cellDate(2026, 8, 14), '9:00 AM', 'VEN-0001', 'open', '', '', ''],
+      [cellDate(2026, 8, 14), '9:00 AM', '',         'open', '', '', ''],
+    ],
+    services: [['VEN-0001','CLEAN_STANDARD','FALSE','neutral','TRUE','']],
+  });
+  post(C);
+  t('unassigned beats a vendor who does not offer the service',
+    bookedVendor(C) === '', JSON.stringify(bookedVendor(C)));
+}
+
 console.log('\n=== 2e. ties keep sheet order ===');
 {
   const C = build({ services: [

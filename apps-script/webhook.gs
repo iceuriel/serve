@@ -1,7 +1,30 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-11  ·  master  ·  r24 — the partner share, 85% and adjustable
+ * VERSION STAMP:  2026-09-11  ·  master  ·  r25 — capacity you can promise before you staff it
+ *
+ * r25 = AN AVAILABILITY ROW WITH AN EMPTY vendor_id IS A REAL, BOOKABLE SLOT.
+ *      It lets a time be offered and GUARANTEED before anybody is booked to
+ *      work it: the customer picks the slot, it is marked booked, and the
+ *      search for a partner starts from a time they have already chosen rather
+ *      than from a blank diary.
+ *
+ *      Almost all of this already worked. The feed reads date/time/status and
+ *      never looked at the vendor, the claim tolerated a blank one, and the
+ *      customer's "Coordinating with our vendor network" state is the same one
+ *      every preference booking has always had. Two things were wrong:
+ *
+ *      RANK. An empty row scored ORDINARY, tying with a genuinely available
+ *      partner, and ties keep sheet order — so a row with nobody in it could
+ *      beat a company sitting free at that hour purely for being higher up the
+ *      tab. Unassigned now sits below every real vendor and above `avoid` and
+ *      `disqualified`: take a partner whenever there is one, and "we will find
+ *      somebody" still beats sending work to a company that does not want it.
+ *
+ *      THE OPERATOR EMAIL. "Nobody assigned — this booking consumed no
+ *      availability row" was true of a preference booking and false here, in
+ *      the one case that actually needs somebody today. There are three states
+ *      now, and the promised-time one says so loudly.
  *
  * r24 = PARTNERS SEE WHAT THEY ARE PAID, WITHOUT ANYONE TYPING IT PER JOB.
  *      The payout is 85% of the ticket by default. An operator's
@@ -1023,7 +1046,7 @@ function doGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-11 r24" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-11 r25" });
 }
 
 
@@ -3547,13 +3570,38 @@ function ensurePropertyMemoryRow(ss, propertyId) {
    what makes an empty VENDOR_SERVICES tab a no-op: booking behaves exactly
    as it did before r16 until somebody actually declares a service. Only a
    vendor who declared their services and left this one out drops to last. */
-const SLOT_RANK_PREFERRED    = 4;
-const SLOT_RANK_ORDINARY     = 3;
+/* r25 — UNASSIGNED CAPACITY IS A REAL ROW WITH AN EMPTY vendor_id.
+
+   It exists so a time can be offered, and guaranteed, before anybody is booked
+   to work it: the customer picks the slot, the booking is held, and the search
+   for a partner starts from a time the customer has already chosen rather than
+   from a blank diary. Their ticket shows "Coordinating with our vendor network"
+   the whole time, which is the same state every preference booking has always
+   had — nothing new to build on the customer's side.
+
+   IT RANKS BELOW EVERY REAL VENDOR AND ABOVE THE ONES WHO SHOULD NOT GET IT.
+   Until r25 an unassigned row scored ORDINARY, tying with a genuinely available
+   partner, and ties keep sheet order — so a row with nobody in it could beat a
+   company sitting free at that hour, purely for being higher up the tab. That
+   is backwards. Unassigned is a promise Serve still has to keep by hand; a real
+   vendor is one already kept. Take the vendor whenever there is one.
+
+   It still outranks `avoid` and `disqualified`, because "we will find somebody"
+   is a better answer than sending a company work they told us they do not
+   want or do not do. */
+const SLOT_RANK_PREFERRED    = 5;
+const SLOT_RANK_ORDINARY     = 4;
+const SLOT_RANK_UNASSIGNED   = 3;
 const SLOT_RANK_AVOID        = 2;
 const SLOT_RANK_DISQUALIFIED = 1;
 
 function slotRank(vendorId, serviceCode, memo) {
-  if (!vendorId || !serviceCode) return SLOT_RANK_ORDINARY;
+  /* Split deliberately. No vendor is capacity Serve still owes somebody, and
+     ranks below a real one. A vendor we simply cannot judge — no service code
+     to check them against — is ORDINARY, because absence of data is not
+     refusal and that rule predates this one. */
+  if (!vendorId)   return SLOT_RANK_UNASSIGNED;
+  if (!serviceCode) return SLOT_RANK_ORDINARY;
   var key = vendorId + "|" + serviceCode;
   if (memo && memo[key] !== undefined) return memo[key];
 
@@ -4106,7 +4154,8 @@ function sendReservationEmail(data, sched, leadId, leadResult, propertyResult, s
        Wrapped because a ticket must never be the reason a booking email fails
        to send. */
     ticketBlock(makeJobId(data, sched), leadResult && leadResult.contact_id,
-                slotResult && slotResult.vendorId) +
+                slotResult && slotResult.vendorId,
+                slotResult && slotResult.action) +
     "\nSubmission: " + (data.submission_id || "(none)") +
     "\nSubmitted:  " + firstSet(data.submitted_at, data.timestamp, "");
 
@@ -4238,7 +4287,7 @@ function serviceLabel(data) {
  *
  * Never throws. A link is not worth failing a booking notification for.
  */
-function ticketBlock(jobId, contactId, vendorId) {
+function ticketBlock(jobId, contactId, vendorId, slotAction) {
   try {
     var customer = contactId
       ? "Customer portal (same link every booking):\n" + portalUrl(contactId) + "\n"
@@ -4248,11 +4297,28 @@ function ticketBlock(jobId, contactId, vendorId) {
     /* r19. The COMPANY's standing portal, not this job. Unassigned is not a
        failure worth hiding: it is every preference booking, so the line
        names the two steps instead of going quiet. */
-    var vendor = isSet(vendorId)
-      ? "Vendor portal for " + vendorId + " (permanent):\n" + vendorUrl(vendorId) + "\n"
-      : "Vendor portal: nobody assigned — this booking consumed no\n" +
-        "availability row. Fill vendor_id on the JOBS row, then run\n" +
-        "printVendorLinks() in the editor for the link.\n";
+    /* THREE STATES, NOT TWO. Until r25 "no vendor" meant one thing — a
+       preference booking that consumed no availability row — and the line said
+       so. Unassigned CAPACITY breaks that: the customer picked a real slot, it
+       is marked booked, their time is guaranteed, and Serve owes them a partner.
+       Telling an operator that booking "consumed no availability row" would be
+       false, and would hide the one case that actually needs them today. */
+    var vendor;
+    if (isSet(vendorId)) {
+      vendor = "Vendor portal for " + vendorId + " (permanent):\n" + vendorUrl(vendorId) + "\n";
+    } else if (String(slotAction) === "booked") {
+      vendor = "*** NO VENDOR YET, AND THE TIME IS PROMISED ***\n" +
+               "This booking took an UNASSIGNED availability row. The slot is\n" +
+               "held and the customer has been given that time — find a partner\n" +
+               "for it, put them in vendor_id on the JOBS row, then run\n" +
+               "printVendorLinks() in the editor for their link.\n" +
+               "Their ticket reads \"Coordinating with our vendor network\"\n" +
+               "until that column is filled.\n";
+    } else {
+      vendor = "Vendor portal: nobody assigned — this booking consumed no\n" +
+               "availability row. Fill vendor_id on the JOBS row, then run\n" +
+               "printVendorLinks() in the editor for the link.\n";
+    }
 
     return "\n— TICKETS —\n" +
            customer + "\n" +

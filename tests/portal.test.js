@@ -469,5 +469,33 @@ t('unassigned says nobody is assigned', /nobody assigned/.test(noVen), noVen.sli
 t('and names the fix', /vendor_id/.test(noVen) && /printVendorLinks/.test(noVen));
 t('and mints no vendor link at all', noVen.indexOf('/v?id=') === -1);
 
+/* ------------------------------------------------------------------ */
+console.log('\n=== r25: ticketBlock tells three stories, not two ===');
+/* "No vendor" used to mean one thing — a preference booking that consumed no
+   availability row — and the line said exactly that. r25 adds UNASSIGNED
+   CAPACITY: the customer picked a real slot, it is held, their time is
+   promised, and Serve owes them a partner. Telling an operator that booking
+   "consumed no availability row" would be false, and false about the one case
+   that actually needs them today. */
+const promised = S.ticketBlock('SRV-20260920-BBBBBB', 'CON-0001', '', 'booked');
+t('a held slot with no vendor shouts that the time is promised',
+  /NO VENDOR YET, AND THE TIME IS PROMISED/.test(promised), promised.slice(-260));
+t('and does NOT repeat the "consumed no availability row" line',
+  !/consumed no/.test(promised));
+t('it still names the fix', /vendor_id/.test(promised) && /printVendorLinks/.test(promised));
+t('and tells the operator what the customer is seeing meanwhile',
+  /Coordinating with our vendor network/.test(promised));
+t('still no vendor link, because there is no vendor',
+  promised.indexOf('/v?id=') === -1);
+
+/* The preference booking keeps its own wording — it really did consume
+   nothing, and conflating the two would lose the distinction r25 adds. */
+t('a preference booking still says no row was consumed',
+  /consumed no/.test(S.ticketBlock('SRV-20260920-CCCCCC', 'CON-0001', '', 'n/a')));
+/* And an assigned booking is untouched by any of this. */
+const assigned = S.ticketBlock('SRV-20260920-DDDDDD', 'CON-0001', 'VEN-0001', 'booked');
+t('an assigned booking still just gets the vendor portal link',
+  /\/v\?id=VEN-0001/.test(assigned) && !/NO VENDOR YET/.test(assigned), assigned.slice(-160));
+
 console.log('\n' + (bad ? bad + ' FAILURES' : 'ALL ASSERTIONS PASSED'));
 process.exit(bad ? 1 : 0);

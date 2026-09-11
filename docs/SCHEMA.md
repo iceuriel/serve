@@ -659,6 +659,35 @@ never touched**; it is the operator's hold and only `open` is eligible.
 *Which* open row, when several match, is decided by the ranking below. With a
 single match it is the same row it has always been.
 
+#### Unassigned capacity — a row with a blank `vendor_id` (r25)
+
+**Leave `vendor_id` empty and the row is still a real, bookable slot.** It is
+how a time gets offered — and guaranteed — before anybody is booked to work it:
+the customer picks it, the webhook marks it `booked` and writes the `job_id`,
+and the search for a partner starts from a time the customer has already chosen
+rather than from a blank diary.
+
+To post one, add a row with `date`, `start_time`, `status` = `open`, and
+**nothing in `vendor_id`**. The feed never looks at that column — it reads
+date, time and status — so the slot appears to customers like any other.
+
+**The customer sees the same thing every preference booking has always shown:**
+"Coordinating with our vendor network" on their portal and ticket, because the
+JOBS row carries no `vendor_id` and `partnerPending` is therefore true. Filling
+`vendor_id` on the JOBS row is what swaps that for the partner's card. Nothing
+extra is built on the customer's side.
+
+**It ranks below every real vendor** — see the table below. Serve should hand a
+job to a partner who is genuinely free before promising to find one. It ranks
+*above* `avoid` and `disqualified`, because "we will find somebody" beats
+sending a company work they told us they do not want or do not do.
+
+> **The booking notification says so, loudly.** An unassigned-capacity booking
+> is the one case where a customer has been promised a time nobody is committed
+> to yet, so the email reads `*** NO VENDOR YET, AND THE TIME IS PROMISED ***`
+> and names the fix. It is deliberately different from the preference-booking
+> wording — that one really did consume no availability row; this one did.
+
 The read happens at write time, inside the script lock `doPost` already holds —
 never from the customer's view, which the five-minute feed cache makes stale by
 construction.
