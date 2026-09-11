@@ -13,6 +13,46 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-11, Claude Code: the access-code migration is DONE
+
+**Migrated in production, 2026-09-11 17:17 ET** (the founder ran it from the
+editor): `Access migration complete. Properties checked: 2; codes transferred:
+0; legacy code columns: 0.` The migration verifies the legacy `entry_code`
+column is gone before it reports success, so Leads PROPERTY_ACCESS no longer
+has it and has `entry_code_saved` instead. No customer door code ever had to
+move — there were none.
+
+**Pre-flight immediately before (17:16 ET), all green:** Access MASTER
+configured and separate, required columns present; 2 homes and zero codes kept
+as text, numbers or dates; no duplicates; no clashes; no dates in Access
+MASTER; and **`Write round trip: OK`**. That settles the one thing no local
+test could prove: on the real workbook, a code written as text with a leading
+apostrophe into a plain-text cell reads back exactly, so r28's save path works.
+
+**Configuration now in place, in Leads MASTER's bound Apps Script project:**
+`ACCESS_SPREADSHEET_ID` → Access MASTER, `ACCESS_CODES_TAB` → `ACCESS_CODES`.
+
+**What went wrong on the way, so nobody repeats it.** The check reported NOT
+READY three times. The cause was a stale `ACCESS_CODES_TAB` = `Sheet1` in the
+Leads-bound project's Script Properties, while the corrected value had not
+landed in that project — most likely it was saved in a different Apps Script
+project, where it did nothing. After the stale row was deleted, the check said
+"not set" with no similar-name warning, which rules out a lookalike property in
+the Leads project. **Script Properties are per project, and the only one that
+matters is the project bound to Leads MASTER** (Extensions → Apps Script):
+`SPREADSHEET_ID` is "" and the webhook finds Leads through that binding. r29's
+message could not tell the causes apart; r30's named the stale value on its
+first run.
+
+**Pending, for the founder to confirm:** the post-migration check reading
+`ABSENT (already migrated)`, and one real portal entry save landing in
+`ACCESS_CODES` and not in Leads. Portal entry saves should now pass r28's gate,
+but that is unverified until the test save. The live web app is still r29,
+which is identical to r30 for everything the web app touches; deploy r30 to the
+EXISTING deployment so the version string matches the repo.
+
+---
+
 ## Current work — 2026-09-11, Claude Code: r30, and what the live check showed
 
 **r30 is committed and pushed, NOT deployed.** It changes only the editor-run
