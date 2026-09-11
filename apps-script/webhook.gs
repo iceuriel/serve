@@ -1,7 +1,31 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-11  ·  master  ·  r25 — capacity you can promise before you staff it
+ * VERSION STAMP:  2026-09-11  ·  master  ·  r26 — the booking text
+ *
+ * r26 = ONE SMS WHEN A BOOKING IS WRITTEN: a sentence and their portal link.
+ *      A text is frozen the second it sends and costs money per segment; the
+ *      portal is always current and holds everything. So the message is an
+ *      envelope, never the contents — texting the booking itself would mean
+ *      texting again on every change, and the customer would not know which
+ *      message was true.
+ *
+ *      Sent from here rather than the Worker: this is the moment the booking
+ *      exists, after the JOBS write and after the dedupe, with the contact_id
+ *      the link needs already in hand. A retried submission returns long
+ *      before this, so nobody is texted twice.
+ *
+ *      FOUR GATES, ALL SILENT WHEN THEY CLOSE — consent (`sms_transactional`
+ *      exactly "yes", the A2P 10DLC line and the only one here carrying a
+ *      legal penalty), credentials, a phone toE164 can read, and a contact_id
+ *      to build a link from. Most bookings will report one of them.
+ *
+ *      Three Script Properties turn it on, and until they are set it does
+ *      nothing at all: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM.
+ *
+ *      NOTHING HERE MAY FAIL A BOOKING, and no phone number, signed link or
+ *      token may reach a log line. Twilio's own error text quotes the recipient
+ *      number, so only the HTTP status and Twilio's error code are logged.
  *
  * r25 = AN AVAILABILITY ROW WITH AN EMPTY vendor_id IS A REAL, BOOKABLE SLOT.
  *      It lets a time be offered and GUARANTEED before anybody is booked to
@@ -895,6 +919,19 @@ function doPost(e) {
       console.error("vendor_id stamp failed (booking stands): " + stampErr);
     }
 
+    /* r26. The customer's own text, after the row exists and after the dedupe,
+       so a retried submission cannot text anybody twice. Returns a reason
+       rather than throwing; "no consent" and "twilio not configured" are
+       ordinary outcomes and most bookings will report one of them. */
+    var smsResult = "skipped";
+    try {
+      smsResult = sendBookingSms(data, leadResult && leadResult.contact_id, record.job_id);
+    } catch (smsErr) {
+      smsResult = "failed";
+      console.error("booking SMS wrapper failed (booking stands): " + smsErr);
+    }
+    console.log("booking SMS " + record.job_id + ": " + smsResult);
+
     try {
       sendReservationEmail(data, sched, leadId, leadResult, propertyResult, slotResult);
     } catch (mailErr) {
@@ -1046,7 +1083,7 @@ function doGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-11 r25" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-11 r26" });
 }
 
 
@@ -1634,6 +1671,106 @@ function buildClientTicketModel(ss, booking) {
     partnerPending: !vendor,
   };
 }
+
+/* ============================================================
+   THE BOOKING TEXT  —  r26
+   ============================================================
+
+   One SMS when a booking is written: a sentence and their portal link.
+
+   WHY A LINK AND NOT THE DETAILS. A text is frozen the second it sends and
+   costs money per segment; the portal is always current and holds everything —
+   the date, the price, who is coming, entry details, payment. Texting the
+   booking itself would mean texting again every time any of it changed, and
+   the customer would still not know which message was the true one.
+
+   SENT FROM HERE, NOT FROM THE WORKER. This is the moment the booking actually
+   exists — after the JOBS row is written, after the dedupe, and where the
+   contact_id the portal link needs is already in hand. A duplicate submission
+   returns long before this, so a retry cannot text somebody twice.
+
+   FOUR GATES, AND ALL OF THEM ARE SILENT WHEN THEY CLOSE:
+
+     consent      `sms_transactional` must be exactly "yes". Blank is not a
+                  "no" on record, it is "nobody asked" — and either way it is
+                  not permission. This is the A2P 10DLC line and it is the one
+                  gate here that carries a legal penalty.
+     credentials  unset Script Properties mean the feature is simply off, the
+                  way QUOTE_SECRET and PHOTO_BRIDGE_SECRET are off until set.
+     a real phone toE164 returns "" for anything it cannot make sense of.
+     a portal     no contact_id means no link, and a text saying "you booked"
+                  with nothing to open is worse than no text.
+
+   NOTHING HERE MAY FAIL A BOOKING, and nothing here may write a phone number or
+   a signed link into a log line. The log says the job id and whether it sent. */
+
+const TWILIO_SID_PROP   = "TWILIO_ACCOUNT_SID";
+const TWILIO_TOKEN_PROP = "TWILIO_AUTH_TOKEN";
+const TWILIO_FROM_PROP  = "TWILIO_FROM";
+
+/**
+ * The message itself.
+ *
+ * Deliberately short: two sentences and a link is one or two segments, and
+ * every segment is billed. The STOP line is what sms-terms.html already
+ * promises — "Reply STOP to any message to stop receiving texts from Serve" —
+ * so leaving it out would break a promise the site makes in writing.
+ */
+function bookingSmsText(firstName, link) {
+  var hi = firstName ? "Hi " + firstName + " — " : "";
+  return hi + "your Serve clean is booked. Your booking page has the details, " +
+         "entry instructions and payment:\n" + link + "\nReply STOP to opt out.";
+}
+
+/**
+ * Returns a short reason string, always. Never throws, never returns a phone
+ * number or a link, and the reason is safe to log verbatim.
+ */
+function sendBookingSms(data, contactId, jobId) {
+  try {
+    if (String(data.sms_transactional || "") !== "yes") return "no consent";
+
+    var props = PropertiesService.getScriptProperties();
+    var sid   = props.getProperty(TWILIO_SID_PROP);
+    var token = props.getProperty(TWILIO_TOKEN_PROP);
+    var from  = props.getProperty(TWILIO_FROM_PROP);
+    if (!sid || !token || !from) return "twilio not configured";
+
+    var e164 = toE164(data.phone);
+    if (!e164) return "no usable phone";
+    if (!contactId) return "no contact_id, so no portal link";
+
+    var body = bookingSmsText(String(data.name || "").split(" ")[0],
+                              portalUrl(contactId));
+
+    /* Basic auth rather than a library: one call, one dependency fewer, and
+       the token never leaves this function. muteHttpExceptions so a 4xx comes
+       back as a response to read rather than an exception to catch. */
+    var res = UrlFetchApp.fetch(
+      "https://api.twilio.com/2010-04-01/Accounts/" + encodeURIComponent(sid) + "/Messages.json",
+      {
+        method: "post",
+        muteHttpExceptions: true,
+        headers: { Authorization: "Basic " + Utilities.base64Encode(sid + ":" + token) },
+        payload: { From: from, To: "+" + e164, Body: body },
+      });
+
+    var code = res.getResponseCode();
+    if (code >= 200 && code < 300) return "sent";
+
+    /* Twilio's error names the parameter it disliked and carries the TO number,
+       so only the code and its own error code are logged — never the body. */
+    var detail = "";
+    try { detail = " twilio_code=" + (JSON.parse(res.getContentText()) || {}).code; } catch (_) {}
+    console.error("booking SMS failed for " + jobId + ": HTTP " + code + detail);
+    return "failed http " + code;
+
+  } catch (err) {
+    console.error("booking SMS threw for " + jobId + " (booking stands): " + err);
+    return "failed";
+  }
+}
+
 
 /* ============================================================
    DATE AND TIME CELLS  —  r23

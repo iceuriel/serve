@@ -85,6 +85,12 @@ function build() {
       'public_rating','public_review_count','rating_source','client_visible']),
   };
   const logs = [];
+  /* Harness state the stubs below share and the tests reach through the return
+     value: script properties that survive a set, recorded outbound HTTP, and a
+     one-shot reply so a test can make the next Twilio call fail. */
+  const propStore = { TICKET_SECRET: 'test-secret-value' };
+  const fetches = [];
+  let nextFetchReply = { code: 201, text: '{"sid":"SM123","status":"queued"}' };
   const ss = {
     getSheetByName: n => tabs[n] || null,
     insertSheet: n => (tabs[n] = makeSheet(n, null)),
@@ -96,11 +102,15 @@ function build() {
                error: m => logs.push(String(m)), info: () => {} },
     JSON, Date, Math, String, Number, Boolean, Array, Object, RegExp, isNaN, parseInt, parseFloat,
     SpreadsheetApp: { openById: () => ss, getActiveSpreadsheet: () => ss },
+    /* ONE store for the whole harness, not a fresh one per call. It used to be
+       rebuilt inside getScriptProperties, which meant a property set from a
+       test never survived to be read back — fine while TICKET_SECRET was the
+       only one, useless the moment a test needs to turn a feature on. */
     PropertiesService: {
-      getScriptProperties: () => {
-        const store = { TICKET_SECRET: 'test-secret-value' };
-        return { getProperty: k => store[k] || null, setProperty: (k, v) => { store[k] = v; } };
-      },
+      getScriptProperties: () => ({
+        getProperty: k => (k in propStore ? propStore[k] : null),
+        setProperty: (k, v) => { propStore[k] = v; },
+      }),
     },
     Utilities: {
       computeHmacSha256Signature: (msg) => {
@@ -109,6 +119,21 @@ function build() {
       },
       getUuid: () => 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
       formatDate: (d) => String(d),
+      base64Encode: (s) => Buffer.from(String(s), 'utf8').toString('base64'),
+    },
+    /* Records outbound HTTP instead of making it. Modelled on Twilio's actual
+       contract — muteHttpExceptions means a 4xx is a response to read, not a
+       throw — so the code under test takes the same branch it would live. */
+    UrlFetchApp: {
+      fetch: (url, opts) => {
+        fetches.push({ url, opts });
+        const reply = nextFetchReply;
+        nextFetchReply = { code: 201, text: '{"sid":"SM123","status":"queued"}' };
+        return {
+          getResponseCode: () => reply.code,
+          getContentText:  () => reply.text,
+        };
+      },
     },
     MailApp: { sendEmail: () => {} },
     ContentService: {
@@ -120,7 +145,8 @@ function build() {
   box.globalThis = box;
   vm.createContext(box);
   vm.runInContext(SRC, box);
-  return { box, tabs, ss, logs };
+  return { box, tabs, ss, logs, propStore, fetches,
+           setFetchReply: (code, text) => { nextFetchReply = { code, text }; } };
 }
 
 const T = build();
@@ -496,6 +522,88 @@ t('a preference booking still says no row was consumed',
 const assigned = S.ticketBlock('SRV-20260920-DDDDDD', 'CON-0001', 'VEN-0001', 'booked');
 t('an assigned booking still just gets the vendor portal link',
   /\/v\?id=VEN-0001/.test(assigned) && !/NO VENDOR YET/.test(assigned), assigned.slice(-160));
+
+/* ------------------------------------------------------------------ */
+head('r26: the booking text');
+/* One SMS on booking: a sentence and the portal link. Four gates close it, and
+   the first of them is the one with a legal penalty attached. */
+{
+  const sms = (over) => S.sendBookingSms(Object.assign({
+    name: 'Uriel Lopez', phone: '(617) 555-0100', sms_transactional: 'yes',
+  }, over), 'CON-0001', 'SRV-20260920-EEEEEE');
+  const sent = () => T.fetches.length;
+
+  /* THE CONSENT GATE. Blank is not "no on record", it is "nobody asked" — and
+     either way it is not permission. This is the A2P 10DLC line. */
+  let before = sent();
+  t('no consent means no text, and no request at all',
+    sms({ sms_transactional: '' }) === 'no consent' && sent() === before);
+  t('and "no" is not treated as a yes either',
+    sms({ sms_transactional: 'no' }) === 'no consent' && sent() === before);
+  t('nor is any other truthy-looking value',
+    sms({ sms_transactional: 'YES' }) === 'no consent' && sent() === before);
+
+  /* Unset credentials mean the feature is simply off, like QUOTE_SECRET. */
+  t('unconfigured Twilio is a silent no-op', sms() === 'twilio not configured' &&
+    sent() === before);
+
+  T.propStore.TWILIO_ACCOUNT_SID = 'AC_test_sid';
+  T.propStore.TWILIO_AUTH_TOKEN  = 'test_token';
+  T.propStore.TWILIO_FROM        = '+15550001111';
+
+  t('an unusable phone sends nothing',
+    sms({ phone: '12' }) === 'no usable phone' && sent() === before);
+  t('and no contact_id means no link, so no text',
+    S.sendBookingSms({ name: 'A', phone: '6175550100', sms_transactional: 'yes' },
+                     '', 'SRV-1') === 'no contact_id, so no portal link' &&
+    sent() === before);
+
+  /* The happy path. */
+  t('with consent, credentials, a phone and a portal, it sends', sms() === 'sent');
+  const call = T.fetches[T.fetches.length - 1];
+  t('to Twilio, under the configured account',
+    /api\.twilio\.com\/2010-04-01\/Accounts\/AC_test_sid\/Messages\.json/.test(call.url),
+    call.url);
+  t('the number is E.164 with the plus Twilio wants',
+    call.opts.payload.To === '+16175550100', call.opts.payload.To);
+  t('from the configured number', call.opts.payload.From === '+15550001111');
+  t('authenticated, and the token is not in the URL',
+    /^Basic /.test(call.opts.headers.Authorization) && !/test_token/.test(call.url));
+  t('a 4xx comes back as a response to read, not a throw',
+    call.opts.muteHttpExceptions === true);
+
+  const body = call.opts.payload.Body;
+  t('the message carries the portal link', /\/h\?id=CON-0001&t=/.test(body), body);
+  t('and greets them by first name only, never the surname',
+    /Hi Uriel/.test(body) && !/Lopez/.test(body), body);
+  t('and honours the opt-out sms-terms.html promises in writing',
+    /Reply STOP to opt out\./.test(body), body);
+  /* Two segments at most. Every segment is billed, and the link is most of it. */
+  t('it stays short enough not to fan out into many segments',
+    body.length <= 320, body.length);
+
+  /* Twilio refusing is not a booking failing. */
+  T.setFetchReply(400, '{"code":21610,"message":"Attempt to send to unsubscribed recipient +16175550100"}');
+  t('a Twilio error is reported, not thrown', sms() === 'failed http 400');
+
+  /* THE LOG IS THE ONE PLACE THIS COULD LEAK. Twilio's own error text carries
+     the TO number; the portal link is a live credential. Neither may be logged,
+     and the rule about addresses in logs is older than this feature. */
+  /* Scoped to the lines THIS feature writes. A blanket search over every log
+     line fails on printCustomerLinks(), an editor-run operator tool whose whole
+     purpose is to print portal links for somebody to copy — a deliberate thing,
+     not a leak, and not something the booking path does. */
+  const smsLogs = T.logs.filter(l => /booking SMS/.test(l)).join(' | ');
+  t('the SMS path logs something at all', smsLogs.length > 0);
+  t('no phone number reaches an SMS log line',
+    !/6175550100|\+1617/.test(smsLogs), smsLogs);
+  t('no portal link reaches an SMS log line', !/\/h\?id=/.test(smsLogs), smsLogs);
+  t('no auth token reaches an SMS log line', !/test_token/.test(smsLogs));
+  t('and Twilio\'s own error text, which quotes the number, is not echoed',
+    !/unsubscribed recipient/.test(smsLogs), smsLogs);
+  t('but the job id does, so a failure can be chased',
+    /SRV-20260920-EEEEEE/.test(smsLogs));
+}
 
 console.log('\n' + (bad ? bad + ' FAILURES' : 'ALL ASSERTIONS PASSED'));
 process.exit(bad ? 1 : 0);
