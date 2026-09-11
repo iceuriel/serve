@@ -485,16 +485,41 @@
         /* THE PAYOUT. What this crew is paid, which is not what the customer
            paid — that number is in the client view and reaches no partner.
            Blank reads as "confirmed at dispatch" rather than $0, because a
-           zero looks like a job that pays nothing. */
+           zero looks like a job that pays nothing.
+
+           TWO DIFFERENT MOMENTS, AND THE COPY HAS TO KEEP THEM APART. The
+           AMOUNT is agreed at dispatch — a partner cannot be asked to accept a
+           job without knowing what it pays. The MONEY arrives after the work is
+           done and checked. The old wording said only "at dispatch", which read
+           as though that were also when they were paid.
+
+           NOTHING HERE IS MECHANICAL. No code watches completed_date or
+           photos_passed to release anything; the founder verifies both by hand
+           and pays by hand. This is a description of how Serve operates, not a
+           trigger, and it must not quietly become one. */
         var pay = el('div', 'tk-blk');
         pay.appendChild(el('div', 'tk-lbl', 'Your payout'));
         var payAmount = money(b.payout);
         if (payAmount) {
             pay.appendChild(el('div', 'tk-money', payAmount));
         } else {
-            pay.appendChild(el('div', 'tk-val', 'Confirmed at dispatch'));
+            pay.appendChild(el('div', 'tk-val', 'Amount confirmed at dispatch'));
         }
+        pay.appendChild(el('div', 'tk-note',
+            'Agreed at dispatch. Paid after the job is completed and the ' +
+            'photo check passes.'));
         bodyEl.appendChild(pay);
+
+        /* WHO. First name only — see buildVendorTicketModel for why that is the
+           whole of it. Sits directly above the address because the two answer
+           the same question: which door, and who opens it. Absent on an older
+           deployment, and absent is silence rather than a blank row. */
+        if (d.customerFirstName) {
+            var who = el('div', 'tk-blk');
+            who.appendChild(el('div', 'tk-lbl', 'Customer'));
+            who.appendChild(el('div', 'tk-val', d.customerFirstName));
+            bodyEl.appendChild(who);
+        }
 
         var where = [prop.address, prop.unit].filter(Boolean).join(', ');
         if (where) {

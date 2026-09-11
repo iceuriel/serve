@@ -1,7 +1,30 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-10  ·  master  ·  r21 — private room photos and shared portal answers
+ * VERSION STAMP:  2026-09-11  ·  master  ·  r22 — the customer's first name, on the job ticket
+ *
+ * r22 = THE CREW KNOWS WHO THEY ARE EXPECTING. buildVendorTicketModel gains
+ *      `customerFirstName`, and only that. Somebody knocking on a stranger's
+ *      door should be able to say "Hi, Sarah?" rather than guessing.
+ *
+ *      This RELAXES the standing rule on partner surfaces — "address only, no
+ *      customer name, email or phone, contact routes through Serve" — and the
+ *      founder made that call on 2026-09-11. The reasoning the rule protects is
+ *      untouched: a first name is not a contact route. It cannot be dialled,
+ *      emailed or looked up, so it does not let a partner arrange work around
+ *      Serve, which is the thing that rule exists to prevent.
+ *
+ *      Surname, email and phone stay out. So does the vendor PORTAL, which
+ *      lists every job the company has and has no business being a customer
+ *      directory. One name, on one job's ticket, for the person going to it.
+ *
+ *      r22 also SEPARATES THE TWO PAYOUT MOMENTS in partner-facing copy. The
+ *      amount is agreed at dispatch; the money follows completion and the photo
+ *      check. Both surfaces said only "at dispatch", and the vendor portal's
+ *      "Payout at dispatch" read as though that were payday. No code changed:
+ *      the founder verifies completion and photos by hand and pays by hand, and
+ *      nothing reads completed_date or photos_passed to release anything.
+ *
  * r21 adds BOOKING_PHOTOS, private Worker-authorized image operations, and
  * customer portal arrival answers in the vendor ticket (never entry codes).
  *
@@ -377,7 +400,18 @@ const PROTECTED_TABS = [
 
 /** Columns ops owns on JOBS. Never written, not even blank-filled.
     `partner_payout` joins them in r13: what the crew is paid for this job, set
-    by hand at dispatch. A booking form cannot know it and must never guess. */
+    by hand at dispatch. A booking form cannot know it and must never guess.
+
+    r22 — WHEN THE MONEY MOVES IS NOT WHEN THE AMOUNT IS SET. The amount is
+    agreed at dispatch, because nobody can be asked to accept a job without
+    knowing what it pays. Payment follows completion and the photo check, and
+    both partner surfaces now say so.
+
+    NONE OF THAT IS MECHANICAL, by the founder's decision on 2026-09-11. No code
+    reads `completed_date` or `photos_passed` to release a payout; both are
+    verified by hand and payment is made by hand. The copy describes how Serve
+    operates. If that ever becomes automatic it is a new decision, and this
+    column stops being ops-owned on the same day. */
 const OPS_OWNED_COLUMNS = ["completed_date", "cleaner", "duration_min", "photos_passed",
                            "payment_status", "partner_payout", "vendor_id", "operator_id"];
 
@@ -939,7 +973,7 @@ function doGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-10 r21" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-11 r22" });
 }
 
 
@@ -1573,6 +1607,25 @@ function buildVendorTicketModel(ss, booking) {
       completed:    booking.completedDate,
       addOns:       booking.addOns,
     },
+
+    /* THE CUSTOMER'S FIRST NAME, AND DELIBERATELY NOTHING ELSE. r22.
+       Somebody knocking on a stranger's door should know who they are expecting,
+       and "Hi, Sarah?" is the difference between a professional arriving and a
+       stranger at the door.
+
+       The standing rule on partner surfaces is "address only — no customer name,
+       email or phone, contact routes through Serve" (see buildVendorPortalModel).
+       The founder relaxed it for this field on 2026-09-11, and the reasoning it
+       protects still holds: a FIRST NAME IS NOT A CONTACT ROUTE. It cannot be
+       dialled, emailed, or looked up, so it does not let a partner arrange work
+       around Serve — which is what that rule exists to prevent. The partner
+       already has the address, without which they could not do the job at all.
+
+       SURNAME, EMAIL AND PHONE STAY OUT, and so does this field on the vendor
+       PORTAL — the company's standing list of every job does not need to be a
+       customer directory. One name, on the ticket for the one job, for the
+       person actually going. Widening this again is a founder decision. */
+    customerFirstName: String(booking.customerName || "").split(" ")[0] || "",
 
     property: {
       address: booking.address,

@@ -467,6 +467,20 @@ t('partner is NOT given the customer email anywhere',
   !partnerJson.includes(tJob.email), partnerJson.slice(0, 200));
 t('partner is NOT given the customer phone anywhere',
   !partnerJson.includes(String(tJob.phone)));
+
+/* r22 — THE FIRST NAME, AND EXACTLY THAT MUCH.
+   Somebody knocking on a stranger's door should know who they are expecting.
+   The rule this relaxes exists to stop a partner arranging work around Serve,
+   and a first name is not a contact route — it cannot be dialled, emailed or
+   looked up. The surname is what turns a greeting into an identity, so the
+   assertion below is the one that matters: the full name must NOT survive. */
+t('partner IS given the customer first name', partner.customerFirstName === 'Test',
+  partner.customerFirstName);
+t('but NOT the full name — a first name is a greeting, a surname is an identity',
+  !partnerJson.includes('Test Customer'), partnerJson.slice(0, 200));
+t('and the client view does not gain a partner-shaped name field',
+  !('customerFirstName' in client) || client.customerFirstName === undefined,
+  client.customerFirstName);
 /* THE TWO SIDES OF THE MONEY ARE NOT THE SAME NUMBER.
    The partner sees `payout` — what they are paid. They must never see
    `price` — what the customer paid. Serve's margin is the difference and it
@@ -477,6 +491,39 @@ t('partner IS given a payout field', 'payout' in partner.booking, Object.keys(pa
 t('the payout is blank until an operator sets it — never a guessed number',
   !partner.booking.payout, partner.booking.payout);
 t('and the client is never shown the payout', !/payout/i.test(clientJson));
+
+/* r22 — THE AMOUNT AND THE MONEY ARE TWO DIFFERENT MOMENTS.
+   Both partner surfaces used to say only "at dispatch", and the vendor
+   portal's "Payout at dispatch" read as though that were payday. The amount IS
+   agreed at dispatch — nobody can be asked to accept a job without knowing what
+   it pays — but payment follows completion and the photo check. */
+{
+  const tk = fs.readFileSync(require('path').join(REPO_ROOT, 'ticket.js'), 'utf8');
+  const vd = fs.readFileSync(require('path').join(REPO_ROOT, 'vendor.js'), 'utf8');
+  /* Comments out so a copy assertion tests what a PARTNER reads, and adjacent
+     string literals joined so that where a sentence happens to wrap in the
+     source does not decide whether the test passes. */
+  const strip = s => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/'\s*\+\s*'/g, '');
+
+  t('the ticket tells a partner when they are actually paid',
+    /completed and the photo check passes/.test(strip(tk)));
+  t('the vendor portal says it too, per job',
+    /completed and the photo check passes/.test(strip(vd)));
+  t('the misleading "Payout at dispatch" is gone',
+    !/Payout at dispatch/.test(strip(vd)),
+    (strip(vd).match(/.{0,30}Payout at dispatch.{0,20}/) || [])[0]);
+
+  /* THE PROMISE IS COPY, NOT A TRIGGER — the founder verifies completion and
+     photos by hand and pays by hand. If payout ever becomes mechanical it is a
+     new decision, and this column stops being ops-owned on the same day. So
+     assert the ownership rather than trusting the comment above it. */
+  const opsOwned = (SRC.match(/const OPS_OWNED_COLUMNS = \[([\s\S]*?)\];/) || [, ''])[1];
+  t('partner_payout is still OPS-owned, so no code can set it',
+    /"partner_payout"/.test(opsOwned), opsOwned.replace(/\s+/g, ' ').slice(0, 120));
+  t('and nothing releases a payout from completion or the photo gate',
+    !/payout[^;\n]*\b(completedDate|photosPassed|completed_date|photos_passed)\b/i
+      .test(strip(SRC)));
+}
 
 /* Door codes live in a separate workbook and must never reach either view. */
 t('no view carries anything named like a code',

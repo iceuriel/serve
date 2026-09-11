@@ -247,12 +247,22 @@
         sum.className = 'pb__sum';
         sum.appendChild(el('span', 'pb__title', b.serviceLabel));
         sum.appendChild(el('span', 'pb__when', whenLine(b) || 'Date to be confirmed'));
-        /* Their payout, not the customer's price. */
+        /* Their payout, not the customer's price.
+           "Payout at dispatch" read as though dispatch were when the money
+           arrived. It is when the AMOUNT is agreed; payment follows completion
+           and the photo check. The detail below says so — this line only has
+           room to say which number it is. */
         var pay = money(b.payout);
-        sum.appendChild(el('span', 'pb__price', pay || 'Payout at dispatch'));
+        sum.appendChild(el('span', 'pb__price', pay || 'Amount at dispatch'));
         det.appendChild(sum);
 
         var inner = el('div', 'pb__body');
+        /* Said once per job rather than once per page: a partner scanning a
+           list of six jobs should not have to remember which one the payment
+           terms applied to. Nothing mechanical stands behind it — completion
+           and photos are verified by hand and payment is made by hand. */
+        add(inner, fact('Payment', 'Agreed at dispatch. Paid after the job is ' +
+                                   'completed and the photo check passes.'));
         add(inner, fact('Where', [b.address, b.zip].filter(Boolean).join('\n')));
         add(inner, fact('Home', b.home));
         add(inner, fact('Condition', b.condition));
