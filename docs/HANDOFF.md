@@ -83,6 +83,25 @@ is a SCHEMA change and a real decision**, since it is currently promised to
 never be touched by the script. Either that promise changes in SCHEMA.md in the
 same commit, or the webhook writes a new column instead.
 
+**The column models two states and the flow now has three.** `paid` is derived
+as `payment_status.toLowerCase() === "paid"` (webhook.gs ~1282), so the only
+value any code recognises is the literal string `paid`, and everything else
+means not-paid. Under authorize-at-booking the real sequence is **not
+authorized → authorized (held, no money moved) → captured (money taken)**, and
+there is no way to say the middle one. Writing `paid` on a mere hold tells a
+customer they have been charged when they have not, and hides the Authorize
+button. Found 2026-09-11 after the founder's first test payment. Whatever the
+webhook writes has to carry this third state, in the column or beside it.
+
+**Do not confuse the two money movements.** Customer → Serve is what
+`/api/checkout` does. Serve → vendor is `partner_payout`, which nothing built
+for payments touches. The customer never pays the vendor; the schema's
+joint-employer constraint depends on that staying true.
+
+**`partner_payout` is undocumented.** It is a real JOBS column written by
+webhook.gs and it appears nowhere in SCHEMA.md, which breaks that file's first
+rule. Needs a row and an owner before payouts are automated.
+
 ### 2. The idempotency key outlives the session it created
 
 In `handleCheckout`, the key is `serve-<job>-<cents>`. Stripe caches the
