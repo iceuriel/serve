@@ -1,7 +1,17 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-11  ·  master  ·  r26 — the booking text
+ * VERSION STAMP:  2026-09-11  ·  master  ·  r27 — the booking text bills as two segments, not three
+ *
+ * r27 = ONE CHARACTER, ONE EXTRA BILLED SEGMENT ON EVERY BOOKING. r26 greeted
+ *      the customer with "Hi Uriel — your Serve clean is booked". The em
+ *      dash is not in the GSM-7 alphabet, so it forced the whole text into
+ *      UCS-2, where a segment holds 67 characters instead of 153 — and a
+ *      191-character message went from two segments to three. It is a
+ *      comma now. With no first name on file the text also began with a
+ *      lowercase "your"; it now opens "Your Serve clean is booked".
+ *      r26 was committed but not deployed when this was found, so no text
+ *      ever went out with the em dash in it.
  *
  * r26 = ONE SMS WHEN A BOOKING IS WRITTEN: a sentence and their portal link.
  *      A text is frozen the second it sends and costs money per segment; the
@@ -1083,7 +1093,7 @@ function doGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-11 r26" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-11 r27" });
 }
 
 
@@ -1715,10 +1725,18 @@ const TWILIO_FROM_PROP  = "TWILIO_FROM";
  * every segment is billed. The STOP line is what sms-terms.html already
  * promises — "Reply STOP to any message to stop receiving texts from Serve" —
  * so leaving it out would break a promise the site makes in writing.
+ *
+ * EVERY CHARACTER OF THE FIXED TEXT IS GSM-7, and that is not fussiness.
+ * One character outside that alphabet — an em dash, a curly quote, a
+ * backtick — switches the WHOLE message to UCS-2, where a segment of a
+ * multi-part text holds 67 characters instead of 153. This text shipped in
+ * r26 with an em dash after the name, which made a two-segment message a
+ * three-segment one on every single booking. portal.test.js checks the
+ * alphabet and the segment count, so it cannot quietly come back.
  */
 function bookingSmsText(firstName, link) {
-  var hi = firstName ? "Hi " + firstName + " — " : "";
-  return hi + "your Serve clean is booked. Your booking page has the details, " +
+  var open = firstName ? "Hi " + firstName + ", your" : "Your";
+  return open + " Serve clean is booked. Your booking page has the details, " +
          "entry instructions and payment:\n" + link + "\nReply STOP to opt out.";
 }
 

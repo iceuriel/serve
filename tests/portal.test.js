@@ -578,9 +578,32 @@ head('r26: the booking text');
     /Hi Uriel/.test(body) && !/Lopez/.test(body), body);
   t('and honours the opt-out sms-terms.html promises in writing',
     /Reply STOP to opt out\./.test(body), body);
-  /* Two segments at most. Every segment is billed, and the link is most of it. */
-  t('it stays short enough not to fan out into many segments',
-    body.length <= 320, body.length);
+  /* EVERY SEGMENT IS BILLED, AND THE ALPHABET DECIDES HOW BIG A SEGMENT IS.
+     GSM-7 carries 153 characters per segment of a multi-part text. One
+     character outside it — an em dash, a curly quote, a backtick — switches
+     the WHOLE message to UCS-2 at 67. r26 shipped with an em dash after the
+     name and turned a two-segment text into a three-segment one on every
+     booking, while the length check that stood here passed, because 191 is
+     comfortably under 320. Length alone was the wrong question.
+     Checked with an ASCII first name: a name outside GSM-7 is the customer's
+     own, and may legitimately cost a segment. */
+  const nonGsm = [...body].filter(ch => {
+    const c = ch.codePointAt(0);
+    return !(c === 10 || (c >= 32 && c <= 126 && c !== 96));
+  });
+  t('the text is pure GSM-7, so it is never billed at the UCS-2 rate',
+    nonGsm.length === 0, nonGsm);
+  /* The real billing arithmetic, in whichever alphabet the text actually is.
+     The eight GSM-7 extension characters cost two septets each. */
+  const EXT = '[]{}|^~' + String.fromCharCode(92);
+  const ucs2 = nonGsm.length > 0;
+  const units = ucs2 ? body.length
+                     : [...body].reduce((n, ch) => n + (EXT.indexOf(ch) !== -1 ? 2 : 1), 0);
+  const segments = units <= (ucs2 ? 70 : 160) ? 1 : Math.ceil(units / (ucs2 ? 67 : 153));
+  t('and it bills as two segments at most', segments <= 2,
+    { encoding: ucs2 ? 'UCS-2' : 'GSM-7', units, segments });
+  t('with no first name it still opens with a capital',
+    /^Your Serve clean/.test(S.bookingSmsText('', 'https://x')), S.bookingSmsText('', 'https://x'));
 
   /* Twilio refusing is not a booking failing. */
   T.setFetchReply(400, '{"code":21610,"message":"Attempt to send to unsubscribed recipient +16175550100"}');

@@ -6,10 +6,68 @@ assistant with no access to this repo. Self-contained on purpose.
 **Companion doc:** `/docs/SCHEMA.md` — authoritative for every column's meaning
 and who writes it. This file is the narrative; that file is the contract.
 
-**Latest session: 2026-09-10.** Jump to
+**Latest session: 2026-09-11.** Jump to
 [what changed on 2026-09-08 / 09](#session-2026-09-08--09) for the current
 state. The sections below it describe earlier builds and remain accurate
 except where a later section supersedes them.
+
+---
+
+## Current work — 2026-09-11, Claude Code: partner surfaces, the 85% share, unassigned capacity, the booking text
+
+**Deployment state, exactly.** r22–r27 are committed and pushed. **Apps Script
+live: r25**, verified 2026-09-11 with `curl -sL` on the webhook URL, which
+returned `"version":"2026-09-11 r25"`. **r26 and r27 are NOT deployed; paste
+r27**, which contains r26. The site half of r22 and the portal pay button are
+LIVE — checked by fetching `vendor.js`, `ticket.js` and `portal.js` from
+servecleaning.com and matching the new copy in each.
+
+| rev | what | live |
+|---|---|---|
+| r22 | customer FIRST NAME on the partner ticket (never the vendor portal, never surname/email/phone); payout copy separates "agreed at dispatch" from "paid after completion and the photo check" — copy only, nothing mechanical releases money | yes |
+| r23 | date/time cells an operator reformatted came back as JS Dates and rendered "Fri Dec 29 1899 22:00:00 GMT-0500"; normalised, and clock times now carry ET | yes |
+| r24 | partner share = 85% of the ticket; source of truth is the Ops `SETTINGS` tab, key `payout_rate`; STAMPED per booking so a rate change never reprices an accepted job; `partner_payout` override still wins | yes |
+| r25 | an AVAILABILITY row with a blank `vendor_id` is bookable unassigned capacity; ranks below every real vendor and above avoid/disqualified; the operator email says "NO VENDOR YET, AND THE TIME IS PROMISED" | yes |
+| r26 | one SMS on booking — a sentence and the portal link — gated on consent, three Twilio Script Properties, a readable phone and a contact_id | no — superseded by r27 before it was ever deployed |
+| r27 | r26 greeted "Hi Uriel — your…"; the em dash is outside GSM-7 and forced UCS-2, billing a 191-character text as 3 segments instead of 2 on every booking. Now a comma: pure GSM-7, 190 septets, 2 segments. With no first name the text now opens "Your…" rather than "your…" | **no** |
+
+**SMS BILLING IS DECIDED BY THE ALPHABET, NOT THE LENGTH.** One character
+outside GSM-7 — an em dash, a curly quote, a backtick — switches the whole
+message to UCS-2 at 67 characters a segment instead of 153. r26's test checked
+length only and passed at 191 characters. It now checks the alphabet and does
+the real segment arithmetic, and putting the em dash back fails both
+assertions. Keep the fixed wording in `bookingSmsText` plain ASCII. A customer's
+own first name outside GSM-7 can still cost a segment; that one is theirs, not
+a bug.
+
+**VERIFY APPS SCRIPT WITH `curl -sL`, NEVER `curl -s`.** The `/exec` URL answers
+`HTTP 302` with an empty body and redirects to googleusercontent.com, so the
+`-s` form prints nothing at all — which reads as "no response", not "follow the
+redirect". Every verification command given to the founder for r20–r25 omitted
+`-L`. The health JSON is on the bare URL; `?ping=1` adds nothing.
+
+**Two consequences worth knowing before anyone checks a booking:**
+- r24 derives a payout only for bookings made AFTER r24 went live, because the
+  rate is stamped at booking. Every older booking still reads "Amount confirmed
+  at dispatch" and will keep doing so unless `partner_payout` is typed.
+- Whether the Ops `SETTINGS` tab exists is unverified. It does not need to —
+  the code falls back to 0.85 — but a changed rate only takes effect once it does.
+
+**Nothing in r22–r27 has been exercised on a real production booking, and no
+SMS has been sent.** All of it is proved against the shipped code in the test
+harnesses; 26/26 files pass.
+
+**Stale project rules, not edited:** CLAUDE.md's "Where the project actually
+is" still says webhook.gs is at r19 with 23 test files. CLAUDE.md and AGENTS.md
+carry uncommitted changes that are not this agent's, so they were left alone;
+whoever claims the continuity section should correct those two facts with it.
+
+**Next:** paste r27 and approve the new permission Google asks for ("Connect
+to an external service") — r27 is the first code here that calls out to the
+internet. Then Twilio: account, a number, A2P 10DLC brand and campaign
+registration, and the three Script Properties `TWILIO_ACCOUNT_SID`,
+`TWILIO_AUTH_TOKEN`, `TWILIO_FROM`. Then one real booking to confirm the text
+arrives. The payment gaps remain queued under "NEXT UP — payments" below.
 
 ---
 
