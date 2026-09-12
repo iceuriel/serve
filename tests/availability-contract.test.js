@@ -50,8 +50,9 @@ function zoned(d, tz) {
   const off = tz === 'America/New_York' ? -240 : tz === 'Australia/Sydney' ? 600 : 0;
   return new RealDate(d.getTime() + off * 60000);
 }
-/* availability.gs should never reach for this — every published value is
-   recovered with local getters. Recorded so we can assert that. */
+/* Every published value goes through this as of avail r3, and it must always
+   be handed the SPREADSHEET timezone rather than the project one. Recorded so
+   that can be asserted directly instead of inferred from the output. */
 const FORMAT_CALLS = [];
 
 function formatDate(d, tz, fmt) {
@@ -104,11 +105,29 @@ function buildAvail(rows, opts) {
     get: p => JSON.parse(sandbox.doGet({ parameter: p || { nocache: '1' } }).getContent()) };
 }
 
-/* Apps Script converts a cell's serial number to a Date using the PROJECT
-   timezone, so a cell reads back through local getters as exactly what was
-   typed. Host-local constructors reproduce that faithfully. */
-const sheetDate = (y, m, d) => new RealDate(y, m - 1, d);
-const sheetTime = (h, mi) => new RealDate(1899, 11, 30, h, mi);
+/* A cell typed as a calendar date in a workbook set to `tz`, as the INSTANT
+   Sheets really hands back for it. The offsets are the ones zoned()/formatDate
+   use above, so fixture and reader agree by construction rather than by both
+   running on a host that happens to sit in the same zone.
+
+   This replaces a comment that said Apps Script converts the serial using the
+   PROJECT timezone. It does not — it uses the SPREADSHEET's, which is why the
+   old sheetTz fixture below could not tell the two models apart: it changed
+   what getSpreadsheetTimeZone() REPORTED without changing the instants, a state
+   the real system can never be in. */
+const OFFSET_FOR = { 'America/New_York': -240, 'Australia/Sydney': 600 };
+const sheetDateIn = (tz, y, m, d) =>
+  new RealDate(RealDate.UTC(y, m - 1, d) - OFFSET_FOR[tz] * 60000);
+const sheetDate = (y, m, d) => sheetDateIn(TZ, y, m, d);
+/* A time-only cell, which Sheets stores against its 1899 epoch. Built through
+   the same flat offset zoned() formats with, NOT through the host's real 1899
+   offset — New York was -5:00 EST then, so a host-local constructor and this
+   harness's -4:00 would disagree by an hour and the round-trip would look
+   broken when it is not. Production round-trips because Google uses the same
+   timezone data in both directions; what is asserted here is that round-trip. */
+const sheetTimeIn = (tz, h, mi) =>
+  new RealDate(RealDate.UTC(1899, 11, 30, h, mi) - OFFSET_FOR[tz] * 60000);
+const sheetTime = (h, mi) => sheetTimeIn(TZ, h, mi);
 
 const HEAD = ['date', 'start_time', 'cleaner_id', 'status'];
 const ROWS = [
@@ -202,22 +221,47 @@ t('flags a wrong PROJECT timezone',
 t('names where to fix it', /Project Settings/.test(dres.warning || ''));
 t('still publishes slots (warn, never block)', dres.ok === true && dres.slots.length > 0);
 
-const D2 = buildAvail(ROWS, { sheetTz: 'Australia/Sydney' });
+/* The published values must not move when a timezone setting is wrong. */
+t('published dates unchanged under a wrong project timezone',
+  JSON.stringify(dres.slots) === JSON.stringify(res.slots),
+  { correct: res.slots, skewed: dres.slots });
+
+/* THE ONE THAT COULD NOT FAIL BEFORE. The old fixture reported Sydney while
+   leaving the cells built for New York — a state Sheets cannot produce, and one
+   that passes under either model. Built honestly, the cells for a Sydney
+   workbook are DIFFERENT instants, and the published day must still be the day
+   somebody typed. Text times are used because a time-only cell carries the 1899
+   epoch, which Sheets treats as a flat +10:00 for Sydney while real timezone
+   data uses the historical +10:05 — a fixture built on it would assert a
+   five-minute fiction. */
+const SYD = 'Australia/Sydney';
+const sydRows = [
+  HEAD,
+  [sheetDateIn(SYD, 2026, 7, 29), '8:00 AM', 'c1', 'open'],
+  [sheetDateIn(SYD, 2026, 8, 3),  '1:00 PM', 'c2', 'open'],
+];
+const D2 = buildAvail(sydRows, { sheetTz: SYD });
+/* Only the calls this run makes — FORMAT_CALLS is shared by every fixture. */
+const sydMark = FORMAT_CALLS.length;
 const d2res = D2.get();
 console.log('  ' + d2res.warning);
 t('flags a wrong SPREADSHEET timezone',
   /Spreadsheet timezone is Australia\/Sydney/.test(d2res.warning || ''), d2res.warning);
 t('names where to fix that one too', /File > Settings/.test(d2res.warning || ''));
+t('still publishes slots (warn, never block)', d2res.ok === true && d2res.slots.length > 0);
+t('a Sydney workbook publishes the day that was typed',
+  d2res.slots.some(s => s.date === '2026-07-29' && s.time === '8:00 AM') &&
+  d2res.slots.some(s => s.date === '2026-08-03' && s.time === '1:00 PM'),
+  d2res.slots);
+t('and never the day before it',
+  !d2res.slots.some(s => s.date === '2026-07-28' || s.date === '2026-08-02'), d2res.slots);
 
-/* The published values must not move when a timezone setting is wrong. */
-t('published dates unchanged under a wrong project timezone',
-  JSON.stringify(dres.slots) === JSON.stringify(res.slots),
-  { correct: res.slots, skewed: dres.slots });
-t('published dates unchanged under a wrong spreadsheet timezone',
-  JSON.stringify(d2res.slots) === JSON.stringify(res.slots));
-
-t('NO Utilities.formatDate call anywhere — nothing is timezone-formatted',
-  FORMAT_CALLS.length === 0, FORMAT_CALLS);
+/* Every conversion must go through the WORKBOOK's timezone. Formatting through
+   the project's is the bug this release exists to remove, so it is asserted
+   directly rather than inferred from the output. */
+const sydCalls = FORMAT_CALLS.slice(sydMark);
+t('every formatDate call used the spreadsheet timezone, never the project one',
+  sydCalls.length > 0 && sydCalls.every(c => c.tz === SYD), sydCalls.slice(0, 4));
 
 /* ============================================================ */
 console.log('\n=== 5. empty availability degrades cleanly ===');

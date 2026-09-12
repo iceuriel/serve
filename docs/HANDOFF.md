@@ -13,14 +13,79 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-12, Claude Code: r33 / avail r3, the slot keys read the same way
+
+**Committed, NOT deployed. Two projects to paste, not one:**
+`apps-script/availability.gs` → the **OPS** workbook, `apps-script/webhook.gs` →
+**Leads MASTER**. No site files changed, so the git push is independent of both.
+Either order is safe *today* (see below); if a workbook timezone ever drifts,
+both must be in before it does.
+
+**This was NOT a live bug, and that is load-bearing.** The live feed
+(`/api/slots`) emits a `warning` whenever either Ops setting is not
+America/New_York. It returns none, so the Ops **spreadsheet** and the Ops
+**project** are both New York; the r31 log already showed the Leads project is
+too. All three agreed, so local getters and the workbook agreed, and every
+published slot and every write-back key was correct. Old and new rules derive
+**identical** keys on the current configuration — which is exactly why this was
+a safe change to make now rather than after something drifted.
+
+**What was actually wrong: the model was documented backwards.**
+availability.gs's header claimed Apps Script builds a date cell from the
+PROJECT timezone, so local getters round-trip "whatever the timezone happens to
+be". They do not — Sheets builds it from the SPREADSHEET's, which is what r32
+proved on Leads MASTER. The same false claim was repeated in
+`tests/availability-contract.test.js` and in webhook.gs's `slotDateKey`
+docblock. The system was therefore correct by coincidence: it needed three
+settings to agree (Ops workbook, Ops project, Leads project) while its own
+documentation said none of them mattered.
+
+**Why no test could catch it.** The suite's `{sheetTz: "Australia/Sydney"}`
+fixture changed what `getSpreadsheetTimeZone()` REPORTED without changing the
+cell instants — a state Sheets can never produce — so "published dates
+unchanged under a wrong spreadsheet timezone" passed under either model. It is
+now built from instants that correspond to the declared zone, and asserts the
+published day is the day somebody typed.
+
+**What changed.** availability.gs gains `sheetTimeZone()` (mirroring
+webhook.gs's), `ymd(d, tz)` and `parseTime(v, tz)` format through it, doGet
+passes it, and the lead-time comparison is rebuilt from the same `dayKey` so the
+published label and the horizon check can never describe different days.
+webhook.gs gains `slotDateKey(v, tz)` / `slotTimeLabel(v, tz)` and threads
+`sheetTimeZone(ops)` through all five call sites; `findOpenSlot` splits its
+chained `openById(...).getSheetByName(...)` so the workbook object is in hand.
+Local getters remain the fallback where no timezone can be read.
+
+**Two harness bugs of mine, found by the failures and fixed honestly.** (1) The
+1899 time fixture was built with the host's real 1899 New York offset (−5:00)
+while the harness formats with a flat −4:00, so a round-trip that is correct in
+production read 11:30 AM; it is now built through the same offset it is read
+with. (2) `FORMAT_CALLS` is module-level and accumulates across every fixture,
+so "every call used the spreadsheet timezone" also saw the happy path's New York
+calls; it is now scoped to the Sydney run.
+
+**Verified.** 26/26 test files pass. Six deliberate mutations, each failing a
+specific assertion: the feed formatting through the project timezone, never
+asking the workbook for its timezone, not passing it into the day key, the two
+scripts drifting apart on the clock, the webhook reading slot dates with local
+getters, and the write-back not passing the Ops timezone on. A seventh attempt
+was refused as ambiguous — r32's `dateCellText` and r33's `slotDateKey` carry a
+byte-identical formatDate line — and was re-anchored to its function rather than
+left unproven. Every file restored afterwards.
+
+**Still open (unchanged by this, and documented in the file).** The lead-time /
+horizon comparison weighs a wall-clock slot against the current instant, which
+is only meaningful when the Ops PROJECT timezone is the business one. A mismatch
+skews the 18-hour boundary; it corrupts no published date. Warned, not fatal.
+
+---
+
 ## Current work — 2026-09-12, Claude Code: r32, dates read through the workbook's timezone
 
-**r32 is committed. NOT deployed and NOT pushed, deliberately.** This change
-spans the script and the site, so the deploy rule applies: paste
-`apps-script/webhook.gs` into Leads MASTER → Extensions → Apps Script and save
-FIRST, then push the site. Pushing the site first would leave every ticket
-showing ONE date that is still the wrong one, with the correct prose summary no
-longer printed beside it — strictly worse than the current state.
+**r32 shipped 2026-09-12** — script pasted into Leads MASTER first, then the
+site pushed (`88be7d1`), in that order because pushing the site first would
+have left every ticket showing ONE date that was still the wrong one, with the
+correct prose summary no longer printed beside it.
 
 **The bug the founder reported.** Vendor and client tickets for the newest test
 booking read `Thu, Sep 17 · 12:30 AM ET · Friday, Sep 18 at 3:30 PM` — three

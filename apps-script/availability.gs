@@ -1,7 +1,7 @@
 /*******************************************************************
  * SERVE — Availability endpoint (doGet)
  * ==================================================================
- * VERSION STAMP:  2026-07-27  ·  branch build/attribution-and-notes  ·  avail r2
+ * VERSION STAMP:  2026-09-12  ·  master  ·  avail r3 — dates read through the workbook timezone
  *
  * Repo source of truth: /apps-script/availability.gs
  * Lives in the OPS sheet — a DIFFERENT spreadsheet from Leads MASTER.
@@ -32,14 +32,30 @@
  * Both should be America/New_York. checkTimezones() reports either one that
  * is not, in the response and in testAvailability().
  *
- * This script no longer DEPENDS on either being right for the values it
- * publishes. Dates and times are recovered with local getters
- * (getFullYear/getHours/...), which round-trip exactly: Apps Script converted
- * the cell's serial number to a Date using the project timezone, so reading it
- * back through that same timezone returns precisely what was typed, whatever
- * the timezone happens to be. Formatting through a *different* zone is what
- * shifts a date by a day or an hour — so Utilities.formatDate is not used here
- * at all, and labels are built from the recovered numbers.
+ * WHICH ONE BUILDS A DATE CELL: setting A, the SPREADSHEET's. Sheets turns a
+ * cell's serial number into an instant using the workbook's own timezone. This
+ * file used to claim the opposite — that the PROJECT timezone did it, so local
+ * getters round-tripped exactly whatever either setting was — and every date
+ * here was recovered with getFullYear/getHours on that basis.
+ *
+ * It is not true, and Leads MASTER proved it: that workbook was set to
+ * Australia/Sydney while its project was America/New_York, and a booking
+ * displaying "2026-09-18" read back through local getters as "2026-09-17".
+ * Local getters are the PROJECT's timezone, so they return what was typed only
+ * while A and B happen to agree. See webhook.gs r32.
+ *
+ * So dates and times are now formatted through the SPREADSHEET's own timezone
+ * (sheetTimeZone()), which recovers what was typed whatever either setting is.
+ * Local getters remain the fallback for a workbook that cannot report one —
+ * the pre-r3 behaviour, never a guessed zone.
+ *
+ * THIS MATTERS BEYOND THIS FILE. webhook.gs re-derives the same key from the
+ * same AVAILABILITY cells to match a booking to its row, and it runs in a
+ * DIFFERENT project whose timezone is its own. While both files used local
+ * getters, the two agreed only because three settings happened to match: this
+ * workbook's, this project's, and the Leads project's. Keying both to the
+ * workbook's own timezone makes them agree by construction instead. Change one
+ * of these files and you must change the other.
  *
  * The one thing still timezone-sensitive is the lead-time / horizon comparison,
  * which weighs a wall-clock slot against the current instant. That is only
@@ -60,7 +76,7 @@ var CONFIG = {
   MIN_LEAD_HOURS: 18,
   CACHE_SECONDS: 300,
   BUSINESS_TZ: 'America/New_York',
-  VERSION: '2026-07-27 avail r2'
+  VERSION: '2026-09-12 avail r3'
 };
 
 /** Required in row 1 of AVAILABILITY. Case-sensitive. */
@@ -106,6 +122,10 @@ function doGet(e) {
     var tzIssues = checkTimezones(ss);
     tzIssues.forEach(function (w) { console.warn(w); });
 
+    /* Sheets built every date cell below from THIS workbook's timezone, so it
+       is the only one that reads them back as they were typed. */
+    var tz = sheetTimeZone(ss);
+
     var now = new Date();
     var minStart = new Date(now.getTime() + CONFIG.MIN_LEAD_HOURS * 3600 * 1000);
     var maxDate  = new Date(now.getTime() + CONFIG.DAYS_AHEAD * 86400 * 1000);
@@ -117,16 +137,19 @@ function doGet(e) {
       var d = data[r][iDate];
       if (!(d instanceof Date)) { skipped++; continue; }
 
-      var t = parseTime(data[r][iTime]);
+      var t = parseTime(data[r][iTime], tz);
       if (!t) { skipped++; continue; }
 
-      /* Same timezone in and out — the wall time typed in the sheet, compared
-         against the current instant. */
-      var start = new Date(d.getFullYear(), d.getMonth(), d.getDate(),
+      /* The day as typed, then the wall clock rebuilt from it. Both come from
+         the workbook's timezone, so the published label and the lead-time
+         comparison can never describe two different days. */
+      var dayKey = ymd(d, tz);
+      var ymdParts = dayKey.split('-');
+      var start = new Date(Number(ymdParts[0]), Number(ymdParts[1]) - 1, Number(ymdParts[2]),
                            Math.floor(t.min / 60), t.min % 60, 0);
       if (start < minStart || start > maxDate) continue;
 
-      var key = ymd(d) + '|' + pad(t.min) + '|' + t.label;
+      var key = dayKey + '|' + pad(t.min) + '|' + t.label;
       agg[key] = (agg[key] || 0) + 1;
     }
 
@@ -156,6 +179,24 @@ function doGet(e) {
 }
 
 
+/**
+ * The timezone Sheets used to build the Dates this workbook hands back.
+ *
+ * Returns '' rather than a guess when it cannot be asked: an empty timezone
+ * sends the helpers below down their local-getter path, which is what they did
+ * before avail r3, instead of formatting through a timezone that may be wrong.
+ *
+ * MUST match sheetTimeZone() in /apps-script/webhook.gs.
+ */
+function sheetTimeZone(ss) {
+  try {
+    var tz = ss && ss.getSpreadsheetTimeZone ? ss.getSpreadsheetTimeZone() : '';
+    return tz || '';
+  } catch (_) {
+    return '';
+  }
+}
+
 /** Both timezone settings should be the business timezone. Returns messages. */
 function checkTimezones(ss) {
   var issues = [];
@@ -176,12 +217,21 @@ function checkTimezones(ss) {
  * Accepts "8:00 AM" text OR a real Sheets time / date-time value.
  * Returns { min: minutes-since-midnight, label: "8:00 AM" } or null.
  *
- * Takes no timezone. Local getters recover the wall time exactly as typed; the
- * label is then built from those numbers rather than formatted through a zone.
+ * `tz` is the SPREADSHEET's timezone — the one that built the cell. Without it
+ * the wall clock is recovered with local getters, which is the project's and is
+ * right only while the two settings agree. Text is never converted at all.
+ *
+ * MUST match slotTimeLabel() in /apps-script/webhook.gs.
  */
-function parseTime(v) {
+function parseTime(v, tz) {
   if (v instanceof Date) {
     var h = v.getHours(), mi = v.getMinutes();
+    if (tz) {
+      try {
+        h  = Number(Utilities.formatDate(v, tz, 'H'));
+        mi = Number(Utilities.formatDate(v, tz, 'm'));
+      } catch (_) { h = v.getHours(); mi = v.getMinutes(); }
+    }
     return { min: h * 60 + mi, label: clockLabel(h, mi) };
   }
   var m = String(v == null ? '' : v).trim().match(/^(\d{1,2}):(\d{2})\s*([AP])\.?M\.?$/i);
@@ -196,8 +246,14 @@ function clockLabel(h, mi) {
   return h12 + ':' + ('0' + mi).slice(-2) + ' ' + (h < 12 ? 'AM' : 'PM');
 }
 
-/** Calendar date as typed, with no timezone conversion. */
-function ymd(d) {
+/**
+ * Calendar date as typed, read through the SPREADSHEET's timezone.
+ * MUST match slotDateKey() in /apps-script/webhook.gs.
+ */
+function ymd(d, tz) {
+  if (tz) {
+    try { return Utilities.formatDate(d, tz, 'yyyy-MM-dd'); } catch (_) {}
+  }
   return d.getFullYear() + '-' +
          ('0' + (d.getMonth() + 1)).slice(-2) + '-' +
          ('0' + d.getDate()).slice(-2);

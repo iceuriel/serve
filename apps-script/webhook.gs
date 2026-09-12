@@ -1,7 +1,27 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-12  ·  master  ·  r32 — dates read through the spreadsheet timezone
+ * VERSION STAMP:  2026-09-12  ·  master  ·  r33 — the slot keys read that way too
+ *
+ * r33 = THE SLOT KEYS ARE READ THE SAME WAY THE TICKETS ARE. r32 fixed the
+ *      JOBS cells in THIS workbook. The AVAILABILITY cells in the OPS workbook
+ *      were still read with local getters by slotDateKey/slotTimeLabel, which
+ *      are this project's timezone — and availability.gs re-derives the very
+ *      same key in a DIFFERENT project with a timezone of its own.
+ *
+ *      Nothing was broken: Ops' workbook, Ops' project and this project are all
+ *      America/New_York today, so all three agreed and the keys matched. They
+ *      agreed by coincidence. Leads MASTER being set to Australia/Sydney is
+ *      proof a workbook's timezone can drift, and if the Ops workbook drifted
+ *      the feed would publish a day the sheet never said while this file went
+ *      on matching against a different one — or stopped matching, which prints
+ *      "no open row for ..." and leaves the slot unsold.
+ *
+ *      Both files now key off the OPS WORKBOOK's own timezone, so they agree by
+ *      construction rather than by three settings happening to line up. The
+ *      change is a no-op while they do line up, which is why it was safe to
+ *      make now. availability.gs avail r3 is the other half and must ship with
+ *      it — see its TIMEZONES header.
  *
  * r32 = A DATE CELL IS READ THROUGH THE SPREADSHEET'S OWN TIMEZONE. The
  *      founder's Leads MASTER was set to Australia/Sydney while the script and
@@ -1171,7 +1191,7 @@ function doGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-12 r32" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-12 r33" });
 }
 
 
@@ -4421,6 +4441,10 @@ function bookAvailabilitySlot(sched, jobId, serviceCode) {
     if (!av) throw new Error('Ops workbook "' + ops.getName() + '" has no ' + AVAILABILITY_TAB + ' tab.');
     assertAvailabilityWritable(AVAILABILITY_TAB);
 
+    /* r33: the Ops workbook built these date cells, so its timezone is the
+       only one that reads them back the way availability.gs published them. */
+    const opsTz = sheetTimeZone(ops);
+
     const headers = sheetHeaders(av);
     const iDate = headers.indexOf("date"),
           iTime = headers.indexOf("start_time"),
@@ -4459,8 +4483,8 @@ function bookAvailabilitySlot(sched, jobId, serviceCode) {
     for (let r = 0; r < rows.length; r++) {
       const row = rows[r];
       if (String(row[iStat]).trim().toLowerCase() !== SLOT_OPEN) continue;   // never touch `held`
-      if (slotDateKey(row[iDate]) !== sched.date) continue;
-      if (slotTimeLabel(row[iTime]) !== sched.time) continue;
+      if (slotDateKey(row[iDate], opsTz) !== sched.date) continue;
+      if (slotTimeLabel(row[iTime], opsTz) !== sched.time) continue;
       const vendorId = iVen === -1 ? "" : String(row[iVen] || "").trim();
       candidates.push({ sheetRow: r + 2, vendorId: vendorId,
                         rank: slotRank(vendorId, serviceCode, memo) });
@@ -4500,11 +4524,18 @@ function bookAvailabilitySlot(sched, jobId, serviceCode) {
  *
  * MUST match ymd() in /apps-script/availability.gs. These are separate script
  * projects so the code cannot be shared, and if the two ever disagree the match
- * silently fails and every booking reports a conflict. Local getters, no
- * timezone conversion, exactly as the feed does it.
+ * silently fails and every booking reports a conflict.
+ *
+ * `tz` is the OPS WORKBOOK's timezone — the one Sheets used to build the cell.
+ * Local getters are this project's timezone, which is a different setting in a
+ * different project; they are kept only as the fallback when the workbook
+ * cannot report one. r33.
  */
-function slotDateKey(v) {
+function slotDateKey(v, tz) {
   if (!(v instanceof Date)) return String(v).trim();
+  if (tz) {
+    try { return Utilities.formatDate(v, tz, "yyyy-MM-dd"); } catch (_) {}
+  }
   return v.getFullYear() + "-" +
          ("0" + (v.getMonth() + 1)).slice(-2) + "-" +
          ("0" + v.getDate()).slice(-2);
@@ -4513,9 +4544,19 @@ function slotDateKey(v) {
 /**
  * start_time cell -> "9:00 AM".
  * MUST match parseTime()/clockLabel() in /apps-script/availability.gs.
+ * `tz` is the OPS WORKBOOK's timezone, as above. Text is never converted.
  */
-function slotTimeLabel(v) {
-  if (v instanceof Date) return clockLabelFor(v.getHours(), v.getMinutes());
+function slotTimeLabel(v, tz) {
+  if (v instanceof Date) {
+    let h = v.getHours(), mi = v.getMinutes();
+    if (tz) {
+      try {
+        h  = Number(Utilities.formatDate(v, tz, "H"));
+        mi = Number(Utilities.formatDate(v, tz, "m"));
+      } catch (_) { h = v.getHours(); mi = v.getMinutes(); }
+    }
+    return clockLabelFor(h, mi);
+  }
   const m = String(v == null ? "" : v).trim().match(/^(\d{1,2}):(\d{2})\s*([AP])\.?M\.?$/i);
   if (!m) return String(v).trim();
   const h24 = (+m[1]) % 12 + (/p/i.test(m[3]) ? 12 : 0);
@@ -5256,8 +5297,11 @@ const TEST_UNIT    = "TEST";
  */
 function findOpenSlot() {
   try {
-    const av = SpreadsheetApp.openById(OPS_SPREADSHEET_ID).getSheetByName(AVAILABILITY_TAB);
+    const ops = SpreadsheetApp.openById(OPS_SPREADSHEET_ID);
+    const av  = ops.getSheetByName(AVAILABILITY_TAB);
     if (!av) return null;
+    /* r33: the Ops workbook's own timezone, not this project's. */
+    const opsTz = sheetTimeZone(ops);
     const headers = sheetHeaders(av);
     const iDate = headers.indexOf("date"),
           iTime = headers.indexOf("start_time"),
@@ -5267,7 +5311,7 @@ function findOpenSlot() {
     const last = av.getLastRow();
     if (last < 2) return null;
     const rows = av.getRange(2, 1, last - 1, headers.length).getValues();
-    const todayKey = slotDateKey(new Date());
+    const todayKey = slotDateKey(new Date(), opsTz);
 
     /* Prefer a slot a customer could actually book. AVAILABILITY accumulates
        past rows that are still marked open — nothing expires them — and taking
@@ -5278,8 +5322,8 @@ function findOpenSlot() {
     for (let r = 0; r < rows.length; r++) {
       if (String(rows[r][iStat]).trim().toLowerCase() !== SLOT_OPEN) continue;
       const hit = {
-        date: slotDateKey(rows[r][iDate]),
-        time: slotTimeLabel(rows[r][iTime]),
+        date: slotDateKey(rows[r][iDate], opsTz),
+        time: slotTimeLabel(rows[r][iTime], opsTz),
         row:  r + 2,
         cleaner: iCln === -1 ? "" : rows[r][iCln],
         past: false,

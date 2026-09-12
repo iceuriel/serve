@@ -60,8 +60,13 @@ function makeSheet(name, headers, audit, seed) {
     }) };
 }
 
-/* Sheet cells round-trip through local getters, so build them locally. */
+/* Sheets builds a date cell's instant from the SPREADSHEET's timezone — not the
+   project's, which is what this file used to say. cellDate() keeps building
+   host-local instants because the Ops stub reports the host's zone, so the two
+   still line up; cellDateIn() is for the cases that must not depend on that. */
 const cellDate = (y, m, d) => new RealDate(y, m - 1, d);
+const cellDateIn = (tz, y, m, d) =>
+  new RealDate(RealDate.UTC(y, m - 1, d) - (tz === 'Australia/Sydney' ? 600 : -240) * 60000);
 
 function build(opts) {
   const o = opts || {};
@@ -100,6 +105,9 @@ function build(opts) {
                     insertSheet: n => (leadsTabs[n] = makeSheet(n, null, audit)),
                     getSheets: () => Object.values(leadsTabs), getName: () => 'Leads MASTER' };
   const opsSs   = { getSheetByName: n => opsTabs[n] || null,
+                    /* r33: the Ops workbook reports its own timezone, and the
+                       slot keys are read through it rather than this project's. */
+                    getSpreadsheetTimeZone: () => o.opsTz || 'America/New_York',
                     getSheets: () => Object.values(opsTabs), getName: () => 'Ops MASTER' };
 
   const sandbox = {
@@ -119,8 +127,12 @@ function build(opts) {
     Session: { getScriptTimeZone: () => 'America/New_York', getEffectiveUser: () => ({ getEmail: () => 'ops@example.com' }) },
     PropertiesService: { getScriptProperties: () => ({ getProperty: () => null }) },
     Utilities: { formatDate: (d, tz, fmt) => {
-      const off = -240, s = new RealDate(d.getTime() + off * 60000), p = n => String(n).padStart(2, '0');
+      const off = tz === 'Australia/Sydney' ? 600 : -240;
+      const s = new RealDate(d.getTime() + off * 60000), p = n => String(n).padStart(2, '0');
       if (fmt === 'yyyyMMdd') return '' + s.getUTCFullYear() + p(s.getUTCMonth() + 1) + p(s.getUTCDate());
+      if (fmt === 'yyyy-MM-dd') return s.getUTCFullYear() + '-' + p(s.getUTCMonth()+1) + '-' + p(s.getUTCDate());
+      if (fmt === 'H') return String(s.getUTCHours());
+      if (fmt === 'm') return String(s.getUTCMinutes());
       if (fmt === "yyyy-MM-dd'T'HH:mm:ssXXX")
         return s.getUTCFullYear() + '-' + p(s.getUTCMonth()+1) + '-' + p(s.getUTCDate()) + 'T' +
                p(s.getUTCHours()) + ':' + p(s.getUTCMinutes()) + ':' + p(s.getUTCSeconds()) + '-04:00';
@@ -277,16 +289,57 @@ t('names the missing header', F.logs.some(l => /missing header\(s\): status/.tes
   F.logs.filter(l => /missing header/.test(l))[0]);
 t('booking still written', F.leadsTabs.JOBS._rows.length - 1 === 1);
 
+console.log('\n=== 2f. an Ops workbook in another timezone still matches ===');
+/* THE CASE THAT COULD NOT FAIL BEFORE r33. availability.gs publishes the day
+   the OPS WORKBOOK says, and the customer books that day. This file then has to
+   find the same row — from a DIFFERENT Apps Script project, with a timezone of
+   its own. While both sides used local getters they agreed only because Ops'
+   workbook, Ops' project and this project were all America/New_York.
+
+   Here the workbook is Sydney and this project is not. The cell below is the
+   instant Sheets hands back for a date typed as 2026-08-14 in a Sydney
+   workbook, which is 2026-08-13 by local getters — so a reader that ignores the
+   workbook's timezone looks for the wrong day and reports a conflict, leaving a
+   sold slot still marked open. */
+const G = build({
+  opsTz: 'Australia/Sydney',
+  availSeed: [
+    [cellDateIn('Australia/Sydney', 2026, 8, 14), '9:00 AM', 'C-01', 'open', '', '', ''],
+  ],
+});
+const rg = G.post(Object.assign({}, BASE, { submission_id: 's-syd' }));
+t('a Sydney Ops workbook still matches the slot the feed published',
+  rg.slot_action === 'booked', rg.slot_action);
+t('and flips that row, not another', G.opsTabs.AVAILABILITY._rows[1][ai('status')] === 'booked',
+  G.opsTabs.AVAILABILITY._rows[1][ai('status')]);
+
 /* ============================================================
    3. the two scripts must agree on how a slot is identified
    ============================================================ */
 console.log('\n=== 3. webhook and availability.gs derive identical keys ===');
+/* These run in two different Apps Script projects against the SAME Ops cells.
+   If they ever disagree the match silently fails and every booking reports a
+   conflict, so the agreement is asserted directly.
+
+   Both are now keyed to the OPS WORKBOOK's timezone. That is the point of r33:
+   while both used local getters they agreed only because Ops' workbook, Ops'
+   project and the Leads project all happened to be America/New_York. */
+const availFormat = (d, tz, fmt) => {
+  const off = tz === 'Australia/Sydney' ? 600 : -240;
+  const s = new RealDate(d.getTime() + off * 60000), p = n => String(n).padStart(2, '0');
+  if (fmt === 'yyyy-MM-dd') return s.getUTCFullYear() + '-' + p(s.getUTCMonth()+1) + '-' + p(s.getUTCDate());
+  if (fmt === 'H') return String(s.getUTCHours());
+  if (fmt === 'm') return String(s.getUTCMinutes());
+  throw new Error('harness: unhandled pattern ' + fmt);
+};
 const availBox = { console: { log(){}, warn(){}, error(){} }, Date: RealDate,
   Session: { getScriptTimeZone: () => 'America/New_York' },
-  SpreadsheetApp: {}, CacheService: {}, ContentService: {}, Utilities: {} };
+  SpreadsheetApp: {}, CacheService: {}, ContentService: {},
+  Utilities: { formatDate: availFormat } };
 vm.createContext(availBox);
 vm.runInContext(AVAIL_SRC, availBox);
 
+const NY = 'America/New_York', SYD = 'Australia/Sydney';
 const samples = [[9,0],[12,0],[0,5],[13,30],[15,30],[17,30],[23,59],[12,30]];
 const mismatchT = samples.filter(([h, m]) =>
   availBox.clockLabel(h, m) !== C.sandbox.clockLabelFor(h, m));
@@ -294,11 +347,32 @@ t('time labels identical across both scripts', mismatchT.length === 0,
   mismatchT.map(([h,m]) => h + ':' + m + ' avail=' + availBox.clockLabel(h,m) + ' hook=' + C.sandbox.clockLabelFor(h,m)));
 
 const dates = [cellDate(2026,8,14), cellDate(2026,1,1), cellDate(2026,12,31), cellDate(2026,3,8)];
-const mismatchD = dates.filter(d => availBox.ymd(d) !== C.sandbox.slotDateKey(d));
+const mismatchD = dates.filter(d => availBox.ymd(d, NY) !== C.sandbox.slotDateKey(d, NY));
 t('date keys identical across both scripts', mismatchD.length === 0,
-  mismatchD.map(d => 'avail=' + availBox.ymd(d) + ' hook=' + C.sandbox.slotDateKey(d)));
+  mismatchD.map(d => 'avail=' + availBox.ymd(d, NY) + ' hook=' + C.sandbox.slotDateKey(d, NY)));
 t('a real Sheets time value parses the same',
-  C.sandbox.slotTimeLabel(new RealDate(1899, 11, 30, 15, 30)) === availBox.clockLabel(15, 30));
+  C.sandbox.slotTimeLabel(new RealDate(1899, 11, 30, 15, 30), NY) ===
+  availBox.parseTime(new RealDate(1899, 11, 30, 15, 30), NY).label);
+
+/* Instants where the two zones fall on DIFFERENT days. A local midnight never
+   does — +10:00 from a New York midnight is still the same date — so a fixture
+   built from cellDate() cannot tell the two readings apart, and an assertion
+   that cannot fail proves nothing. */
+const crossing = [
+  new RealDate(RealDate.UTC(2026, 7, 14, 20, 0)),   // NY Aug 14 16:00, Sydney Aug 15 06:00
+  new RealDate(RealDate.UTC(2026, 0, 1, 23, 30)),   // NY Jan 1 18:30, Sydney Jan 2 10:30
+];
+t('the workbook timezone genuinely changes the day read',
+  crossing.every(d => availBox.ymd(d, SYD) !== availBox.ymd(d, NY)),
+  crossing.map(d => [availBox.ymd(d, NY), availBox.ymd(d, SYD)]));
+
+const mismatchSyd = crossing.filter(d => availBox.ymd(d, SYD) !== C.sandbox.slotDateKey(d, SYD));
+t('and they still agree when the workbook is in neither project timezone',
+  mismatchSyd.length === 0,
+  mismatchSyd.map(d => 'avail=' + availBox.ymd(d, SYD) + ' hook=' + C.sandbox.slotDateKey(d, SYD)));
+t('including the time label',
+  C.sandbox.slotTimeLabel(new RealDate(1899, 11, 30, 15, 30), SYD) ===
+  availBox.parseTime(new RealDate(1899, 11, 30, 15, 30), SYD).label);
 
 console.log('\n' + (bad ? 'FAILURES: ' + bad : 'ALL CHECKS PASSED'));
 process.exit(bad ? 1 : 0);
