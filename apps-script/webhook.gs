@@ -1,7 +1,29 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-12  ·  master  ·  r31 — what is actually in the date cells
+ * VERSION STAMP:  2026-09-12  ·  master  ·  r32 — dates read through the spreadsheet timezone
+ *
+ * r32 = A DATE CELL IS READ THROUGH THE SPREADSHEET'S OWN TIMEZONE. The
+ *      founder's Leads MASTER was set to Australia/Sydney while the script and
+ *      the business are America/New_York, and checkBookingDates proved what
+ *      that does: a booking displaying "2026-09-18" and "3:30 PM" in the sheet
+ *      came back as "2026-09-17" and "12:30 AM ET" — a day early on every
+ *      ticket and portal, with only the prose summary still correct.
+ *
+ *      Sheets turns a cell's serial into an instant using the SPREADSHEET's
+ *      timezone. r23 read that instant back with local getters, which are the
+ *      PROJECT's timezone, so the two only agreed while the two settings did.
+ *      availability.gs states the opposite in its own header and its tests
+ *      encode that belief, so the slot feed has the same fault and its tests
+ *      cannot see it. That is a separate fix, noted in HANDOFF.
+ *
+ *      dateCellText and timeCellText now take the spreadsheet's timezone and
+ *      format through it, which recovers exactly what was typed whatever either
+ *      setting happens to be. Local getters remain the fallback for a harness
+ *      or workbook that cannot report one. checkBookingDates reads through the
+ *      same timezone, so the diagnostic and the ticket can never disagree.
+ *      Fixing the setting is still worth doing — it is one click and it makes
+ *      the two agree — but the reading no longer depends on anyone remembering.
  *
  * r31 = WHAT IS ACTUALLY IN THE DATE CELLS. A test booking rendered as
  *      "Thu, Sep 17 · 12:30 AM ET · Friday, Sep 18 at 3:30 PM": three fields
@@ -1149,7 +1171,7 @@ function doGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-12 r31" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-12 r32" });
 }
 
 
@@ -1442,6 +1464,10 @@ function getBooking(ss, jobId) {
   var values = jobs.getRange(row, 1, 1, h.length).getValues()[0];
   var f = function (name) { var c = h.indexOf(name); return c === -1 ? "" : values[c]; };
 
+  /* r32: Sheets built these Dates from the SPREADSHEET timezone, so that is
+     the only one that reads them back as they were typed. */
+  var tz = sheetTimeZone(ss);
+
   var beds  = Number(f("beds"));
   var baths = Number(f("baths"));
   var meta  = {};
@@ -1467,15 +1493,18 @@ function getBooking(ss, jobId) {
     baths:  isNaN(baths) ? null : baths,
     levels: Number(meta.levels) || 1,
 
-    /* when — READ THROUGH THE CELL NORMALISERS, never String() directly.
+    /* when — READ THROUGH THE CELL NORMALISERS, never String() directly, and
+       through the SPREADSHEET's timezone rather than the project's.
        See dateCellText/timeCellText: a cell an operator formatted as a date or
-       a time comes back from getValues() as a Date, and String()ing one of
-       those put "Fri Dec 29 1899 22:00:00 GMT-0500 (Eastern Standard Time)" at
-       the top of live booking slips. */
-    scheduledDate:   dateCellText(f("scheduled_date")),
-    startTime:       timeCellText(f("start_time")),
+       a time comes back from getValues() as a Date. String()ing one put
+       "Fri Dec 29 1899 22:00:00 GMT-0500 (Eastern Standard Time)" at the top of
+       live booking slips (r23), and reading one with LOCAL getters put the
+       wrong DAY there whenever the workbook's timezone differed from the
+       project's (r32). `tz` is what closes the second one. */
+    scheduledDate:   dateCellText(f("scheduled_date"), tz),
+    startTime:       timeCellText(f("start_time"), tz),
     scheduleSummary: String(f("notes") || ""),
-    completedDate:   dateCellText(f("completed_date")).trim(),
+    completedDate:   dateCellText(f("completed_date"), tz).trim(),
     status:          String(f("job_status") || ""),
 
     /* MONEY, AND THE TWO SIDES OF IT ARE NOT THE SAME NUMBER.
@@ -1881,9 +1910,30 @@ function isDateValue(v) {
   return Object.prototype.toString.call(v) === "[object Date]" && !isNaN(v.getTime());
 }
 
+/**
+ * The timezone Sheets used to build the Dates this workbook hands back.
+ *
+ * Returns "" rather than a guess when it cannot be asked: an empty timezone
+ * sends the cell helpers down their local-getter path, which is what they did
+ * before r32, instead of formatting through a timezone that may be wrong.
+ */
+function sheetTimeZone(ss) {
+  try {
+    var tz = ss && ss.getSpreadsheetTimeZone ? ss.getSpreadsheetTimeZone() : "";
+    return tz || "";
+  } catch (_) {
+    return "";
+  }
+}
+
 /** A date cell as `YYYY-MM-DD`, whether it arrived as text or as a Date. */
-function dateCellText(v) {
+function dateCellText(v, tz) {
   if (!isDateValue(v)) return String(v || "");
+  if (tz) {
+    /* The timezone that built this instant is the only one that gives back the
+       day that was typed. Formatting through any other shifts it. */
+    try { return Utilities.formatDate(v, tz, "yyyy-MM-dd"); } catch (_) {}
+  }
   var p = function (n) { return (n < 10 ? "0" : "") + n; };
   return v.getFullYear() + "-" + p(v.getMonth() + 1) + "-" + p(v.getDate());
 }
@@ -1896,11 +1946,18 @@ function dateCellText(v) {
  * another timezone has no way to know which 9 is meant. A cell that is not a
  * time at all — "Morning preferred" — is left exactly alone.
  */
-function timeCellText(v) {
+function timeCellText(v, tz) {
   if (isDateValue(v)) {
-    var h24 = v.getHours(), m = v.getMinutes();
-    var h12 = h24 % 12 === 0 ? 12 : h24 % 12;
-    return h12 + ":" + (m < 10 ? "0" : "") + m + " " + (h24 < 12 ? "AM" : "PM") + " ET";
+    var text = "";
+    if (tz) {
+      try { text = Utilities.formatDate(v, tz, "h:mm a"); } catch (_) { text = ""; }
+    }
+    if (!text) {
+      var h24 = v.getHours(), m = v.getMinutes();
+      var h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+      text = h12 + ":" + (m < 10 ? "0" : "") + m + " " + (h24 < 12 ? "AM" : "PM");
+    }
+    return text + " ET";
   }
   var s = String(v || "").trim();
   if (!s) return "";
@@ -1946,6 +2003,12 @@ function checkBookingDates(howMany) {
     say("  Spreadsheet timezone:         " + sheetTz +
         (sheetTz === BUSINESS_TZ ? "" : "  <-- not the business timezone (File > Settings > Time zone)"));
 
+    /* r32: read the cells the way the tickets now read them, or this
+       diagnostic would report a different day than the booking slip shows —
+       and it is the tool someone reaches for precisely when those disagree.
+       sheetTimeZone() is used rather than the sheetTz reported above, because
+       that one holds the string "(unavailable)" when it cannot be read. */
+    var tz = sheetTimeZone(ss);
     var sheet = ss.getSheetByName(JOBS_TAB);
     if (!sheet) { say("No " + JOBS_TAB + " tab."); return finish(lines); }
     var h = sheetHeaders(sheet);
@@ -1974,10 +2037,10 @@ function checkBookingDates(howMany) {
           "  scheduling_type=" + String(at(row, "scheduling_type") || "(blank)"));
       say("  scheduled_date  raw " + cellKind(at(row, "scheduled_date")) +
           " | displayed " + JSON.stringify(seen(r, "scheduled_date")) +
-          " | read as " + JSON.stringify(dateCellText(at(row, "scheduled_date"))));
+          " | read as " + JSON.stringify(dateCellText(at(row, "scheduled_date"), tz)));
       say("  start_time      raw " + cellKind(at(row, "start_time")) +
           " | displayed " + JSON.stringify(seen(r, "start_time")) +
-          " | read as " + JSON.stringify(timeCellText(at(row, "start_time"))));
+          " | read as " + JSON.stringify(timeCellText(at(row, "start_time"), tz)));
       say("  notes           " + JSON.stringify(String(at(row, "notes") || "")));
     }
     say("");

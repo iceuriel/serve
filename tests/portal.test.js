@@ -142,7 +142,22 @@ function build() {
         return [...h].map(b => (b > 127 ? b - 256 : b));
       },
       getUuid: () => 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
-      formatDate: (d) => String(d),
+      /* r32: the two patterns the cell helpers use are formatted for real,
+         through whatever timezone they are handed. Every other pattern keeps
+         the old String(d) behaviour on purpose — job ids ("yyyyMMdd") and ISO
+         stamps are formatted on paths these tests are not about, and making
+         those throw would break them for nothing. The old stub ignored the
+         timezone completely, which is exactly why it could not have caught a
+         date read through the wrong one. */
+      formatDate: (d, tz, fmt) => {
+        if (fmt !== 'yyyy-MM-dd' && fmt !== 'h:mm a') return String(d);
+        const p = new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric',
+          month: '2-digit', day: '2-digit', hour: 'numeric', minute: '2-digit', hour12: true })
+          .formatToParts(d).reduce((o, x) => (o[x.type] = x.value, o), {});
+        return fmt === 'yyyy-MM-dd'
+          ? p.year + '-' + p.month + '-' + p.day
+          : p.hour + ':' + p.minute + ' ' + String(p.dayPeriod).toUpperCase();
+      },
       base64Encode: (s) => Buffer.from(String(s), 'utf8').toString('base64'),
     },
     /* Records outbound HTTP instead of making it. Modelled on Twilio's actual
@@ -602,6 +617,65 @@ dd = datesFixture('', '');
 rep = dd.box.checkBookingDates();
 t('blank date cells are reported as blank', /scheduled_date  raw blank/.test(rep), rep);
 t('and still show the summary', /Friday, Sep 18 at 3:30 PM/.test(rep), rep);
+
+head("5f. r32 — a date cell is read through the SPREADSHEET's timezone");
+/* Leads MASTER was set to Australia/Sydney while the script and the business
+   are America/New_York. Sheets builds a cell's instant from the SPREADSHEET's
+   timezone; r23 read it back with local getters, which are the PROJECT's. A
+   booking displaying "2026-09-18" and "3:30 PM" reached every ticket and
+   portal as "2026-09-17" and "12:30 AM ET", a day early.
+
+   The instants below are what a Sydney workbook really hands back for that
+   booking. The time uses a modern date rather than the 1899 epoch a time-only
+   cell carries: Sheets treats that epoch as a flat +10:00 for Sydney while
+   Node's timezone data uses the historical +10:05, so an epoch fixture would
+   assert a five-minute fiction. Same code path, honest numbers. */
+const SYD_DATE = new Date('2026-09-17T14:00:00.000Z');   // 2026-09-18 00:00 in Sydney
+const SYD_TIME = new Date('2026-09-18T05:30:00.000Z');   // 3:30 PM in Sydney
+
+t('a date cell reads as the day that was typed, not the day the project is in',
+  S.dateCellText(SYD_DATE, 'Australia/Sydney') === '2026-09-18',
+  S.dateCellText(SYD_DATE, 'Australia/Sydney'));
+t('and a time cell as the time that was typed',
+  S.timeCellText(SYD_TIME, 'Australia/Sydney') === '3:30 PM ET',
+  S.timeCellText(SYD_TIME, 'Australia/Sydney'));
+
+/* No timezone is a real workbook's case and the older harnesses': fall back to
+   local getters, which is exactly what r23 did — never a guessed zone. */
+t('with no timezone the old local reading is kept',
+  S.dateCellText(new Date(2026, 8, 18)) === '2026-09-18',
+  S.dateCellText(new Date(2026, 8, 18)));
+t('and a text cell never consults a timezone at all',
+  S.dateCellText('2026-09-18', 'Australia/Sydney') === '2026-09-18' &&
+  S.timeCellText('3:30 PM', 'Australia/Sydney') === '3:30 PM ET');
+
+/* THE WIRING, which is the half that was actually broken. The helpers could
+   always have been handed a timezone; getBooking never handed them one. */
+const syd = datesFixture(SYD_DATE, SYD_TIME);
+syd.ss.getSpreadsheetTimeZone = () => 'Australia/Sydney';
+const sydBooking = syd.box.getBooking(syd.ss, 'SRV-20260918-DATE01');
+t('a booking on a Sydney workbook reports the booked day',
+  !!sydBooking && sydBooking.scheduledDate === '2026-09-18',
+  sydBooking && sydBooking.scheduledDate);
+t('and the booked time',
+  !!sydBooking && sydBooking.startTime === '3:30 PM ET',
+  sydBooking && sydBooking.startTime);
+t('which is the day the summary said all along',
+  /Friday, Sep 18/.test(String(sydBooking && sydBooking.scheduleSummary)),
+  sydBooking && sydBooking.scheduleSummary);
+
+/* The diagnostic is what someone opens when a slip looks wrong. Reading the
+   cells differently from the slip would send them chasing a ghost. */
+const sydRep = syd.box.checkBookingDates();
+t('checkBookingDates agrees with the ticket rather than the project timezone',
+  /read as "2026-09-18"/.test(sydRep) && /read as "3:30 PM ET"/.test(sydRep), sydRep);
+
+/* A correctly configured workbook must be left exactly as it was. */
+const ny = datesFixture(SYD_DATE, SYD_TIME);
+const nyBooking = ny.box.getBooking(ny.ss, 'SRV-20260918-DATE01');
+t('an America/New_York workbook reads its own instants unchanged',
+  !!nyBooking && nyBooking.scheduledDate === '2026-09-17',
+  nyBooking && nyBooking.scheduledDate);
 
 function q2(model, field) {
   return (model.homes[0].questions || []).filter(x => x.field === field)[0] || {};

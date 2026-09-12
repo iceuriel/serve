@@ -6,10 +6,78 @@ assistant with no access to this repo. Self-contained on purpose.
 **Companion doc:** `/docs/SCHEMA.md` — authoritative for every column's meaning
 and who writes it. This file is the narrative; that file is the contract.
 
-**Latest session: 2026-09-11.** Jump to
+**Latest session: 2026-09-12.** Jump to
 [what changed on 2026-09-08 / 09](#session-2026-09-08--09) for the current
 state. The sections below it describe earlier builds and remain accurate
 except where a later section supersedes them.
+
+---
+
+## Current work — 2026-09-12, Claude Code: r32, dates read through the workbook's timezone
+
+**r32 is committed. NOT deployed and NOT pushed, deliberately.** This change
+spans the script and the site, so the deploy rule applies: paste
+`apps-script/webhook.gs` into Leads MASTER → Extensions → Apps Script and save
+FIRST, then push the site. Pushing the site first would leave every ticket
+showing ONE date that is still the wrong one, with the correct prose summary no
+longer printed beside it — strictly worse than the current state.
+
+**The bug the founder reported.** Vendor and client tickets for the newest test
+booking read `Thu, Sep 17 · 12:30 AM ET · Friday, Sep 18 at 3:30 PM` — three
+fields of one booking disagreeing, and the two that came from cells were both
+wrong.
+
+**Root cause, confirmed by the live `checkBookingDates` log.** Leads MASTER’s
+spreadsheet timezone was **Australia/Sydney**; the Apps Script project and the
+business are America/New_York. Sheets builds a date cell’s instant from the
+SPREADSHEET’s timezone, and r23 read that instant back with local getters,
+which are the PROJECT’s. The two agreed only while the two settings did. The
+cells were correct the whole time — the log showed `displayed "2026-09-18"` and
+`displayed "3:30 PM"` — so nothing in the sheet needed repairing.
+
+**What r32 changes.** `dateCellText(v, tz)` and `timeCellText(v, tz)` format
+through the workbook’s own timezone via `sheetTimeZone(ss)`, recovering what was
+typed whatever either setting is. A workbook that cannot report one falls back
+to local getters — the pre-r32 behaviour, never a guessed zone. `getBooking`
+passes it, and so does `checkBookingDates`, so the diagnostic can never report a
+different day than the slip it is being used to explain.
+
+The ticket header now shows ONE date. It used to print day, then time, then the
+schedule summary, deduping only when one string contained another — which they
+never do, so a slot booking printed its date twice and, while this bug was live,
+printed two different dates. `notes` is prose the script writes for bookings
+with no date, so it is now the fallback rather than a second opinion. One
+behaviour was deliberately dropped: a summary saying something genuinely new no
+longer appears beside a real time. Its test was updated, not deleted. Sizes
+rebalanced with it — `.tk-day` 0.7→0.82rem, `.tk-time` 1.75→1.45rem.
+
+**STILL OPEN, and it is customer-facing: `availability.gs` has the same fault.**
+Its header documents the OPPOSITE model and its tests encode that belief, so the
+slot feed customers book against is likely reading dates the same wrong way and
+its suite cannot catch it. `tests/availability-contract.test.js` already has a
+`sheetTz` option, which is the hook for fixing it. Not touched in r32.
+
+**Verified.** 26/26 test files pass. Seven deliberate mutations each failed a
+specific assertion: the date and the time formatted through UTC instead of the
+sheet zone, the workbook never asked for its timezone, `getBooking` no longer
+passing it on (the original bug, reintroduced), the diagnostic drifting off the
+ticket’s reading, and the header summary both printed beside a time and dropped
+as a fallback. Every file restored afterwards.
+
+`tests/vendor-portal.test.js` and `tests/webhook-routing.test.js` were left
+alone on purpose: the first seeds date cells as text, which never reaches the
+timezone path, and the second’s workbook stub reports no timezone and calls the
+helpers with one argument. Both keep the local-getter path byte for byte.
+`tests/portal.test.js` had to change — its workbook already reported
+America/New_York, so its `formatDate: (d) => String(d)` stub would have started
+returning raw Date strings. It now formats the two real patterns through the
+timezone it is handed and keeps `String(d)` for every other pattern, because
+job ids and ISO stamps are formatted on paths those tests are not about.
+
+**Next:** (1) paste r32 and save, (2) push the site, (3) set Leads MASTER’s
+timezone to New York under File → Settings → Time zone and check the Ops
+workbook while there — the reading no longer depends on it, but the two should
+agree, (4) fix `availability.gs` and its tests.
 
 ---
 

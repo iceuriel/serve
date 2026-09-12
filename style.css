@@ -2204,20 +2204,25 @@ a {
     padding: 1.5rem 0;
 }
 
+/* The date and the time are the first thing anyone opens a ticket to find, so
+   they lead — but one line should not shout over the whole page. The date used
+   to be the smallest text on the ticket at 0.7rem while the time ran at
+   1.75rem; now that the prose summary no longer repeats them, they carry the
+   answer between them and are sized closer together. */
 .tk-when { margin-bottom: 1.25rem; }
 .tk-day {
-    font-size: 0.7rem;
+    font-size: 0.82rem;
     font-weight: 700;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
     color: var(--color-accent);
-    margin-bottom: 0.2rem;
+    margin-bottom: 0.25rem;
 }
 .tk-time {
-    font-size: 1.75rem;
+    font-size: 1.45rem;
     font-weight: 700;
     color: var(--color-dark);
-    line-height: 1.15;
+    line-height: 1.2;
 }
 .tk-sub {
     font-size: 0.88rem;

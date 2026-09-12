@@ -253,25 +253,25 @@
      * twice, and only the shorter one belongs under a date that already says
      * the day. Two lines that genuinely differ are both kept.
      */
+    /**
+     * ONE DATE, AND ONE LINE UNDER IT.
+     *
+     * This used to print the day, then the time, then the schedule summary,
+     * deduping only when one string contained another. Those never overlap, so
+     * a slot booking showed its date twice — "Fri, Sep 18" above "Friday,
+     * Sep 18 at 3:30 PM" — and while the timezone bug was live it showed two
+     * DIFFERENT dates, one of them wrong.
+     *
+     * The summary is prose the script wrote for bookings that have no date:
+     * "Earlier in the day (typically 8:00 AM - 12:00 PM)". So it is the
+     * fallback, never a second opinion beside a real date.
+     */
     function scheduleHead(b, subParts) {
         var head = el('div', 'tk-when');
         var day = prettyDate(b.date);
         if (day) head.appendChild(el('div', 'tk-day', day));
-
-        var norm = function (s) {
-            return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-        };
-        var seen = [];
-        [b.time, b.when].forEach(function (v) {
-            var text = String(v || '').trim();
-            var n = norm(text);
-            if (!n) return;
-            for (var i = 0; i < seen.length; i++) {
-                if (seen[i].indexOf(n) !== -1 || n.indexOf(seen[i]) !== -1) return;
-            }
-            seen.push(n);
-            head.appendChild(el('div', 'tk-time', text));
-        });
+        var line = String(b.time || b.when || '').trim();
+        if (line) head.appendChild(el('div', 'tk-time', line));
 
         var sub = (subParts || []).filter(Boolean).join(' · ');
         if (sub) head.appendChild(el('div', 'tk-sub', sub));

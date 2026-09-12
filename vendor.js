@@ -91,21 +91,11 @@
 
     /* One line per fact, never the same fact twice — a preference booking has
        no date and `time` and `when` then hold the same sentence. */
+    /* One date, then the time — or the schedule summary when there is no date.
+       See scheduleHead in ticket.js. */
     function whenLine(b) {
-        var norm = function (s) {
-            return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-        };
-        var parts = [];
-        [b.time, b.when].forEach(function (v) {
-            var text = String(v || '').trim();
-            var n = norm(text);
-            if (!n) return;
-            for (var i = 0; i < parts.length; i++) {
-                if (norm(parts[i]).indexOf(n) !== -1 || n.indexOf(norm(parts[i])) !== -1) return;
-            }
-            parts.push(text);
-        });
-        return [prettyDate(b.date)].concat(parts).filter(Boolean).join(' · ');
+        return [prettyDate(b.date), String(b.time || b.when || '').trim()]
+            .filter(Boolean).join(' · ');
     }
 
     function save(payload, statusEl, btn) {

@@ -92,10 +92,22 @@ t('a summary that merely repeats the window is dropped',
   lines({ date: '2026-09-10', time: '9-11 AM', when: 'Thursday 10 September, 9-11 AM' }),
   [['tk-day', 'Thursday, Sep 10'], ['tk-time', '9-11 AM']]);
 
-head('C. Genuinely different lines are both kept');
-t('two different facts both render',
+head('C. The schedule summary never stands beside a real time');
+/* It used to. `when` is the schedule SUMMARY — prose the webhook writes for
+   bookings that have no date — so beside a real time it is at best a repeat
+   and at worst a contradiction. While the timezone bug was live it was the
+   contradiction: the header read "Thu, Sep 17 · 12:30 AM ET · Friday,
+   Sep 18 at 3:30 PM", three fields of one booking disagreeing.
+   It is the fallback now, not a second opinion. */
+t('a summary beside a time is dropped, even when it says something else',
   lines({ date: '', time: '9-11 AM', when: 'Second visit of a biweekly plan' }),
-  [['tk-time', '9-11 AM'], ['tk-time', 'Second visit of a biweekly plan']]);
+  [['tk-time', '9-11 AM']]);
+t('and the summary is still shown when there is no time',
+  lines({ date: '', time: '', when: 'Second visit of a biweekly plan' }),
+  [['tk-time', 'Second visit of a biweekly plan']]);
+t('a slot booking renders exactly one date and one time',
+  lines({ date: '2026-09-18', time: '3:30 PM ET', when: 'Friday, Sep 18 at 3:30 PM' }),
+  [['tk-day', 'Friday, Sep 18'], ['tk-time', '3:30 PM ET']]);
 
 head('D. Nothing to say, nothing rendered');
 t('an empty booking renders no lines', lines({ date: '', time: '', when: '' }), []);
