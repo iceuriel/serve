@@ -56,6 +56,7 @@ function makeSheet(name, headers) {
     setFrozenRows: () => {},
     deleteColumn: c => rows.forEach(r => r.splice(c - 1, 1)),
     deleteRow: r => rows.splice(r - 1, 1),
+
     getDataRange: () => ({ getValues: () => rows.map(r => r.slice()) }),
     getRange: (r, c, nr, nc) => ({
       getValues: () => {
@@ -67,6 +68,17 @@ function makeSheet(name, headers) {
         return o;
       },
       getNumberFormats: () => Array.from({ length: nr || 1 }, () => new Array(nc || 1).fill('')),
+      /* r31: real Sheets exposes this on the RANGE, not on the sheet. Reading
+         the value and the displayed text side by side is how the check tells
+         a cell Sheets converted from one that is still the text we wrote. */
+      getDisplayValues: () => {
+        const o = [];
+        for (let i = 0; i < (nr || 1); i++) {
+          const row = rows[r - 1 + i] || [];
+          o.push(row.slice(c - 1, c - 1 + (nc || 1)).map(v => String(v)));
+        }
+        return o;
+      },
       setValue: v => {
         while (rows.length < r) rows.push([]);
         while (rows[r - 1].length < c) rows[r - 1].push('');
@@ -103,6 +115,7 @@ function build() {
     getSheetByName: n => tabs[n] || null,
     insertSheet: n => (tabs[n] = makeSheet(n, null)),
     getName: () => 'Leads MASTER',
+    getSpreadsheetTimeZone: () => 'America/New_York',
     getId: () => 'leads-book',
   };
 
@@ -111,6 +124,7 @@ function build() {
                error: m => logs.push(String(m)), info: () => {} },
     JSON, Date, Math, String, Number, Boolean, Array, Object, RegExp, isNaN, parseInt, parseFloat,
     SpreadsheetApp: { openById: id => id === 'private-access-book' ? privateBook : ss, getActiveSpreadsheet: () => ss, flush: () => {} },
+    Session: { getScriptTimeZone: () => 'America/New_York' },
     /* ONE store for the whole harness, not a fresh one per call. It used to be
        rebuilt inside getScriptProperties, which meant a property set from a
        test never survived to be read back — fine while TICKET_SECRET was the
@@ -513,6 +527,81 @@ t('a header in the wrong case is shown with what it should be',
 /* It reads Access MASTER's tab names and header row, never a stored code. */
 dr = diag(m => { m.privateTabs.ACCESS.appendRow(['PROP-0001', 'SECRET-9911', '']); m.propStore.ACCESS_CODES_TAB = 'nope'; });
 t('the diagnosis never prints a value from inside Access MASTER', !/SECRET-9911/.test(dr), dr);
+
+head('5e. r31 — what is actually in the date cells');
+/* A test booking rendered as "Thu, Sep 17 · 12:30 AM ET · Friday, Sep 18 at
+   3:30 PM". The row is written consistent, so something between writing and
+   reading changes it, and only the live cells can say which. This check has to
+   report the cell faithfully and give away nothing about the customer.
+
+   The fake sheet's getDisplayValues is String(v), which is not how Sheets
+   formats a real date. That is fine here: what is being proved is which FIELDS
+   are reported and that no personal detail is, not Google's formatting. */
+function datesFixture(dateCell, timeCell) {
+  const m = build();
+  m.tabs.JOBS = makeSheet('JOBS', JOBS_HEADERS);
+  const row = new Array(JOBS_HEADERS.length).fill('');
+  const set = (k, v) => { row[JOBS_HEADERS.indexOf(k)] = v; };
+  set('job_id', 'SRV-20260918-DATE01');
+  set('scheduling_type', 'slot');
+  set('scheduled_date', dateCell);
+  set('start_time', timeCell);
+  set('notes', 'Friday, Sep 18 at 3:30 PM');
+  /* Seeded on purpose: the report must never print any of these. */
+  set('name', 'Uriel Lopez');
+  set('email', 'cust@example.com');
+  set('phone', '6175550100');
+  set('address', '123 Beacon St');
+  m.tabs.JOBS.appendRow(row);
+  return m;
+}
+
+/* Written as text and still text: the harmless case. */
+let dd = datesFixture('2026-09-18', '3:30 PM');
+let rep = dd.box.checkBookingDates();
+t('text cells are reported as text', /scheduled_date  raw text "2026-09-18"/.test(rep), rep);
+t('and read back unchanged', /read as "2026-09-18"/.test(rep), rep);
+/* getDisplayValues is what a person sees in the cell, and it is the line that
+   settles whether a wrong date was typed in or introduced on the way out.
+   Removing it from the report failed no assertion until this one existed. */
+t('what the cell displays to a person is shown too',
+  /displayed "2026-09-18"/.test(rep) && /displayed "3:30 PM"/.test(rep), rep);
+t('a text time keeps its wording and gains ET', /read as "3:30 PM ET"/.test(rep), rep);
+t('the booked summary is shown for comparison', /Friday, Sep 18 at 3:30 PM/.test(rep), rep);
+t('the job and its scheduling type are named',
+  /SRV-20260918-DATE01  scheduling_type=slot/.test(rep), rep);
+
+/* Converted by Sheets: the case that would explain the wrong ticket. */
+dd = datesFixture(new Date(2026, 8, 18), new Date(1899, 11, 30, 15, 30));
+rep = dd.box.checkBookingDates();
+t('a converted date cell is reported as a DATE with its instant',
+  /scheduled_date  raw DATE [0-9]{4}-/.test(rep), rep);
+t('with the local wall clock beside it', /\(local 2026-9-18 0:00\)/.test(rep), rep);
+t('a converted time cell is reported as a DATE too', /start_time      raw DATE/.test(rep), rep);
+t('and what the code makes of it is shown', /read as "3:30 PM ET"/.test(rep), rep);
+
+/* Both timezone settings, because a mismatch is one of the two explanations. */
+t('the project timezone is reported', /Apps Script project timezone: America\/New_York/.test(rep), rep);
+t('the spreadsheet timezone is reported', /Spreadsheet timezone:         America\/New_York/.test(rep), rep);
+dd = datesFixture('2026-09-18', '3:30 PM');
+dd.box.Session = { getScriptTimeZone: () => 'Australia/Sydney' };
+rep = dd.box.checkBookingDates();
+t('a wrong project timezone is flagged, with where to fix it',
+  /Australia\/Sydney  <-- not the business timezone \(Project Settings/.test(rep), rep);
+
+/* THE RULE THAT MATTERS: a diagnostic must not become a data leak. */
+dd = datesFixture(new Date(2026, 8, 18), '3:30 PM');
+rep = dd.box.checkBookingDates();
+t('no customer name in the report', !/Uriel|Lopez/.test(rep), rep);
+t('no email or phone in the report', !/cust@example\.com|6175550100/.test(rep), rep);
+t('no address in the report', !/Beacon/.test(rep), rep);
+t('the check changes nothing', dd.tabs.JOBS._rows.length === 2, dd.tabs.JOBS._rows.length);
+
+/* Blank cells are a real state on preference bookings, not an error. */
+dd = datesFixture('', '');
+rep = dd.box.checkBookingDates();
+t('blank date cells are reported as blank', /scheduled_date  raw blank/.test(rep), rep);
+t('and still show the summary', /Friday, Sep 18 at 3:30 PM/.test(rep), rep);
 
 function q2(model, field) {
   return (model.homes[0].questions || []).filter(x => x.field === field)[0] || {};

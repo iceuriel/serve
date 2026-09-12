@@ -1,7 +1,25 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-11  ·  master  ·  r30 — NOT READY says which one
+ * VERSION STAMP:  2026-09-12  ·  master  ·  r31 — what is actually in the date cells
+ *
+ * r31 = WHAT IS ACTUALLY IN THE DATE CELLS. A test booking rendered as
+ *      "Thu, Sep 17 · 12:30 AM ET · Friday, Sep 18 at 3:30 PM": three fields
+ *      of one row disagreeing, with only the prose summary correct. The row is
+ *      written consistent — buildJobRecord takes the date, the window and the
+ *      summary from one normalizeSchedule result, the site sends only
+ *      slot_date and slot_time, and nothing rewrites those columns afterwards.
+ *      So something between writing and reading changes them, and two
+ *      explanations survive: the cells hold Sep 17 and 00:30 because appendRow
+ *      let Sheets convert the text it was given, or they hold the right values
+ *      and the read is skewed.
+ *
+ *      Guessing between them has already cost two wrong theories, so
+ *      checkBookingDates() reads the cells instead: for the most recent
+ *      bookings it prints what each cell contains, what TYPE it is, what the
+ *      cell displays to a human, what the code reads it as, and both timezone
+ *      settings. Editor-only, read-only, and it prints only the schedule —
+ *      never a name, email, phone or address.
  *
  * r30 = "NOT READY" NOW SAYS WHICH ONE. checkAccessMigration reported every
  *      Access MASTER fault in one sentence covering seven causes — properties
@@ -1131,7 +1149,7 @@ function doGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-11 r30" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-12 r31" });
 }
 
 
@@ -1888,6 +1906,106 @@ function timeCellText(v) {
   if (!s) return "";
   if (/\bET\b|eastern/i.test(s)) return s;              // already said so
   return /\d\s*(:|am|pm)/i.test(s) ? s + " ET" : s;     // a clock time, or prose
+}
+
+/* ============================================================
+   WHAT IS IN THE DATE CELLS  —  r31
+   ============================================================ */
+
+/**
+ * Read-only. Run from the editor: `checkBookingDates()` for the last three
+ * bookings, or `checkBookingDates(10)` for more.
+ *
+ * Prints, per booking, the four things that settle where a wrong date came
+ * from, and nothing else about the customer:
+ *
+ *   raw        what getValues() hands the script, and its TYPE
+ *   displayed  what getDisplayValues() shows — what a person sees in the cell
+ *   read as    what dateCellText/timeCellText turn it into, which is what
+ *              every ticket and portal then renders
+ *   notes      the schedule summary, prose the script wrote and Sheets cannot
+ *              convert, so it still says what was booked
+ *
+ * If `raw` is a Date, Sheets converted what the script wrote. If `displayed`
+ * and `read as` disagree, the conversion back is skewed and the timezone lines
+ * at the top say which setting is wrong.
+ */
+function checkBookingDates(howMany) {
+  var lines = [];
+  var say = function (s) { lines.push(s); };
+  try {
+    var ss = SPREADSHEET_ID ? SpreadsheetApp.openById(SPREADSHEET_ID)
+                            : SpreadsheetApp.getActiveSpreadsheet();
+
+    say("Business timezone expected: " + BUSINESS_TZ);
+    var scriptTz = "(unavailable)", sheetTz = "(unavailable)";
+    try { scriptTz = Session.getScriptTimeZone(); } catch (_) {}
+    try { sheetTz = ss.getSpreadsheetTimeZone(); } catch (_) {}
+    say("  Apps Script project timezone: " + scriptTz +
+        (scriptTz === BUSINESS_TZ ? "" : "  <-- not the business timezone (Project Settings > Time zone)"));
+    say("  Spreadsheet timezone:         " + sheetTz +
+        (sheetTz === BUSINESS_TZ ? "" : "  <-- not the business timezone (File > Settings > Time zone)"));
+
+    var sheet = ss.getSheetByName(JOBS_TAB);
+    if (!sheet) { say("No " + JOBS_TAB + " tab."); return finish(lines); }
+    var h = sheetHeaders(sheet);
+    var last = sheet.getLastRow();
+    if (last < 2) { say("No bookings yet."); return finish(lines); }
+
+    var want = Math.min(Math.max(1, Number(howMany) || 3), 10);
+    var first = Math.max(2, last - want + 1);
+    var count = last - first + 1;
+    var range = sheet.getRange(first, 1, count, h.length);
+    var raw = range.getValues();
+    var shown = [];
+    try { shown = range.getDisplayValues(); } catch (_) {}
+
+    var col = function (n) { return h.indexOf(n); };
+    var at = function (row, name) { var i = col(name); return i === -1 ? "" : row[i]; };
+    var seen = function (r, name) {
+      var i = col(name);
+      return (i === -1 || !shown[r] || shown[r][i] === undefined) ? "(no display value)" : String(shown[r][i]);
+    };
+
+    for (var r = 0; r < count; r++) {
+      var row = raw[r];
+      say("");
+      say("Row " + (first + r) + "  " + String(at(row, "job_id") || "(no job_id)") +
+          "  scheduling_type=" + String(at(row, "scheduling_type") || "(blank)"));
+      say("  scheduled_date  raw " + cellKind(at(row, "scheduled_date")) +
+          " | displayed " + JSON.stringify(seen(r, "scheduled_date")) +
+          " | read as " + JSON.stringify(dateCellText(at(row, "scheduled_date"))));
+      say("  start_time      raw " + cellKind(at(row, "start_time")) +
+          " | displayed " + JSON.stringify(seen(r, "start_time")) +
+          " | read as " + JSON.stringify(timeCellText(at(row, "start_time"))));
+      say("  notes           " + JSON.stringify(String(at(row, "notes") || "")));
+    }
+    say("");
+    say("Compare the last two lines of each booking: notes is what was booked.");
+  } catch (err) {
+    say("Check stopped before finishing. Details are suppressed because service errors can contain cell data.");
+  }
+  return finish(lines);
+}
+
+/** The type of a cell value, and its instant when it is a Date. Never guesses. */
+function cellKind(v) {
+  if (v === "" || v === null || v === undefined) return "blank";
+  if (isDateValue(v)) {
+    var iso = "";
+    try { iso = v.toISOString(); } catch (_) { iso = "(uniso)"; }
+    return "DATE " + iso + " (local " + v.getFullYear() + "-" + (v.getMonth() + 1) + "-" + v.getDate() +
+           " " + v.getHours() + ":" + ("0" + v.getMinutes()).slice(-2) + ")";
+  }
+  if (typeof v === "number") return "NUMBER " + v;
+  if (typeof v === "boolean") return "BOOLEAN " + v;
+  return "text " + JSON.stringify(String(v));
+}
+
+/** Log every line and hand the whole report back, so tests can read it. */
+function finish(lines) {
+  lines.forEach(function (l) { console.log(l); });
+  return lines.join(" | ");
 }
 
 /** Split a flat instruction list into the three shapes a ticket renders. */
