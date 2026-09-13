@@ -13,6 +13,56 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-13, Claude Code: r41, the plan card reaches the page
+
+**A SITE FIX. `webhook.gs` is untouched and needs no paste.** r40 is already
+live — confirmed by probing the health endpoint, which answered
+`{"ok":true,"service":"serve-booking-webhook","version":"2026-09-13 r40"}`.
+The server has been sending the plan correctly since that paste. Deploying
+this is pushing the site; Cloudflare Pages builds from the repo.
+
+**The bug.** r38’s plan card was drawn by `add(bodyEl, planCard(d.plan))`.
+`d` is the parameter of the fetch callback at the top of `portal.js`; inside
+`renderBookings()` the model is called `model`. `d` does not exist in that
+scope, so the line threw a ReferenceError — in production, on every portal
+load, for two releases.
+
+**Why it looked like nothing rather than a crash.** The throw happened AFTER
+the upcoming rows were already appended, and the load promise’s `.catch()`
+swallowed it into a `console.warn` and a state message that `start()` had
+already hidden. So the page rendered up to that line and stopped: no plan
+card, and no Past section either. Ten backfilled plans sat in the sheet,
+correct and invisible, and the reported symptom was “nothing changed”.
+
+### The gap: no test had ever executed portal.js
+
+26/26 passed throughout. `portal.test.js` tests the server view model;
+`portal-access.test.js` string-slices ONE function (`accessComplete`) out of
+the file and runs it alone. Nothing ever booted the render path. `ticket.js`
+has had `ticket-render.test.js` since r23 — the portal, which is the page the
+confirmation email actually sends, had no equivalent.
+
+**New: `tests/portal-render.test.js`.** Boots the real `portal.js` — byte for
+byte, IIFE and all — in a `vm` context against a DOM shim and a stubbed fetch,
+then asserts what a person would see. `partner-card.js` and `serve-scope.js`
+are loaded for real rather than stubbed, because `bookingRow()` calls
+`ServePartner.block()` with NO typeof guard; a stub would assert against a
+fixture instead of the shipped page.
+
+Its load-bearing assertion is `the bookings tab renders without throwing`,
+which reads the captured `console.warn`. Against the unfixed file it printed
+`["portal load failed d is not defined"]`, and `the Past section after it
+still renders` printed `["Upcoming"]` — the collateral damage, reproduced
+exactly. 10 assertions failed before the fix; all pass after it.
+
+**Verified.** Red before, green after, then 27/27 test files pass.
+
+**STILL QUEUED, unchanged:** confirm & schedule (with a slot reader for /h),
+the same-provider request, reschedule/cancel with the anchor as source of
+truth, then the portal settings tab.
+
+---
+
 ## Current work — 2026-09-13, Claude Code: r40, a plan is found by lead_id
 
 **Committed, NOT deployed.** Paste `apps-script/webhook.gs` into Leads MASTER.

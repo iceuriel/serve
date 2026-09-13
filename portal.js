@@ -276,8 +276,14 @@
             bodyEl.appendChild(el('h2', 'portal__h', 'Upcoming'));
             upcoming.forEach(function (b) { bodyEl.appendChild(bookingRow(b)); });
         }
-        /* r38. After the real bookings, because it is not one of them. */
-        add(bodyEl, planCard(d.plan));
+        /* r38. After the real bookings, because it is not one of them.
+
+           r41: the model is `model` here. `d` is the fetch callback parameter
+           at the top of this file and does not exist in this scope — this line
+           threw, AFTER the upcoming rows were already on the page, so the
+           portal rendered up to here and stopped. No plan card, and no Past
+           section either. */
+        add(bodyEl, planCard(model.plan));
         if (past.length) {
             bodyEl.appendChild(el('h2', 'portal__h', 'Past'));
             past.forEach(function (b) { bodyEl.appendChild(bookingRow(b)); });
