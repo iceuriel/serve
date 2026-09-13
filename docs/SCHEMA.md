@@ -57,7 +57,7 @@ narrative.
 > two people. That is correct and is the convention.
 | 19 | `photos_passed` | **OPS** | `TRUE`/`FALSE`. Photo-verification QA gate. |
 | 20 | `payment_status` | **OPS** | Never touched by the script. |
-| 21 | `job_status` | WH → OPS | Script writes `new` at booking. Operator updates thereafter. |
+| 21 | `job_status` | WH → OPS | Script writes `new` at booking, and `cancelled` when a customer calls the visit off in their portal (r43). Operator updates otherwise. **A cancelled booking is never deleted** — see below. |
 | 22 | `notes` | WH | **Schedule summary only.** Human-readable, never empty. Not customer text. |
 | 23 | `submission_id` | WH | Client-generated UUID. **Idempotency key.** Dedupe runs on this. |
 | 24 | `received_at` | WH | Server-side ISO timestamp, America/New_York. |
@@ -531,6 +531,73 @@ row here at all. A missing tab costs the plan prompt in the portal and nothing
 else — the booking, the portal and every other surface are unaffected.
 
 
+### Changing a booked visit — `reschedule` and `cancel` (r43)
+
+Two more portal writes, and the first code in the system that ever GIVES
+CAPACITY BACK. Both resolve the booking through the same seam every portal
+write uses — the contact's `lead_id`, then a job carrying it — and both are
+refused on a booking that is finished (`closed`) or already called off
+(`cancelled`). "Not yours" and "does not exist" stay indistinguishable.
+
+| | what it writes |
+|---|---|
+| `reschedule` | `JOBS.scheduled_date`, `start_time`, `notes`, `scheduling_type` on the existing row; books the new `AVAILABILITY` row and releases the old one; stamps the new slot's partner into a **blank** `vendor_id` only |
+| `cancel` | `JOBS.job_status` → `cancelled`; releases the `AVAILABILITY` row. Nothing else. |
+
+**THE ANCHOR IS NOT TOUCHED BY EITHER.** `RECURRING_PLANS.anchor_date` /
+`anchor_time` is the beat every later visit is counted from. Moving October's
+clean does not move the cadence, and cancelling October does not cancel
+November. Writing a new time back onto the anchor would let one one-off change
+silently redefine the schedule — the drift that walks an every-other-Tuesday
+onto a different weekday over a few months with nobody deciding it.
+
+**THE `job_id` NEVER CHANGES.** It is minted once from the date first booked,
+so after a move the date inside the id no longer matches `scheduled_date`. That
+is correct: the id is an identity and the join key for the `AVAILABILITY` row,
+the instructions, the photos, the ticket and the portal. Re-minting it to keep
+the digits tidy would orphan all five at once.
+
+**A CANCELLED ROW IS KEPT, NEVER DELETED.** It is the record of something that
+was really sold and really given back; deleting it would take the address, the
+price, the instructions and the attribution with it, and every count of "work
+booked" would quietly stop including work that was booked and cancelled.
+
+**The new slot is taken BEFORE the old one is released**, and the release is
+told which row was just booked. Both rows carry the same `job_id` for that
+instant, so a release matching on the id alone hands back the time the customer
+has just chosen — they keep a confirmation for a slot reading `open` that the
+next visitor can buy. This was a real defect, caught by its own test.
+
+**`vendor_id` is never overwritten by a move.** It is ops-owned: where a
+dispatcher has already assigned the job, a new slot belonging to another company
+is a clash for a human, and the ops email says so outright. `setJobCells()`
+refuses any ops-owned column by throwing rather than skipping — a customer-facing
+path must not become the back door onto a hand entry.
+
+**Money is untouched.** Nothing captures, voids or refunds here; refund terms
+were still the founder's open decision. The ops email says whether a hold may
+still be outstanding.
+
+#### `cancel_notice_hours` — a lever with no number in it
+
+How much notice a customer must give to change or cancel in the portal.
+`SETTINGS` in the **Ops** workbook, column A `key` = `cancel_notice_hours`,
+column B `value` = a whole number of hours. Same shape and same failure
+behaviour as `payout_rate`: a missing tab, missing row or empty cell falls back
+to `DEFAULT_CANCEL_NOTICE_HOURS`, because a lookup must never be what stops a
+customer managing their own booking.
+
+**The default is `0`, and that is a deliberate non-decision.** A notice window
+is a customer promise with a refund question attached, and both were the
+founder's to make. The mechanism is built, tested and OFF: put a number in the
+sheet and it starts being enforced, with no deploy. Anything outside `[0, 336]`
+is refused and logged rather than clamped — two weeks is already an extreme
+notice period for a house clean, so a larger number is a typo, and guessing
+what it meant would lock customers out of their own bookings.
+
+A move can never land sooner than the feed allows regardless: `/api/slots`
+publishes nothing inside `MIN_LEAD_HOURS` (18), inherited from availability.gs.
+
 ### PROPERTIES — one row per address
 
 Live header row (17 cols), confirmed 2026-07-28:
@@ -954,9 +1021,14 @@ both confirmed returning 404.
   twice, but with a single `open` row per time a conflict is still a real clash
   rather than a queue. This is a roster problem, not a code one — more
   `AVAILABILITY` rows per time means `open: 2+` and genuine resilience.
-- **Nothing releases a slot.** If a booking is cancelled, its `AVAILABILITY` row
-  stays `booked`. The `job_id` written back is the handle for undoing that, but
-  no code does it yet.
+- ~~**Nothing releases a slot.**~~ **CLOSED by r43.** `releaseAvailabilitySlot()`
+  now hands capacity back when a visit is cancelled or moved, using exactly the
+  handle this entry named: the `job_id` written into the `AVAILABILITY` row. It
+  matches on that id and never on date and time — after a conflict a human
+  resolved by hand, the square on the calendar can belong to somebody else — and
+  it never touches a `held` row, which is an operator's own diary rather than
+  public capacity. Every cancellation before this release leaked its time out of
+  the feed permanently; those rows still read `booked` and are worth a look.
 - **The availability feed cold-starts slower than the Worker waits.** Observed
   2026-09-13: `/api/slots` answered `{"ok":false,"error":"upstream_unreachable"}`
   on a first probe and `ok:true` with 14 slots moments later — with the feed
@@ -1008,6 +1080,7 @@ held `direct ×1` and blank ×12, with no channel values anywhere.
 
 | Date | Change |
 |---|---|
+| 2026-09-13 | **Reschedule and cancel — webhook r43.** Two portal writes act on a booking the customer already has, and `releaseAvailabilitySlot()` closes the "nothing releases a slot" open item that had stood since r5 — every cancellation before today leaked its time out of the feed permanently. No new column: `job_status` gains the value `cancelled` (written by the script, second value it writes), and the row is **kept, never deleted**, so counts of booked work keep including work that was given back. `JOBS.vendor_id` stays ops-owned — `setJobCells()` throws on any ops column rather than skipping it. **The anchor is untouched by both writes**, which is the property the release exists to protect: a one-off move shifts one visit, never the cadence. New optional Ops `SETTINGS` key `cancel_notice_hours`, defaulting to `0` — the mechanism is built and enforces nothing until the founder sets a number, because a notice window is a customer promise with a refund question attached. Two real defects were caught by the new tests rather than in production: a release that gave back the slot a move had just booked, and a guard comparing `getBooking`'s display time (`"1:00 PM ET"`) against a raw slot time (`"1:00 PM"`), which meant it never once fired. See `HANDOFF.md` §r43. |
 | 2026-09-02 | **Server-side price verification — no schema change, one new payload key.** The pricing engine moved out of `script.js` into `pricing-engine.js`, and the Worker now re-derives every booking's price instead of trusting `quote_price` from the browser. `pricing_version` joins the payload and rides in `quote_meta`; it is what lets the server tell an edited payload (same version, different price → refused) from a deploy that landed mid-session (different version → the quoted price is honoured). 86,400 configurations priced before and after the extraction and compared by hash — identical. **This caused a live outage:** the two shared files are classic `<script>` files exporting through `if (typeof module …)`, which never runs under a bundler that treats `.js` as ESM, so the Worker's import was `undefined`, every geo-mapped ZIP priced as unmapped, and bookings from 49 ZIPs were rejected for about an hour. Fixed by generating a real ES module (`src/engine.generated.mjs`) rather than importing the sources. Rejection is now gated on `CAN_PRICE`, so a Worker that cannot reproduce the browser's arithmetic relays instead of refusing. See `HANDOFF.md` §2026-09-02 before touching the Worker's imports. |
 | 2026-09-01 | **Webhook r10 — `job_notes` updates an existing JOBS row.** The reserve step's "anything we should know?" textarea was removed: asking at the moment of commitment costs bookings, and free text is the worst shape to ask in — it arrives as prose to be re-typed into PROPERTY_MEMORY by hand. The same question now sits on the confirmation screen, after the spot is claimed, and posts a `job_notes` event carrying the booking's `submission_id`. **This is the one write path that deliberately skips `alreadyWritten()`** — everywhere else a repeated submission_id is a replay to ignore; here it is how the booking gets found. Blank-fill only, so a second send cannot erase the first and a hand-edit always survives, and it never throws because the booking is already confirmed on screen. No new column: it fills `customer_notes` and `pets_flag`, both of which now arrive **blank at booking**. The site sends neither key rather than sending `''` and `false` — `FALSE` would read as "asked, and no pets" when nobody was asked, the same trap as a blank `levels`. `PET_WORDS` extracted so `petsFlag()` and `petsFromText()` cannot drift. Covered by SCENARIO 6 in `tests/webhook-routing.test.js`. **Repo is r10; production is still r9.** |
 | 2026-08-29 | **r9 deployed — repo and production agree for the first time since r6.** `/exec` confirmed reporting `2026-08-28 r9`. This is a deployment, not a schema change: every column below was already documented, but until today none of `property_id`, `contact_id`, `phone_e164` or `PROPERTY_MEMORY` was being written by a real booking. Two "Deployed version" rows that had been stale for a month (this file said `r4`, `HANDOFF.md` §3 said `r6`, production was actually r8) are corrected. **Neither file is evidence — read the stamp from `/exec`.** Also shipped in the same paste: the booking notification email now states `Levels:` on its own line, always, including one floor, and says `NOT REPORTED` when a cached browser sends no `levels` key at all — a blank there is indistinguishable from a field that never arrived, which defeats the point of the line. |

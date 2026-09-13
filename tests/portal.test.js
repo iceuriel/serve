@@ -1563,5 +1563,329 @@ t('and says there is not when nobody was ever assigned',
 t('a vendor_id still never reaches the browser',
   !JSON.stringify(planNow() || {}).includes('VEN-'), planNow());
 
+/* ------------------------------------------------------------------
+   r43 — a booked visit can be moved, or called off.
+
+   r42 made an offer into a booking. This is what a customer can do to that
+   booking afterwards, and it is the first code in the system that ever GIVES
+   CAPACITY BACK. SCHEMA has carried "nothing releases a slot" as a known open
+   item since r5; every cancellation until now leaked a time out of the feed
+   permanently.
+
+   The assertion this release exists to protect is THE ANCHOR. Moving one visit
+   must not move the cadence, and cancelling one visit must not cancel the plan.
+   ------------------------------------------------------------------ */
+head('24. r43 — moving a visit, and calling one off');
+
+/* A slot in whatever state the test needs, rather than always an open one —
+   releasing capacity can only be watched on a row that is already booked. */
+const pushSlotAs = (date, time, vendor, status, jobId) =>
+  T.tabs.AVAILABILITY.appendRow([date, time, vendor || '', status, jobId || '']);
+/* Found BY JOB, not by date and time: the whole point of the release path is
+   that it tracks the booking, not the calendar square it happens to sit in. */
+const slotsHolding = (jobId) => (T.tabs.AVAILABILITY._rows || []).slice(1)
+  .filter(r => String(r[AVAIL_H.indexOf('job_id')]).trim() === jobId);
+
+const MOVER = 'SRV-20261101-MOVING';
+seedJob(MOVER, 'uriel@example.com', 'PROP-0001',
+        { scheduled_date: '2026-11-01', start_time: '9:00 AM',
+          service_type: 'Recurring clean', frequency: 'weekly' });
+pushSlotAs('2026-11-01', '9:00 AM', 'VEN-OLD', 'booked', MOVER);
+pushSlot('2026-11-08', '1:00 PM', 'VEN-NEW');
+
+/* The plan this visit belongs to, already confirmed and carrying the anchor
+   r42 wrote. Without this row the headline assertion has nothing to watch. */
+onlyPlan();
+pushPlan({ plan_id: 'PLN-ANCHOR', status: 'confirmed', anchor_date: '2026-11-01',
+           anchor_time: '9:00 AM', confirmed_job_id: MOVER });
+
+const move = (over, tok, cid) => write(Object.assign(
+  { kind: 'reschedule', job_id: MOVER,
+    slot_date: '2026-11-08', slot_time: '1:00 PM' }, over || {}), tok, cid);
+
+const R1 = move();
+t('it moves', R1.ok === true, R1);
+t('the visit is on the new day', jobCell(MOVER, 'scheduled_date') === '2026-11-08',
+  jobCell(MOVER, 'scheduled_date'));
+t('and at the new time', jobCell(MOVER, 'start_time') === '1:00 PM',
+  jobCell(MOVER, 'start_time'));
+t('the schedule summary is rewritten with it',
+  /Nov 8/.test(String(jobCell(MOVER, 'notes'))), jobCell(MOVER, 'notes'));
+t('and it is still a specific slot', jobCell(MOVER, 'scheduling_type') === 'slot',
+  jobCell(MOVER, 'scheduling_type'));
+
+/* THE ID IS AN IDENTITY, NOT A DATE. It is the join key for the AVAILABILITY
+   row, the instructions, the photos, the ticket and the portal — re-minting it
+   so the digits match the new day would orphan all five at once. */
+t('the job keeps the id everything else joins on', R1.job_id === MOVER, R1.job_id);
+t('and there is still exactly one row for it',
+  jobsRows().filter(r => String(r[JOBS_HEADERS.indexOf('job_id')]).trim() === MOVER).length === 1);
+
+/* THE NEW TIME IS TAKEN. */
+t('the new slot is booked', slotCell('2026-11-08', '1:00 PM', 'status') === 'booked',
+  slotCell('2026-11-08', '1:00 PM', 'status'));
+t('and carries the visit that took it',
+  slotCell('2026-11-08', '1:00 PM', 'job_id') === MOVER,
+  slotCell('2026-11-08', '1:00 PM', 'job_id'));
+
+/* THE BUG THIS ASSERTION EXISTS FOR, and it was real. A move books the new
+   slot under the SAME job_id before giving the old one back, so at release
+   time TWO booked rows carry that id. A release matching on the id alone frees
+   both — handing back the time the customer just chose, leaving them with a
+   confirmation for a slot reading `open` that the next visitor can buy. The
+   row just taken is excluded by number. */
+t('the time they just chose is NOT given away again',
+  slotsHolding(MOVER).length === 1, slotsHolding(MOVER));
+
+/* THE OLD TIME GOES BACK ON SALE — the open item SCHEMA has carried since r5. */
+t('the old slot is open again', slotCell('2026-11-01', '9:00 AM', 'status') === 'open',
+  slotCell('2026-11-01', '9:00 AM', 'status'));
+t('and no longer names a booking',
+  slotCell('2026-11-01', '9:00 AM', 'job_id') === '',
+  slotCell('2026-11-01', '9:00 AM', 'job_id'));
+
+/* ================================================================
+   THE HEADLINE. A one-off move shifts ONE VISIT. The cadence is the anchor,
+   and the anchor is what every later visit is counted from — writing the new
+   time back onto it would let a single change silently redefine the schedule,
+   which is the drift that walks an every-other-Tuesday onto a different day
+   over a few months with nobody deciding it.
+   ================================================================ */
+t('THE ANCHOR DID NOT MOVE WITH THE VISIT',
+  planCell('PLN-ANCHOR', 'anchor_date') === '2026-11-01' &&
+  planCell('PLN-ANCHOR', 'anchor_time') === '9:00 AM',
+  [planCell('PLN-ANCHOR', 'anchor_date'), planCell('PLN-ANCHOR', 'anchor_time')]);
+t('and the plan is still confirmed, still pointing at this booking',
+  planCell('PLN-ANCHOR', 'status') === 'confirmed' &&
+  planCell('PLN-ANCHOR', 'confirmed_job_id') === MOVER,
+  [planCell('PLN-ANCHOR', 'status'), planCell('PLN-ANCHOR', 'confirmed_job_id')]);
+
+/* ---- a double-tapped button does not give the slot away ---- */
+/* Without the already-there guard this would release the row it holds and then
+   try to re-book the very same row — the failure being a customer's own visit
+   handed back to nobody. */
+const R2 = move();
+t('moving a visit to the time it is already at changes nothing',
+  R2.ok === true && R2.unchanged === true, R2);
+t('and the slot it holds is untouched',
+  slotCell('2026-11-08', '1:00 PM', 'status') === 'booked' &&
+  slotsHolding(MOVER).length === 1, slotsHolding(MOVER));
+
+/* ---- ownership, on a write that moves somebody's cleaner ---- */
+t('another customer cannot move this visit',
+  move({}, THEIRS, 'CON-0002').error === 'not_found');
+t('and nothing moved by trying', jobCell(MOVER, 'scheduled_date') === '2026-11-08',
+  jobCell(MOVER, 'scheduled_date'));
+t('an unknown booking looks exactly like one that is not theirs',
+  write({ kind: 'reschedule', job_id: 'SRV-NOPE',
+          slot_date: '2026-11-08', slot_time: '1:00 PM' }).error === 'not_found');
+
+/* ---- a finished visit is a receipt ---- */
+t('a completed booking cannot be moved',
+  write({ kind: 'reschedule', job_id: 'SRV-20260810-BBBBBB',
+          slot_date: '2026-11-08', slot_time: '1:00 PM' }).error === 'closed');
+
+/* ---- the time is validated, not passed along ---- */
+const beforeBad = JSON.stringify(T.tabs.AVAILABILITY._rows);
+t('an unreadable time is refused', move({ slot_time: 'sometime Tuesday' }).error === 'bad_slot');
+t('an unreadable date is refused', move({ slot_date: 'next week' }).error === 'bad_slot');
+t('and neither consumed any capacity',
+  JSON.stringify(T.tabs.AVAILABILITY._rows) === beforeBad);
+
+/* ================================================================
+   CALLING A VISIT OFF
+   ================================================================ */
+const KILLED = 'SRV-20261115-CANCEL';
+seedJob(KILLED, 'uriel@example.com', 'PROP-0001',
+        { scheduled_date: '2026-11-15', start_time: '8:00 AM' });
+pushSlotAs('2026-11-15', '8:00 AM', 'VEN-OLD', 'booked', KILLED);
+
+const kill = (over, tok, cid) => write(Object.assign(
+  { kind: 'cancel', job_id: KILLED }, over || {}), tok, cid);
+
+const rowsBeforeCancel = jobsRows().length;
+const K1 = kill({ reason: 'Away that week.' });
+t('it cancels', K1.ok === true, K1);
+t('the booking reads cancelled', jobCell(KILLED, 'job_status') === 'cancelled',
+  jobCell(KILLED, 'job_status'));
+
+/* THE ROW SURVIVES. Deleting it would take the address, the price, the
+   instructions and the attribution with it — and every count of "work booked"
+   would quietly stop including the work that was booked and given back. */
+t('the row is KEPT, not deleted', jobsRows().length === rowsBeforeCancel,
+  jobsRows().length - rowsBeforeCancel);
+t('with what was sold still on it',
+  jobCell(KILLED, 'quoted_price') === 214 && jobCell(KILLED, 'address') === '123 Beacon St',
+  [jobCell(KILLED, 'quoted_price'), jobCell(KILLED, 'address')]);
+
+t('the slot goes back on sale', slotCell('2026-11-15', '8:00 AM', 'status') === 'open',
+  slotCell('2026-11-15', '8:00 AM', 'status'));
+t('and names no booking', slotCell('2026-11-15', '8:00 AM', 'job_id') === '',
+  slotCell('2026-11-15', '8:00 AM', 'job_id'));
+
+/* ---- what the customer's own page is told ---- */
+const afterCancel = get({ portal: 'CON-0001', t: MINE });
+const killedRow = (afterCancel.bookings || []).filter(b => b.bookingId === KILLED)[0] || {};
+t('the portal is told it is cancelled', killedRow.cancelled === true, killedRow.cancelled);
+t('and that nothing on it can be acted on', killedRow.editable === false, killedRow.editable);
+/* A FIELD, not a string the page has to interpret. job_status is a sheet value
+   an operator can reword; a browser comparing against it would start showing
+   cancelled visits as live ones the day somebody did. */
+t('it is a boolean, not the sheet wording', typeof killedRow.cancelled === 'boolean',
+  typeof killedRow.cancelled);
+t('a cancelled visit carries no rooms to instruct',
+  killedRow.rooms === undefined, killedRow.rooms);
+
+/* ---- a cancelled visit is closed to everything ---- */
+t('cancelling it again is refused', kill().error === 'cancelled', kill());
+t('and it cannot be moved afterwards',
+  write({ kind: 'reschedule', job_id: KILLED,
+          slot_date: '2026-11-08', slot_time: '1:00 PM' }).error === 'cancelled');
+t('nor instructed', write({ kind: 'instruction', job_id: KILLED,
+    scope_type: 'BOOKING', scope_key: 'GENERAL',
+    instruction: 'still coming?' }).error === 'cancelled');
+t('another customer cannot cancel this visit',
+  kill({}, THEIRS, 'CON-0002').error === 'not_found');
+
+/* ================================================================
+   WHAT THE RELEASE MUST NEVER TOUCH
+   ================================================================ */
+
+/* `held` IS AN OPERATOR'S OWN DIARY. A customer cancelling a visit is not
+   permission to hand somebody's held morning back to the public feed. Same
+   rule bookAvailabilitySlot has always followed on the way in. */
+const HELD = 'SRV-20261120-HELD';
+seedJob(HELD, 'uriel@example.com', 'PROP-0001',
+        { scheduled_date: '2026-11-20', start_time: '10:00 AM' });
+pushSlotAs('2026-11-20', '10:00 AM', 'VEN-OLD', 'held', HELD);
+write({ kind: 'cancel', job_id: HELD });
+t('a HELD row is never released by a cancellation',
+  slotCell('2026-11-20', '10:00 AM', 'status') === 'held',
+  slotCell('2026-11-20', '10:00 AM', 'status'));
+t('the cancellation itself still stands', jobCell(HELD, 'job_status') === 'cancelled',
+  jobCell(HELD, 'job_status'));
+
+/* MATCHED ON job_id, NEVER ON DATE AND TIME. After a conflict a human resolved
+   by hand, the square on the calendar can belong to somebody else entirely —
+   freeing "the 9 AM row for the 25th" would give away their booking. */
+const MINE_AT_NOON = 'SRV-20261125-MINE';
+const THEIRS_AT_NOON = 'SRV-20261125-THEIRS';
+seedJob(MINE_AT_NOON, 'uriel@example.com', 'PROP-0001',
+        { scheduled_date: '2026-11-25', start_time: '12:00 PM' });
+pushSlotAs('2026-11-25', '12:00 PM', 'VEN-A', 'booked', MINE_AT_NOON);
+pushSlotAs('2026-11-25', '12:00 PM', 'VEN-B', 'booked', THEIRS_AT_NOON);
+write({ kind: 'cancel', job_id: MINE_AT_NOON });
+t('only the cancelled booking\'s row is freed',
+  slotsHolding(MINE_AT_NOON).length === 0, slotsHolding(MINE_AT_NOON));
+t('the row at the same time holding ANOTHER booking is untouched',
+  slotsHolding(THEIRS_AT_NOON).length === 1 &&
+  String(slotsHolding(THEIRS_AT_NOON)[0][AVAIL_H.indexOf('status')]) === 'booked',
+  slotsHolding(THEIRS_AT_NOON));
+
+/* ---- the write path cannot become a back door onto ops columns ---- */
+/* vendor_id, payment_status and cleaner belong to a dispatcher or to whoever
+   reconciles money. A customer-facing path must refuse them LOUDLY rather than
+   skip them quietly, so a mistyped field stops the release instead of losing a
+   hand entry. */
+let opsRefused = '';
+try {
+  const jobsTab = T.tabs.JOBS;
+  S.setJobCells(jobsTab, 2, JOBS_HEADERS.slice(), { vendor_id: 'VEN-SNEAK' });
+} catch (e) { opsRefused = String(e.message || e); }
+t('setJobCells refuses an ops-owned column outright',
+  /refuses "vendor_id"/.test(opsRefused), opsRefused);
+
+/* ================================================================
+   THE NOTICE WINDOW — built, tested, and OFF by default.
+
+   A cut-off for changing a booking online is a customer promise with a refund
+   question attached, and both were still the founder's open decisions on
+   2026-09-13. So the mechanism exists and enforces nothing until a number is
+   put in the Ops SETTINGS tab. These run on FRESH harnesses because the hours
+   are cached on first read, exactly as payout_rate is.
+   ================================================================ */
+const dayISO = (n) => {
+  const d = new Date(); d.setDate(d.getDate() + n);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') +
+         '-' + String(d.getDate()).padStart(2, '0');
+};
+
+function noticeFixture(hours, whenISO) {
+  const F = build();
+  if (hours !== null) {
+    F.tabs.SETTINGS = makeSheet('SETTINGS', ['key', 'value']);
+    F.tabs.SETTINGS.appendRow(['cancel_notice_hours', hours]);
+  }
+  const lead = new Array(LEADS_HEADERS.length).fill('');
+  const setL = (k, v) => { lead[LEADS_HEADERS.indexOf(k)] = v; };
+  setL('lead_id', 'uriel@example.com'); setL('name', 'Uriel Lopez');
+  setL('email', 'uriel@example.com'); setL('contact_id', 'CON-0001');
+  F.tabs.LEADS.appendRow(lead);
+
+  const job = new Array(JOBS_HEADERS.length).fill('');
+  const setJ = (k, v) => { job[JOBS_HEADERS.indexOf(k)] = v; };
+  setJ('job_id', 'SRV-SOON'); setJ('lead_id', 'uriel@example.com');
+  setJ('property_id', 'PROP-0001'); setJ('service_type', 'First Clean');
+  setJ('frequency', 'once'); setJ('beds', 2); setJ('baths', 1);
+  setJ('quoted_price', 214); setJ('scheduled_date', whenISO);
+  setJ('start_time', '9:00 AM'); setJ('address', '123 Beacon St');
+  setJ('zip', '02116'); setJ('name', 'Uriel Lopez'); setJ('email', 'uriel@example.com');
+  F.tabs.JOBS.appendRow(job);
+
+  const tok = F.box.portalToken('CON-0001');
+  return {
+    call: (o) => JSON.parse(F.box.doPost({ postData: { contents: JSON.stringify(
+      Object.assign({ event_type: 'portal_write', contact_id: 'CON-0001', t: tok },
+                    o)) } }).getContent()),
+    status: () => ((F.tabs.JOBS._rows || []).slice(1)
+      .filter(r => String(r[JOBS_HEADERS.indexOf('job_id')]).trim() === 'SRV-SOON')[0]
+      || [])[JOBS_HEADERS.indexOf('job_status')],
+  };
+}
+
+/* Two weeks' notice against a visit tomorrow — comfortably inside the window
+   whatever time of day this test runs, so it cannot rot into a flaky red. */
+const tooSoon = noticeFixture(336, dayISO(1));
+const TL = tooSoon.call({ kind: 'cancel', job_id: 'SRV-SOON' });
+t('inside the notice window a cancellation is refused',
+  TL.error === 'too_late', TL);
+t('and says how much notice is required, for the page to explain',
+  TL.hours === 336, TL.hours);
+t('nothing was cancelled by trying', tooSoon.status() === '', tooSoon.status());
+t('a move is refused on the same footing',
+  tooSoon.call({ kind: 'reschedule', job_id: 'SRV-SOON',
+                 slot_date: dayISO(20), slot_time: '9:00 AM' }).error === 'too_late');
+
+const farOff = noticeFixture(336, dayISO(30));
+t('outside the window the same customer may cancel',
+  farOff.call({ kind: 'cancel', job_id: 'SRV-SOON' }).ok === true);
+
+/* THE DEFAULT IS GENUINELY OFF. No SETTINGS row, no window — a visit tomorrow
+   can still be cancelled online, because no notice period has been decided. */
+const noPolicy = noticeFixture(null, dayISO(1));
+t('with nothing configured there is no cut-off at all',
+  noPolicy.call({ kind: 'cancel', job_id: 'SRV-SOON' }).ok === true);
+
+/* A nonsense value must not lock customers out of their own bookings. */
+const silly = noticeFixture(99999, dayISO(1));
+t('an out-of-range notice setting is ignored rather than enforced',
+  silly.call({ kind: 'cancel', job_id: 'SRV-SOON' }).ok === true);
+
+/* THE WINDOW MEASURES FROM THE REAL START, and this is asserted directly
+   rather than through a fixture. getBooking hands out a DISPLAY time —
+   "1:00 PM ET" — so a parser anchored at the END of the string reads nothing,
+   falls back to midnight, and measures the window from an instant up to a day
+   off. Through a fixture that difference only shows at certain hours, which is
+   a test that passes every morning and fails every evening; here it is exact.
+   The second clause is what stops both sides simply being midnight. */
+t('the clock parser reads the display time a booking actually carries',
+  S.wallClockMs('2026-11-08', '1:00 PM ET') === S.wallClockMs('2026-11-08', '1:00 PM') &&
+  S.wallClockMs('2026-11-08', '1:00 PM')    !== S.wallClockMs('2026-11-08', ''),
+  [S.wallClockMs('2026-11-08', '1:00 PM ET'), S.wallClockMs('2026-11-08', '1:00 PM'),
+   S.wallClockMs('2026-11-08', '')]);
+t('and a time that is not a clock time at all is not invented into one',
+  S.wallClockMs('2026-11-08', 'Morning preferred') === S.wallClockMs('2026-11-08', ''),
+  S.wallClockMs('2026-11-08', 'Morning preferred'));
+
 console.log('\n' + (bad ? bad + ' FAILURES' : 'ALL ASSERTIONS PASSED'));
 process.exit(bad ? 1 : 0);

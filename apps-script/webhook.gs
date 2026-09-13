@@ -1,7 +1,7 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-13  ·  master  ·  r42 — a plan can be confirmed and scheduled
+ * VERSION STAMP:  2026-09-13  ·  master  ·  r43 — a booked visit can be moved or called off
  *
  * r40 = A PLAN IS FOUND BY lead_id, NOT BY contact_id. The r39 backfill wrote
  *      ten plans and not one of them appeared in a portal. They were correct
@@ -741,6 +741,12 @@ const OPS_OWNED_COLUMNS = ["completed_date", "cleaner", "duration_min", "photos_
 
 const NEW_JOB_STATUS = "new";
 
+/* r43. What job_status reads once a customer calls a visit off in their portal.
+   The row is NEVER deleted — a cancelled booking is a record of something that
+   was really sold and really given back, and ops reporting that counted only
+   surviving rows would quietly overstate how much work was actually booked. */
+const CANCELLED_JOB_STATUS = "cancelled";
+
 
 /* ============================================================
    2. HEADER_MAP — payload/record key -> EXACT header text
@@ -1352,7 +1358,7 @@ function doGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-13 r42" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-13 r43" });
 }
 
 
@@ -1915,6 +1921,8 @@ function buildClientTicketModel(ss, booking) {
       time:         booking.startTime,
       when:         booking.scheduleSummary,
       status:       booking.status,
+      /* r43. A ticket for a visit nobody is coming to has to say so. */
+      cancelled:    bookingIsCancelled(booking),
       completed:    booking.completedDate,
       addOns:       booking.addOns,
       /* The price the customer agreed to. `final` once an operator sets it,
@@ -2315,6 +2323,11 @@ function buildVendorTicketModel(ss, booking) {
       time:         booking.startTime,
       when:         booking.scheduleSummary,
       status:       booking.status,
+      /* r43. THE MOST CONSEQUENTIAL PLACE THIS FIELD APPEARS. A cleaner
+         holding a live-looking ticket for a cancelled visit drives to a
+         stranger's home and knocks. The customer's own surfaces losing a
+         cancellation is confusing; this one is somebody's morning. */
+      cancelled:    bookingIsCancelled(booking),
       completed:    booking.completedDate,
       addOns:       booking.addOns,
     },
@@ -3417,6 +3430,454 @@ function sendPlanConfirmedEmail(ctx) {
 }
 
 
+/* ============================================================
+   CHANGING A VISIT  —  r43
+   ============================================================
+
+   Two portal writes that act on ONE booking the customer already has: move it
+   to another time, or call it off. Both prove ownership through the same seam
+   every other portal write uses, and both are refused on a finished booking —
+   a completed visit is a receipt, not a plan.
+
+   THE ANCHOR IS NOT TOUCHED BY EITHER OF THEM, and that is the whole design.
+   A plan's anchor_date/anchor_time is the beat every later visit is counted
+   from. Moving October's clean to the 9th does not move the cadence to the
+   9th, and cancelling October does not cancel November. Writing the new time
+   back onto the anchor would let one one-off change silently redefine the
+   schedule — the drift that walks a customer's every-other-Tuesday into a
+   different day of the week over a few months, with nothing anywhere recording
+   that anyone decided it. SCHEMA has said this since r38; this is the release
+   where code could first have broken it.
+
+   THE job_id NEVER CHANGES. It is minted once from the date first booked, so
+   after a move the date inside the id no longer matches scheduled_date. That
+   is correct: the id is an identity, and it is the join key for the
+   AVAILABILITY row, the instructions, the photos, the ticket and the portal.
+   Re-minting it to keep the digits tidy would orphan all five at once.
+   ============================================================ */
+
+/** The sheet row one booking sits on, plus that tab's headers. */
+function findJobRow(jobs, jobId) {
+  var h = sheetHeaders(jobs);
+  var idCol = h.indexOf("job_id");
+  var last = jobs.getLastRow();
+  if (idCol === -1 || last < 2) return null;
+
+  var ids = jobs.getRange(2, idCol + 1, last - 1, 1).getValues();
+  var needle = String(jobId).trim();
+  for (var i = 0; i < ids.length; i++) {
+    if (String(ids[i][0]).trim() === needle) return { rowNumber: i + 2, headers: h };
+  }
+  return null;
+}
+
+/**
+ * Write named cells on one JOBS row.
+ *
+ * Same rule as setPlanCells: a column this tab does not have is SKIPPED, never
+ * created. And one rule of its own — an OPS-OWNED column is REFUSED outright
+ * rather than skipped quietly. Those cells belong to a dispatcher (`vendor_id`,
+ * `cleaner`) or to whoever reconciles money (`payment_status`), and a
+ * customer-facing write path must never become the back door that overwrites
+ * one. A mistyped field name should stop the release, not lose a hand entry.
+ */
+function setJobCells(jobs, rowNumber, headers, fields) {
+  Object.keys(fields).forEach(function (name) {
+    if (OPS_OWNED_COLUMNS.indexOf(name) !== -1) {
+      throw new Error('setJobCells refuses "' + name + '" — ops owns that column.');
+    }
+    var c = headers.indexOf(name);
+    if (c === -1) { console.log("No " + name + " column on " + JOBS_TAB); return; }
+    jobs.getRange(rowNumber, c + 1).setValue(fields[name]);
+  });
+}
+
+/** Is this booking already called off? */
+function bookingIsCancelled(booking) {
+  return String(booking.status || "").trim().toLowerCase() === CANCELLED_JOB_STATUS;
+}
+
+const DEFAULT_CANCEL_NOTICE_HOURS = 0;
+var CANCEL_NOTICE_CACHE = null;
+
+/**
+ * How much notice a customer must give to change or cancel in the portal.
+ *
+ * ZERO BY DEFAULT, AND THAT IS A DELIBERATE NON-DECISION. A notice window is a
+ * customer promise with a refund question attached, and both are the founder's
+ * to set — both were still open on 2026-09-13. Shipping a number I chose would
+ * publish a policy nobody agreed to. So the mechanism is built, tested, and
+ * off: put `cancel_notice_hours` in the Ops SETTINGS tab and it starts being
+ * enforced, with no redeploy and no code change.
+ *
+ * A MOVE CANNOT LAND SOONER THAN THE FEED ALLOWS whatever this says. The times
+ * offered come from /api/slots, which publishes nothing inside MIN_LEAD_HOURS
+ * (18) — that floor is inherited from availability.gs, not invented here.
+ */
+function cancelNoticeHours() {
+  if (CANCEL_NOTICE_CACHE !== null) return CANCEL_NOTICE_CACHE;
+  CANCEL_NOTICE_CACHE = readCancelNoticeHours();
+  return CANCEL_NOTICE_CACHE;
+}
+
+function readCancelNoticeHours() {
+  try {
+    var sheet = opsBook().getSheetByName(SETTINGS_TAB);
+    if (!sheet || sheet.getLastRow() < 2) return DEFAULT_CANCEL_NOTICE_HOURS;
+
+    var rows = sheet.getRange(1, 1, sheet.getLastRow(), 2).getValues();
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i][0] || "").trim().toLowerCase() !== "cancel_notice_hours") continue;
+
+      var raw = String(rows[i][1] === 0 ? "0" : (rows[i][1] || "")).trim();
+      if (!raw) return DEFAULT_CANCEL_NOTICE_HOURS;
+
+      var n = Number(raw);
+      /* Loud, and never clamped into range. Two weeks is already an extreme
+         notice period for a house clean; a bigger number is a typo, and
+         guessing what it meant would lock customers out of their own bookings
+         with nothing anywhere reporting a fault. */
+      if (!isFinite(n) || n < 0 || n > 336) {
+        console.error("SETTINGS cancel_notice_hours is not a sane hour count: " +
+                      JSON.stringify(raw) + " — using " + DEFAULT_CANCEL_NOTICE_HOURS);
+        return DEFAULT_CANCEL_NOTICE_HOURS;
+      }
+      return n;
+    }
+    return DEFAULT_CANCEL_NOTICE_HOURS;
+  } catch (err) {
+    console.error("cancel_notice_hours lookup failed, using default: " + err);
+    return DEFAULT_CANCEL_NOTICE_HOURS;
+  }
+}
+
+/**
+ * "2026-10-02" + "9:00 AM" -> a naive wall-clock instant. Null if the date is
+ * unreadable, which is how a preference booking with no start reads.
+ *
+ * Naive on purpose: it is only ever compared against another value from this
+ * same function, so both sides sit in the same zone and the offset cancels.
+ */
+function wallClockMs(dateStr, timeStr) {
+  var d = String(dateStr || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return null;
+  var p = d.split("-");
+
+  /* NOT ANCHORED AT THE END, deliberately. The value handed in is usually
+     getBooking's DISPLAY string, which carries a trailing " ET" — anchoring
+     would fail to match it, silently fall through to midnight, and measure the
+     notice window from the wrong instant by up to a day. Anything after the
+     meridiem is ignored; text that is not a clock time at all ("9-11 AM", a
+     preference label) still matches nothing and reads as midnight, which is
+     the conservative answer for a booking with no real start. */
+  var t = /^(\d{1,2}):(\d{2})\s*([AP])\.?M\.?\b/i.exec(String(timeStr || "").trim());
+  var hour = 0, minute = 0;
+  if (t) {
+    hour = Number(t[1]) % 12;
+    if (/^p$/i.test(t[3])) hour += 12;
+    minute = Number(t[2]);
+  }
+  return Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2]), hour, minute);
+}
+
+/**
+ * Hours from now until a booking starts. Null when it has no specific time —
+ * a preference booking has no start to count down to, and a notice window
+ * cannot be applied to one.
+ *
+ * BOTH SIDES ARE READ IN BUSINESS WALL-CLOCK TIME. The booking's date and time
+ * are Boston local, because the customer picked them off a Boston calendar.
+ * Building a Date from them directly would interpret them in the SCRIPT
+ * PROJECT's timezone, which is a different setting in a different place and
+ * has silently disagreed before (r32). Formatting "now" through BUSINESS_TZ
+ * and parsing it with the very same parser keeps both sides honest.
+ *
+ * Off by up to an hour across a DST change. That is acceptable for a window
+ * measured in hours and is not worth a calendar library.
+ */
+function hoursUntilBooking(booking) {
+  var start = wallClockMs(booking.scheduledDate, booking.startTime);
+  if (start === null) return null;
+
+  var now = new Date();
+  var here = wallClockMs(Utilities.formatDate(now, BUSINESS_TZ, "yyyy-MM-dd"),
+                         Utilities.formatDate(now, BUSINESS_TZ, "h:mm a"));
+  if (here === null) return null;
+
+  return (start - here) / 3600000;
+}
+
+/** What a booking's time reads as today, for an email that has to say both. */
+function scheduleLine(booking) {
+  var explicit = [String(booking.scheduledDate || "").trim(),
+                  String(booking.startTime || "").trim()].filter(Boolean).join(" at ");
+  return explicit || String(booking.scheduleSummary || "") || "no time on file";
+}
+
+/**
+ * MOVE ONE VISIT. The customer picks a new time from the same feed and the
+ * same horizon rules the booking form uses, and the visit moves to it.
+ */
+function rescheduleBooking(ss, contact, booking, data) {
+  /* Validated, not passed along — the same rule as a plan confirmation. A time
+     nothing can read matches no AVAILABILITY row, consumes nothing, and leaves
+     a customer holding a confirmation for a visit no cleaner can see. */
+  var slotDate = String(data.slot_date || "").trim();
+  var slotTime = String(data.slot_time || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(slotDate) || !PLAN_TIME_SHAPE.test(slotTime)) {
+    return json({ ok: false, error: "bad_slot" });
+  }
+  var sched = normalizeSchedule({ slot_date: slotDate, slot_time: slotTime });
+  if (sched.shape !== "slot") return json({ ok: false, error: "bad_slot" });
+
+  var jobs = requireTab(ss, JOBS_TAB);
+  var found = findJobRow(jobs, booking.bookingId);
+  if (!found) return json({ ok: false, error: "not_found" });
+
+  /* ALREADY THERE — and this is a guard, not a nicety. A double-tapped button
+     would otherwise release the slot this booking holds and then try to book
+     the very same row again; whether that succeeds depends on ordering, and
+     the failure mode is a customer's own visit handed away to nobody. Nothing
+     is touched, and the answer is a success, because from the customer's side
+     it is one: the visit is at the time they asked for.
+
+     COMPARED AGAINST THE RAW CELLS, NEVER AGAINST getBooking's STRINGS, and
+     that distinction cost this guard its entire purpose the first time it ran.
+     `booking.startTime` is a DISPLAY value: timeCellText appends " ET" to
+     anything reading as a clock time, so it is "1:00 PM ET" where the browser
+     sends "1:00 PM". The comparison was therefore false forever, the guard
+     never fired, and a repeated move re-booked a row that was already booked
+     (a conflict, so nothing was taken) and then released the row the customer
+     was holding — giving their visit away. Both sides are normalised through
+     slotTimeLabel, the same function that matches an AVAILABILITY row. */
+  var jobTz   = sheetTimeZone(ss);
+  var cellOf  = function (name) {
+    var c = found.headers.indexOf(name);
+    return c === -1 ? "" : jobs.getRange(found.rowNumber, c + 1).getValue();
+  };
+  if (dateCellText(cellOf("scheduled_date"), jobTz) === sched.date &&
+      slotTimeLabel(cellOf("start_time"), jobTz) === sched.time) {
+    return json({ ok: true, unchanged: true, job_id: booking.bookingId,
+                  when: sched.summary });
+  }
+
+  var notice = cancelNoticeHours();
+  var left = hoursUntilBooking(booking);
+  if (notice > 0 && left !== null && left < notice) {
+    return json({ ok: false, error: "too_late", hours: notice });
+  }
+
+  var fromWhen = scheduleLine(booking);
+
+  /* THE COMMITMENT. Everything below is capacity bookkeeping, and none of it
+     may fail the change the customer just made — the same band, and the same
+     rule, as the website's booking path. */
+  setJobCells(jobs, found.rowNumber, found.headers, {
+    scheduled_date:  sched.date,
+    start_time:      sched.time,
+    notes:           sched.summary,
+    scheduling_type: sched.shape,
+  });
+
+  /* TAKE THE NEW TIME BEFORE GIVING THE OLD ONE BACK. Both run inside the
+     script lock doPost already holds, so nothing interleaves — the order is
+     about failure, not races: never release capacity you are holding until the
+     replacement has been secured, or a throw in between leaves the customer
+     with neither. */
+  var slotResult = { ok: true, action: "skipped" };
+  try {
+    slotResult = bookAvailabilitySlot(sched, booking.bookingId, booking.serviceCode);
+  } catch (slotErr) {
+    slotResult = { ok: false, action: "failed", error: String(slotErr) };
+    console.error("reschedule slot write-back failed (the move stands): " + slotErr);
+  }
+
+  var release = { ok: true, action: "skipped" };
+  try {
+    /* The row just taken is excluded BY NUMBER. Both rows now carry this
+       job_id, so anything matching on the id alone would give the new time
+       straight back — see releaseAvailabilitySlot. */
+    release = releaseAvailabilitySlot(booking.bookingId,
+                slotResult.action === "booked" ? slotResult.row : 0);
+  } catch (relErr) {
+    release = { ok: false, action: "failed", error: String(relErr) };
+    console.error("reschedule release failed (the move stands): " + relErr);
+  }
+
+  /* BLANK CELLS ONLY, exactly as at booking. vendor_id is ops-owned: where a
+     dispatcher has already assigned this job, the new slot belonging to another
+     company is a clash for a HUMAN to resolve, never something a customer's
+     reschedule may quietly overwrite. The email below says so in as many
+     words. */
+  try {
+    stampJobVendor(jobs, found.rowNumber, slotResult.vendorId);
+  } catch (stampErr) {
+    console.error("reschedule vendor stamp failed (the move stands): " + stampErr);
+  }
+
+  /* NOTE WHAT IS ABSENT: nothing here writes RECURRING_PLANS. See the section
+     header — the anchor is the cadence, and one moved visit is not a new
+     cadence. */
+  try {
+    sendVisitChangedEmail({
+      what: "moved", ss: ss, booking: booking, contactId: contact.contactId,
+      fromWhen: fromWhen, toWhen: sched.summary,
+      release: release, slotResult: slotResult,
+    });
+  } catch (mailErr) {
+    console.error("reschedule email failed (the move stands): " + mailErr);
+  }
+
+  return json({ ok: true, job_id: booking.bookingId, when: sched.summary,
+                slot_action: slotResult.action, released: release.action });
+}
+
+/**
+ * CALL ONE VISIT OFF.
+ *
+ * The row is marked, never removed, and the slot goes back to the feed. What
+ * this deliberately does NOT do is touch money: nothing in this system has ever
+ * captured a payment, refund terms are the founder's open decision, and a
+ * cancellation that silently voided or kept a hold would be making that
+ * decision by accident. The email tells a human a hold may be outstanding.
+ */
+function cancelBooking(ss, contact, booking, data) {
+  var notice = cancelNoticeHours();
+  var left = hoursUntilBooking(booking);
+  if (notice > 0 && left !== null && left < notice) {
+    return json({ ok: false, error: "too_late", hours: notice });
+  }
+
+  var jobs = requireTab(ss, JOBS_TAB);
+  var found = findJobRow(jobs, booking.bookingId);
+  if (!found) return json({ ok: false, error: "not_found" });
+
+  /* THE ROW SURVIVES. Deleting it would take the address, the price, the
+     instructions and the attribution with it, and every count of "work booked"
+     would quietly stop including the work that was booked and given back. */
+  setJobCells(jobs, found.rowNumber, found.headers, {
+    job_status: CANCELLED_JOB_STATUS,
+  });
+
+  var release = { ok: true, action: "skipped" };
+  try {
+    release = releaseAvailabilitySlot(booking.bookingId);
+  } catch (relErr) {
+    release = { ok: false, action: "failed", error: String(relErr) };
+    console.error("cancel release failed (the cancellation stands): " + relErr);
+  }
+
+  /* The reason goes in the EMAIL and nowhere else. It is worth a human reading
+     and it is not worth a new JOBS column invented on a customer's behalf. */
+  try {
+    sendVisitChangedEmail({
+      what: "cancelled", ss: ss, booking: booking, contactId: contact.contactId,
+      fromWhen: scheduleLine(booking), toWhen: "",
+      reason: String(data.reason || "").trim().slice(0, 500),
+      release: release, slotResult: { action: "n/a" },
+    });
+  } catch (mailErr) {
+    console.error("cancel email failed (the cancellation stands): " + mailErr);
+  }
+
+  return json({ ok: true, job_id: booking.bookingId, released: release.action });
+}
+
+/**
+ * Tell a human that a booked visit moved or stopped existing.
+ *
+ * ONE EMAIL FOR BOTH, because the thing a person has to do about them is the
+ * same: look at whether capacity ended up where it should be, and whether
+ * anybody needs calling. The subject carries the flags so it can be triaged
+ * without opening it.
+ */
+function sendVisitChangedEmail(ctx) {
+  var moved   = ctx.what === "moved";
+  var release = ctx.release || { action: "n/a" };
+  var slot    = ctx.slotResult || { action: "n/a" };
+  var b       = ctx.booking;
+
+  var warn = "";
+  if (release.action === "failed" || release.action === "not_found") {
+    warn += "*** THE OLD SLOT WAS NOT GIVEN BACK — it still reads booked. ***\n" +
+            "*** " + (release.error || release.reason || "") + " ***\n" +
+            "*** Free it by hand or that time stays unsellable. ***\n\n";
+  }
+  if (moved && slot.action === "conflict") {
+    warn += "*** SLOT CONFLICT — the new time was already taken. ***\n" +
+            "*** " + (slot.reason || "") + " ***\n" +
+            "*** The visit HAS been moved. Call them, or find a second ***\n" +
+            "*** cleaner for that slot. They have not been told. ***\n\n";
+  }
+  if (moved && slot.action === "failed") {
+    warn += "*** THE NEW SLOT WAS NOT MARKED BOOKED — it still reads open. ***\n" +
+            "*** " + (slot.error || "") + " ***\n" +
+            "*** Mark it by hand or it can be sold twice. ***\n\n";
+  }
+
+  /* THE ASSIGNMENT CLASH. A dispatcher's vendor_id is never overwritten by a
+     reschedule, so a visit can end up assigned to one company while sitting in
+     another company's slot. Nothing is broken and nobody is told — which is
+     exactly why it has to be said out loud here. */
+  var assigned = String(b.vendorId || "").trim();
+  var slotVendor = String(slot.vendorId || "").trim();
+  var clash = moved && assigned && slotVendor && assigned !== slotVendor;
+  if (clash) {
+    warn += "*** ASSIGNED TO ONE COMPANY, BOOKED INTO ANOTHER'S SLOT. ***\n" +
+            "*** Job is assigned to " + assigned + "; the new slot belongs to " +
+            slotVendor + ". ***\n" +
+            "*** Reassign the job or move it again. Nothing was overwritten. ***\n\n";
+  }
+
+  var flags = [];
+  if (release.action === "failed" || release.action === "not_found") flags.push("SLOT NOT FREED");
+  if (moved && slot.action === "conflict") flags.push("SLOT CONFLICT");
+  if (moved && slot.action === "failed")   flags.push("SLOT NOT MARKED");
+  if (clash) flags.push("VENDOR CLASH");
+
+  MailApp.sendEmail(
+    notifyEmail(),
+    "Serve Visit " + (moved ? "Moved" : "CANCELLED") + " — " +
+      (b.customerName || "Unknown") +
+      (flags.length ? " · " + flags.join(" · ") : ""),
+    warn +
+    (moved
+      ? "A customer moved one of their visits in their portal.\n\n"
+      : "A customer cancelled one of their visits in their portal.\n" +
+        "THE BOOKING ROW IS KEPT and now reads " + CANCELLED_JOB_STATUS + ".\n\n") +
+    "— WHEN —\n" +
+    (moved ? "Was:       " + ctx.fromWhen + "\n" +
+             "Now:       " + ctx.toWhen + "\n"
+           : "Was:       " + ctx.fromWhen + "\n") + "\n" +
+    "— WHAT —\n" +
+    "job_id:    " + b.bookingId + "\n" +
+    "Service:   " + (b.serviceLabel || "") +
+      (b.frequency ? " (" + b.frequency + ")" : "") + "\n" +
+    "Price:     " + money(b.price.final || b.price.quoted) + "\n" +
+    "Address:   " + (b.address || "") +
+      (isSet(b.unit) ? ", " + b.unit : "") + "\n" +
+    "ZIP:       " + (b.zip || "") + "\n" +
+    "Assigned:  " + (assigned || "(nobody yet)") + "\n" +
+    "Old slot:  " + release.action +
+      (release.action === "released" ? " — AVAILABILITY row(s) " + (release.rows || []).join(", ")
+                                     : (release.reason ? " — " + release.reason : "")) + "\n" +
+    (moved
+      ? "New slot:  " + slot.action +
+        (slot.action === "booked"
+          ? " — AVAILABILITY row " + slot.row +
+            (isSet(slot.vendorId) ? ", vendor " + slot.vendorId : "")
+          : (slot.reason ? " — " + slot.reason : "")) + "\n"
+      : "") +
+    (ctx.reason ? "\n— WHY THEY SAID —\n" + ctx.reason + "\n" : "") +
+    /* MONEY IS A HUMAN'S. Nothing captures, and nothing here voids a hold. */
+    (b.payment.paid
+      ? "\n— MONEY —\nThis booking reads PAID. Decide what is owed back.\n"
+      : "\n— MONEY —\nNo payment captured. If a card was authorized, the hold\n" +
+        "is still outstanding — release it in Stripe if this is not rebooked.\n") +
+    "\n" + ticketBlock(b.bookingId, ctx.contactId, b.vendorId, slot.action));
+}
+
+
 function buildPortalModel(ss, contact) {
   var bookings = getContactBookings(ss, contact.leadId);
   /* A customer with a standing partner has the same vendor on every row. */
@@ -3457,6 +3918,9 @@ function buildPortalModel(ss, contact) {
     plan:      planForPortal(clientRecurringPlan(ss, contact.leadId), bookings),
     bookings:  bookings.map(function (b) {
       var done = !!b.completedDate;
+      /* r43. Called off, and still on the account as a record of what was
+         really sold and really given back. */
+      var cancelled = bookingIsCancelled(b);
       var row = {
         bookingId:    b.bookingId,
         photos:       publicBookingPhotos(ss, b.bookingId),
@@ -3480,16 +3944,22 @@ function buildPortalModel(ss, contact) {
         when:         b.scheduleSummary,
         status:       b.status,
         completed:    b.completedDate,
+        /* A FIELD, not a string the browser has to interpret. The portal must
+           never have to know how job_status is spelled — that is a sheet
+           value an operator can reword, and a page comparing against it would
+           start showing cancelled visits as live ones the day they did. */
+        cancelled:    cancelled,
         price:        b.price.final || b.price.quoted,
         paid:         b.payment.paid,
         addOns:       b.addOns,
         propertyLabel: [b.address, b.unit].filter(Boolean).join(", "),
-        editable:     !done,
+        editable:     !done && !cancelled,
       };
       /* Rooms and instructions only where they can still be acted on. A past
          booking is a receipt, and loading every room of every job a customer
-         has ever had would grow the payload for nothing. */
-      if (!done) {
+         has ever had would grow the payload for nothing. A cancelled one is
+         the same: nobody is coming, so there is nothing to instruct. */
+      if (!done && !cancelled) {
         var sorted = sortInstructions(getBookingInstructions(ss, b.bookingId));
         row.rooms = deriveRooms(b.beds, b.baths).map(function (r) {
           return { key: r.key, label: r.label, instruction: sorted.rooms[r.key] || "" };
@@ -3590,7 +4060,12 @@ function handlePortalWrite(ss, data) {
     var bookings = getContactBookings(ss, contact.leadId);
     var kind = String(data.kind || "").toLowerCase();
 
-    if (kind === "instruction") {
+    /* r43. THREE kinds act on one booking the customer already has, and all
+       three need the same proof first: it is a real job, it is theirs, and it
+       is still open. Proving it in one place is what keeps the answers
+       identical across them — "not yours" and "does not exist" must stay
+       indistinguishable on every one of the three, not just on the oldest. */
+    if (kind === "instruction" || kind === "reschedule" || kind === "cancel") {
       var jobId = String(data.job_id || "").trim();
       var mine = null;
       for (var i = 0; i < bookings.length; i++) {
@@ -3599,7 +4074,13 @@ function handlePortalWrite(ss, data) {
       /* Not theirs, or not a job at all — the same answer either way. */
       if (!mine) return json({ ok: false, error: "not_found" });
       if (mine.completedDate) return json({ ok: false, error: "closed" });
-      return writeInstruction(ss, mine, data);
+      /* A visit already called off cannot be edited, moved or cancelled again.
+         Moving one would book a fresh slot for a booking nobody is coming to. */
+      if (bookingIsCancelled(mine)) return json({ ok: false, error: "cancelled" });
+
+      if (kind === "instruction") return writeInstruction(ss, mine, data);
+      if (kind === "reschedule")  return rescheduleBooking(ss, contact, mine, data);
+      return cancelBooking(ss, contact, mine, data);
     }
 
     if (kind === "access") {
@@ -5293,6 +5774,92 @@ function bookAvailabilitySlot(sched, jobId, serviceCode) {
 
   } catch (err) {
     console.error("AVAILABILITY write-back failed: " + err);
+    return { ok: false, action: "failed", error: String(err) };
+  }
+}
+
+/**
+ * Give a slot back.
+ *
+ * THE OPEN ITEM THIS CLOSES. Until r43 nothing released capacity: a cancelled
+ * or moved booking left its AVAILABILITY row reading `booked` forever, so that
+ * time vanished from the feed and no customer could ever buy it again —
+ * capacity leaking one cancellation at a time, invisibly. SCHEMA has said since
+ * r5 that the `job_id` written back is the handle for undoing a booking. This
+ * is the code that finally uses it.
+ *
+ * `held` IS NEVER TOUCHED, the same rule bookAvailabilitySlot follows. That
+ * status is an operator's hold on their own diary; a customer cancelling a
+ * visit is not permission to hand somebody's held morning back to the public
+ * feed. Only a row reading `booked` AND carrying this job_id is ours to return.
+ *
+ * MATCHED ON job_id, NEVER ON DATE AND TIME. Freeing "the 9 AM row for the 2nd"
+ * would free whatever now sits there — which, after a conflict a human resolved
+ * by hand, can be somebody else's booking entirely.
+ *
+ * EVERY matching row is freed, not merely the first. One booking should hold
+ * one row, but a hand-resolved conflict can leave two pointing at the same job,
+ * and releasing one would leave the other sold to nobody.
+ *
+ * `exceptRow` IS WHAT MAKES A RESCHEDULE POSSIBLE AT ALL, and it is not an
+ * optimisation. A move books the new slot under the SAME job_id before giving
+ * the old one back — so by the time this runs there are two booked rows
+ * carrying that id, and "free every row for this job" would hand back the time
+ * the customer just chose. They would be left holding a confirmation for a slot
+ * that reads open, and the next visitor could buy it. The caller passes the row
+ * it just took; that one row is not ours to release.
+ *
+ * Returns { ok, action: released|not_found|skipped|failed, ... }. Never throws:
+ * a cancellation must not fail because the Ops sheet moved underneath it.
+ */
+function releaseAvailabilitySlot(jobId, exceptRow) {
+  var want = String(jobId || "").trim();
+  if (!want) return { ok: true, action: "skipped", reason: "no job id" };
+  var keep = Number(exceptRow) || 0;
+
+  try {
+    const ops = SpreadsheetApp.openById(OPS_SPREADSHEET_ID);
+    const av  = ops.getSheetByName(AVAILABILITY_TAB);
+    if (!av) throw new Error('Ops workbook "' + ops.getName() + '" has no ' + AVAILABILITY_TAB + ' tab.');
+    assertAvailabilityWritable(AVAILABILITY_TAB);
+
+    const headers = sheetHeaders(av);
+    const iStat = headers.indexOf("status");
+    const iJob  = headers.indexOf("job_id");
+
+    /* Without job_id there is no handle at all. Refuse rather than fall back to
+       date and time, for the reason in the header comment. */
+    const missing = [];
+    if (iStat === -1) missing.push("status");
+    if (iJob  === -1) missing.push("job_id");
+    if (missing.length) {
+      throw new Error(AVAILABILITY_TAB + " is missing header(s): " + missing.join(", ") +
+                      ". Row 1 reads: " + headers.join(" | "));
+    }
+
+    const lastRow = av.getLastRow();
+    if (lastRow < 2) return { ok: true, action: "not_found", reason: "no availability rows" };
+
+    const rows = av.getRange(2, 1, lastRow - 1, headers.length).getValues();
+    const freed = [];
+    for (let r = 0; r < rows.length; r++) {
+      if ((r + 2) === keep) continue;                          // just booked — see above
+      if (String(rows[r][iJob]).trim() !== want) continue;
+      if (String(rows[r][iStat]).trim().toLowerCase() !== SLOT_BOOKED) continue;   // never `held`
+      av.getRange(r + 2, iStat + 1).setValue(SLOT_OPEN);
+      av.getRange(r + 2, iJob + 1).setValue("");
+      freed.push(r + 2);
+    }
+
+    if (!freed.length) {
+      return { ok: true, action: "not_found",
+               reason: "no booked row carries " + want +
+                       " — a preference booking consumed none, or a human already freed it" };
+    }
+    return { ok: true, action: "released", rows: freed };
+
+  } catch (err) {
+    console.error("AVAILABILITY release failed: " + err);
     return { ok: false, action: "failed", error: String(err) };
   }
 }

@@ -157,7 +157,12 @@ async function boot(model, opts) {
   box.window = box;
   vm.createContext(box);
   vm.runInContext(SCOPE, box);
-  vm.runInContext(SLOTS, box);
+  /* r43: SKIPPABLE, so the page can be driven without the slots module. The
+     two halves of "change this visit" degrade separately — a missing scheduler
+     may cost the move control, but it must never cost the ability to call a
+     visit off, or a customer who cannot stop a cleaner arriving is on the
+     phone instead. */
+  if (!opts.noSlots) vm.runInContext(SLOTS, box);
   vm.runInContext(PARTNER, box);
   vm.runInContext(PORTAL, box);
   /* One macrotask flushes every pending microtask in the chain. */
@@ -330,6 +335,132 @@ const PRETTY = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][D.getDay()] +
     (byClass(F.body, 'plan__row')[0] || {}).hidden, true);
   t('nothing was requested', F.posts, []);
   t('and nothing threw', F.warns, []);
+
+  head('G. r43 — the two controls, and what they ask before acting');
+
+  /* Two buttons share a class, so "the first one" is not a selector. Reaching
+     for them by their words is also what a person does. */
+  const clickText = (root, cls, text) => {
+    const n = byClass(root, cls).filter(x => x._text === text)[0];
+    ((n && n._on && n._on.click) || []).forEach((fn) => fn({}));
+  };
+
+  const G = await boot(model());
+
+  t('an open booking offers both ways to change it',
+    byClass(G.body, 'sched__btn').map(n => n._text),
+    ['Change time', 'Cancel visit', 'Keep it']);
+  t('a finished booking offers neither',
+    byClass(G.body, 'pb--done').length === 1 && byClass(G.body, 'sched').length === 1, true);
+  t('nothing is asked before cancelling is chosen',
+    (byClass(G.body, 'sched__confirm')[0] || {}).hidden, true);
+  t('and nothing can be moved before a time is chosen',
+    (byClass(G.body, 'sched__go')[0] || {}).hidden, true);
+  t('opening the portal sends nothing', G.posts, []);
+
+  click(G.body, 'sched__btn--quiet');
+  await G.settle();
+
+  /* ASKING IS NOT DOING. Cancelling gives a slot back to somebody else, so it
+     asks twice — and the question itself must reach no server. */
+  t('choosing to cancel asks first',
+    (byClass(G.body, 'sched__confirm')[0] || {}).hidden, false);
+  t('and asking sends nothing', G.posts, []);
+  t('it says plainly what cancelling costs them', textOf(G.body, 'sched__warn'),
+    'Cancelling gives this time back to another customer. We cannot promise ' +
+    'the same slot if you change your mind.');
+
+  clickText(G.body, 'sched__btn', 'Keep it');
+  await G.settle();
+  t('backing out closes the question',
+    (byClass(G.body, 'sched__confirm')[0] || {}).hidden, true);
+  t('and still sends nothing', G.posts, []);
+
+  click(G.body, 'sched__btn--quiet');
+  click(G.body, 'sched__yes');
+  await G.settle();
+
+  t('confirming sends exactly one request', G.posts.length, 1);
+  t('naming the booking, and carrying no time at all',
+    G.posts[0], { event_type: 'portal_write', contact_id: 'CON-1', t: 'tok',
+                  kind: 'cancel', job_id: 'SRV-1' });
+  t('and none of that threw', G.warns, []);
+
+  head('H. A cancelled visit reads as a record, not as an appointment');
+
+  const CANCELLED = model({ bookings: [
+    { bookingId: 'SRV-1', serviceLabel: 'First clean · deep clean',
+      serviceCode: 'CLEAN_DEEP', date: '2026-09-18', time: '9:00 AM',
+      price: 420, paid: false, completed: '', cancelled: true,
+      rooms: [], partner: null },
+    { bookingId: 'SRV-0', serviceLabel: 'Move-out clean',
+      serviceCode: 'CLEAN_MOVEOUT', date: '2026-08-02', time: '1:00 PM',
+      price: 300, paid: true, completed: '2026-08-02', rooms: [], photos: [] },
+  ] });
+  const H = await boot(CANCELLED);
+
+  /* IT LEAVES UPCOMING ENTIRELY. A visit nobody is coming to, sitting at the
+     top of the page under a heading that says it is coming, is the one place
+     it must never be. */
+  t('it is not upcoming, and it is not past', headings(H.body), ['Past', 'Cancelled']);
+  t('it is labelled without having to be opened', textOf(H.body, 'pb__tag'), 'Cancelled');
+  t('and reads as struck through', byClass(H.body, 'pb--cancelled').length, 1);
+  t('it says in words that nobody is coming',
+    byClass(H.body, 'tk-note').some(n => n._text.indexOf('nobody is coming') !== -1), true);
+
+  /* NOTHING ACTIONABLE SURVIVES ON IT. */
+  t('no control that could change it', byClass(H.body, 'sched__btn').length, 0);
+  t('no payment button on a visit that will not happen',
+    byClass(H.body, 'pay__btn').length, 0);
+  t('and renders without throwing', H.warns, []);
+
+  head('I. Moving a visit to another time');
+
+  const I = await boot(model());
+  click(I.body, 'sched__btn');
+  await I.settle();
+
+  /* THE HORIZON RULES ARE THE PAGE'S, AND THEY ARE THE SAME ONES. Six slots
+     served; the one with nobody open, the one already past and the one beyond
+     three weeks are dropped here exactly as they are on the booking form. */
+  t('only the bookable times are offered',
+    byClass(I.body, 'slot-chip').map(n => n._text), ['9:00 AM', '1:00 PM', '11:00 AM']);
+  t('and looking sends nothing', I.posts, []);
+
+  click(I.body, 'slot-chip');
+  await I.settle();
+  t('a move control appears once a time is chosen',
+    (byClass(I.body, 'sched__go')[0] || {}).hidden, false);
+  t('choosing a time still sends nothing', I.posts, []);
+
+  click(I.body, 'sched__move');
+  await I.settle();
+
+  t('moving sends exactly one request', I.posts.length, 1);
+  t('naming the booking and the new time, and nothing else',
+    I.posts[0], { event_type: 'portal_write', contact_id: 'CON-1', t: 'tok',
+                  kind: 'reschedule', job_id: 'SRV-1',
+                  slot_date: isoOf(SOON), slot_time: '9:00 AM' });
+  t('and none of that threw', I.warns, []);
+
+  head('J. Without the scheduler, calling off still works');
+
+  /* The move control needs serve-slots.js. Cancelling does not, and must not:
+     losing the ability to stop a cleaner arriving because a script failed to
+     load is the worse failure by far. */
+  const J = await boot(model(), { noSlots: true });
+
+  t('the move control is simply absent',
+    byClass(J.body, 'sched__btn').map(n => n._text), ['Cancel visit', 'Keep it']);
+  t('and no dead control is offered in its place',
+    byClass(J.body, 'sched__move').length, 0);
+
+  click(J.body, 'sched__btn--quiet');
+  click(J.body, 'sched__yes');
+  await J.settle();
+
+  t('the visit can still be called off', (J.posts[0] || {}).kind, 'cancel');
+  t('and nothing threw', J.warns, []);
 
   console.log('\n' + (bad ? bad + ' FAILURES' : 'all portal-render checks passed'));
   process.exit(bad ? 1 : 0);

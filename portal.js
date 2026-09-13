@@ -301,8 +301,13 @@
             return;
         }
 
-        var upcoming = list.filter(function (b) { return !b.completed; });
-        var past     = list.filter(function (b) { return b.completed; });
+        /* r43. A cancelled visit is neither upcoming nor past — it is not
+           going to happen, and it did not happen. Leaving it in Upcoming with
+           a label would put a visit nobody is coming to at the top of the
+           page, which is the one place it must never be. */
+        var upcoming  = list.filter(function (b) { return !b.completed && !b.cancelled; });
+        var past      = list.filter(function (b) { return b.completed; });
+        var cancelled = list.filter(function (b) { return b.cancelled && !b.completed; });
 
         if (upcoming.length) {
             bodyEl.appendChild(el('h2', 'portal__h', 'Upcoming'));
@@ -319,6 +324,11 @@
         if (past.length) {
             bodyEl.appendChild(el('h2', 'portal__h', 'Past'));
             past.forEach(function (b) { bodyEl.appendChild(bookingRow(b)); });
+        }
+        /* Last, because it is the least actionable thing on the page. */
+        if (cancelled.length) {
+            bodyEl.appendChild(el('h2', 'portal__h', 'Cancelled'));
+            cancelled.forEach(function (b) { bodyEl.appendChild(bookingRow(b)); });
         }
     }
 
@@ -492,10 +502,189 @@
         return 'That did not go through. Please try again.';
     }
 
+    /**
+     * CHANGE OR CANCEL ONE VISIT (r43).
+     *
+     * Two actions with deliberately different weights. Moving a visit is
+     * ordinary and undoable — pick another time, and another. Cancelling gives
+     * the slot back to somebody else, so it asks twice, and the confirming
+     * button says what it does rather than "Yes".
+     *
+     * NO window.confirm. A browser modal cannot be styled, blocks the page
+     * while it is open, and on a phone arrives detached from the booking it
+     * refers to — the customer is asked "are you sure?" about something they
+     * can no longer see. An inline step keeps the visit on screen.
+     *
+     * THE TWO HALVES DEGRADE SEPARATELY. Moving needs serve-slots.js; calling
+     * off does not. A missing module must not take away a customer's ability to
+     * cancel a visit nobody is coming to — that failure would put them on the
+     * phone to stop a cleaner arriving.
+     *
+     * NOTHING IS REDRAWN OPTIMISTICALLY. Both paths re-read the whole account
+     * on success, exactly as confirming a plan does: a visit somebody believes
+     * is moved and is not is the worst failure this page has.
+     */
+    function scheduleControls(b) {
+        var wrap   = el('div', 'sched');
+        var picked = { date: '', time: '' };
+
+        var row = el('div', 'sched__row');
+        var moveBtn = null;
+        if (typeof ServeSlots !== 'undefined') {
+            moveBtn = el('button', 'sched__btn', 'Change time');
+            moveBtn.type = 'button';
+            row.appendChild(moveBtn);
+        }
+        var cancelBtn = el('button', 'sched__btn sched__btn--quiet', 'Cancel visit');
+        cancelBtn.type = 'button';
+        row.appendChild(cancelBtn);
+        var status = el('span', 'tk-save');
+        row.appendChild(status);
+        wrap.appendChild(row);
+
+        /* THE MOVE HALF IS BUILT ONLY WHERE IT CAN WORK. Without the scheduler
+           there is no agenda to populate, so a "Move this visit" button could
+           never be revealed — building one anyway leaves a control in the page
+           that no sequence of clicks can reach. The cancel half below is built
+           unconditionally, because it needs nothing. */
+        var pickWrap = null, goRow = null, go = null;
+        if (moveBtn) {
+            pickWrap = el('div', 'sched__pick');
+            pickWrap.hidden = true;
+            wrap.appendChild(pickWrap);
+
+            /* Revealed only once a time is chosen, so there is never a button
+               that would post an empty slot. */
+            goRow = el('div', 'sched__go');
+            goRow.hidden = true;
+            /* ITS OWN CLASS, NOT THE PLAN CARD'S. Borrowing `plan__cta` here
+               put a second element answering to the plan card's name into every
+               open booking — and because bookings render ABOVE the card,
+               anything looking for "the plan's button" found this one instead.
+               It cost ten assertions the first time it ran. A class name is an
+               identity. */
+            go = el('button', 'sched__move', 'Move this visit');
+            go.type = 'button';
+            goRow.appendChild(go);
+            wrap.appendChild(goRow);
+        }
+
+        var confirmRow = el('div', 'sched__confirm');
+        confirmRow.hidden = true;
+        confirmRow.appendChild(el('p', 'sched__warn',
+            'Cancelling gives this time back to another customer. We cannot ' +
+            'promise the same slot if you change your mind.'));
+        var yes = el('button', 'sched__yes', 'Yes, cancel this visit');
+        yes.type = 'button';
+        var no  = el('button', 'sched__btn', 'Keep it');
+        no.type = 'button';
+        confirmRow.appendChild(yes);
+        confirmRow.appendChild(no);
+        wrap.appendChild(confirmRow);
+
+        /* One place both paths report from, so a failed move and a failed
+           cancellation cannot drift into saying different things. */
+        function failed(btn, code) {
+            btn.disabled = false;
+            status.textContent = changeError(code);
+            status.className = 'tk-save is-bad';
+        }
+
+        if (moveBtn) moveBtn.addEventListener('click', function () {
+            moveBtn.disabled = true;
+            confirmRow.hidden = true;
+            pickWrap.hidden = false;
+            pickWrap.textContent = 'Loading times…';
+
+            ServeSlots.load(SLOTS).then(function (slots) {
+                pickWrap.textContent = '';
+                /* Unreachable, slow, or genuinely nothing open all arrive here
+                   as the same empty list, and mean the same thing to a
+                   customer who needs this visit moved. */
+                if (!slots.length) {
+                    pickWrap.appendChild(el('p', 'tk-note',
+                        'We have no open times on screen right now. Call or email ' +
+                        'us below and we will move it with you.'));
+                    return;
+                }
+                pickWrap.appendChild(ServeSlots.picker(slots, function (date, time) {
+                    picked.date = date;
+                    picked.time = time;
+                    goRow.hidden = false;
+                    status.textContent = '';
+                    status.className = 'tk-save';
+                }));
+            });
+        });
+
+        if (go) go.addEventListener('click', function () {
+            if (!picked.date || !picked.time) return;
+            go.disabled = true;
+            status.textContent = 'Moving…';
+            status.className = 'tk-save';
+
+            postWrite({ kind: 'reschedule', job_id: b.bookingId,
+                        slot_date: picked.date, slot_time: picked.time })
+            .then(function (d) {
+                if (d && d.ok) {
+                    status.textContent = 'Moved';
+                    status.className = 'tk-save is-ok';
+                    return reload();
+                }
+                failed(go, d && d.error);
+            })
+            .catch(function () { failed(go); });
+        });
+
+        /* Asking is not doing. Opening the confirm step sends nothing. */
+        cancelBtn.addEventListener('click', function () {
+            /* BOTH ARE NULL WHEN THE SCHEDULER IS ABSENT, and reaching through
+               them unguarded threw exactly there — taking the cancel button
+               down with it on the one page state where cancelling matters most.
+               Building the two halves separately is only worth anything if this
+               half never assumes the other exists. */
+            if (pickWrap) pickWrap.hidden = true;
+            if (goRow)    goRow.hidden = true;
+            confirmRow.hidden = false;
+        });
+        no.addEventListener('click', function () { confirmRow.hidden = true; });
+
+        yes.addEventListener('click', function () {
+            yes.disabled = true;
+            status.textContent = 'Cancelling…';
+            status.className = 'tk-save';
+
+            postWrite({ kind: 'cancel', job_id: b.bookingId })
+            .then(function (d) {
+                if (d && d.ok) {
+                    status.textContent = 'Cancelled';
+                    status.className = 'tk-save is-ok';
+                    return reload();
+                }
+                failed(yes, d && d.error);
+            })
+            .catch(function () { failed(yes); });
+        });
+
+        return wrap;
+    }
+
+    /* Each of these is a real state rather than a generic failure: the time
+       went stale between loading the list and choosing from it, the visit is
+       too close to change without a person, or it is already gone. */
+    function changeError(code) {
+        if (code === 'bad_slot')  return 'That time is no longer available. Please pick another.';
+        if (code === 'too_late')  return 'That visit is too soon to change online. Please call us.';
+        if (code === 'cancelled') return 'That visit is already cancelled.';
+        if (code === 'closed')    return 'That booking is finished, so it can no longer be changed.';
+        return 'That did not go through. Please try again.';
+    }
+
     /** The title line is service + date, as asked; the detail opens on click. */
     function bookingRow(b) {
         var det = document.createElement('details');
-        det.className = 'pb' + (b.completed ? ' pb--done' : '');
+        det.className = 'pb' + (b.completed ? ' pb--done' : '') +
+                               (b.cancelled ? ' pb--cancelled' : '');
         det.setAttribute('data-live-key', b.bookingId);
 
         var sum = document.createElement('summary');
@@ -512,6 +701,20 @@
         /* One definition, in serve-scope.js beside the data it renders. */
         if (typeof ServeScope !== 'undefined') {
             add(inner, ServeScope.block(b.serviceCode, b.serviceLabel));
+        }
+        /* r43. Called off. It keeps its summary line, so the customer can see
+           what it was they cancelled, and carries nothing that could be acted
+           on: no payment button, no partner card, no instructions, no controls.
+           Checked BEFORE `completed` because a cancelled visit that an operator
+           later stamps as completed is a data problem to look at, not a receipt
+           to show the customer. */
+        if (b.cancelled) {
+            sum.appendChild(el('span', 'pb__tag', 'Cancelled'));
+            inner.appendChild(el('p', 'tk-note',
+                'This visit was cancelled and nobody is coming. ' +
+                'Book again whenever you need us.'));
+            det.appendChild(inner);
+            return det;
         }
         if (b.completed) {
             if (typeof ServePhotos !== 'undefined') {
@@ -580,6 +783,11 @@
             },
         }));
         if (b.atBooking) add(inner, line('What you told us when you booked', b.atBooking));
+
+        /* Last in the panel, deliberately. Everything above is something the
+           customer is adding to the visit; this is the pair of actions that
+           change whether it happens at all. */
+        add(inner, scheduleControls(b));
 
         det.appendChild(inner);
         return det;

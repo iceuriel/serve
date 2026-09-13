@@ -13,6 +13,129 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-13, Claude Code: r43, reschedule & cancel
+
+**COMMITTED, NOT DEPLOYED. Paste `apps-script/webhook.gs` into Leads MASTER
+BEFORE the site is pushed.** This is the order that matters and it is not
+optional here: the site half puts live "Change time" and "Cancel visit"
+buttons on every open booking, and the deployed r42 server answers
+`unknown_kind` to both. A customer would tap Cancel, be told it did not go
+through, and reasonably conclude their visit is still booked. Script first,
+site second — the rule in CLAUDE.md, and the same trap r42 avoided.
+
+Verify the paste took by opening the `/exec` URL: it must answer
+`"version":"2026-09-13 r43"`. Saving the editor is not deploying; only the
+stamp can tell those apart.
+
+### What shipped
+
+**A customer can move a booked visit, or call it off.** Two portal writes
+(`reschedule`, `cancel`) on a booking they already have, offered at the bottom
+of an open booking panel under everything they might add to the visit —
+because these are the two controls that change whether it happens at all.
+Moving reads times from `/api/slots` through the same horizon rules the
+booking form uses. Cancelling asks twice, inline, and says what it costs them.
+
+**This is the first code in the system that ever GIVES CAPACITY BACK.**
+`releaseAvailabilitySlot()` closes the "nothing releases a slot" open item that
+has stood in SCHEMA since r5. Every cancellation before today left its
+`AVAILABILITY` row reading `booked` forever — capacity leaking one cancellation
+at a time, invisibly. **Those rows are still out there and are worth a look.**
+It matches on `job_id`, never on date and time (after a hand-resolved conflict
+the calendar square can belong to somebody else), and never touches `held`,
+which is an operator's own diary rather than public capacity.
+
+**THE ANCHOR IS UNTOUCHED BY BOTH WRITES.** That is the property this release
+exists to protect. `anchor_date`/`anchor_time` is the beat every later visit is
+counted from; moving October's clean does not move the cadence, and cancelling
+October does not cancel November. Writing a new time back onto the anchor would
+let one one-off change silently redefine the schedule — the drift that walks an
+every-other-Tuesday onto a different weekday over months with nobody deciding
+it. Nothing in either write path touches `RECURRING_PLANS` at all.
+
+**A cancelled row is kept, never deleted.** `job_status` reads `cancelled` and
+the row keeps its price, address, instructions and attribution. Deleting it
+would quietly stop every count of "work booked" from including work that was
+booked and given back. The portal renders it in its own **Cancelled** section,
+struck through, with no payment button and no controls.
+
+**`vendor_id` is never overwritten by a move.** It is ops-owned. Where a
+dispatcher has already assigned the job, a new slot belonging to another
+company is a clash for a human, and the ops email says so in as many words.
+`setJobCells()` **throws** on any ops-owned column rather than skipping it — a
+customer-facing path must not become the back door onto a hand entry.
+
+**`cancel_notice_hours` is built, tested, and OFF.** A notice window is a
+customer promise with a refund question attached, and both are the founder's
+open decisions. The default is `0`, so nothing is enforced; put a number in Ops
+`SETTINGS` and it starts working with no deploy. Out-of-range values are
+refused and logged, never clamped — guessing what `99999` meant would lock
+customers out of their own bookings.
+
+### Two real defects, both caught by the new tests rather than in production
+
+**The release gave back the slot the move had just booked.** A reschedule books
+the new row under the SAME `job_id` before releasing the old one, so for that
+instant two booked rows carry that id — and "free every row for this job" freed
+both. The customer would hold a confirmation for a slot reading `open` that the
+next visitor could buy. The caller now passes the row it just took, excluded by
+number. Found by reasoning through the ordering while writing the test for it.
+
+**The already-there guard never once fired, and the cause is a class of bug
+worth remembering.** It compared `booking.scheduledDate`/`startTime` against
+the browser's slot values. But `getBooking()` returns **display** strings:
+`timeCellText` appends " ET" to anything reading as a clock time, so the
+comparison was `"1:00 PM ET" === "1:00 PM"` — false forever. A repeated move
+therefore re-booked an already-booked row (a conflict, so nothing was taken)
+and then released the row the customer was holding. It now compares the RAW
+cells through `slotTimeLabel`, the same normaliser that matches AVAILABILITY
+rows. **`getBooking()`'s `startTime` is for showing a human, never for
+matching.** The same bug had also made `wallClockMs` fall back to midnight,
+measuring the notice window from an instant up to a day off; its parser is no
+longer anchored at the end of the string.
+
+### A class-name collision cost ten assertions
+
+The move button first reused `plan__cta plan__go`. Bookings render ABOVE the
+plan card, so every "find the plan's button" in the existing render tests found
+the booking's button instead, and r42's section D/E/F went red. It now carries
+its own `sched__move`. A class name is an identity, not styling.
+
+### Verified
+
+- **27/27 test files pass.** `portal.test.js` gained section 24 (the server
+  side) and `portal-render.test.js` gained G/H/I/J, which drive the real
+  `portal.js` through clicks — including with `serve-slots.js` deliberately not
+  loaded, because the two halves degrade separately: a missing scheduler may
+  cost the move control but must never cost the ability to stop a cleaner
+  arriving. That path threw the first time it ran and is now asserted.
+- **19 deliberate mutations, all 19 caught, each on a NAMED assertion** rather
+  than on a crash somewhere else — the r40 rule, checked explicitly by the
+  runner. They covered: the anchor being dragged along, the release not being
+  told which row was just booked, the already-there guard disabled, the ET
+  regression restored, `held` released, the release ignoring `job_id`,
+  ownership falling back to any booking, a cancelled visit acted on twice, the
+  row not marked, an ops column written, the notice window unenforced, imposed
+  when unset, and clamped instead of ignored, the anchored clock parser, and
+  five browser-side breaks. Both files green again after restore.
+- `scripts/build-site.sh` runs clean. **No new file this release** —
+  `portal.js` and `style.css` are already on the allow-list, and `_site/` is
+  gitignored and untracked, so there is nothing to stage into the commit.
+- **NOT VERIFIED IN PRODUCTION, because nothing is deployed.** Production is
+  still r42. No probe of a live r43 has been made and none can be until the
+  paste happens.
+
+**Not mine, left alone:** `AGENTS.md` and `CLAUDE.md` still carry uncommitted
+continuity edits from the founder or Codex, and two image files are untracked.
+None are in this commit.
+
+**STILL QUEUED:** the portal settings tab for the plan and home layout. Also
+worth deciding, both the founder's: the notice window number (the lever is
+live and reads `0`), and whether the availability feed's cold start gets a
+warm-up ping — it now degrades the reschedule agenda too, not just booking.
+
+---
+
 ## Current work — 2026-09-13, Claude Code: r42, confirm & schedule
 
 **DEPLOYED AND VERIFIED IN PRODUCTION. Both halves, in the right order.**
