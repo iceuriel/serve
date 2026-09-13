@@ -147,7 +147,11 @@ function build(o) {
     post: p => JSON.parse(sandbox.doPost({ postData: { contents: JSON.stringify(p) } }).getContent()) };
 }
 
-/* frequency biweekly + "First Clean" => CLEAN_STANDARD. */
+/* A First Clean sold with a biweekly plan. This resolves to CLEAN_DEEP: the
+   cadence describes the visits after this one, and the visit being dispatched
+   is deep-clean work. It said CLEAN_STANDARD until r36, which is why the
+   vendor rows below declare CLEAN_DEEP — they are declaring the service this
+   booking actually is. */
 const BASE = {
   event: 'quote_reserved', event_type: 'reservation',
   timestamp: '2026-07-28T14:00:00.000Z', submitted_at: '2026-07-28T14:00:00.000Z',
@@ -208,7 +212,7 @@ console.log('\n=== 2a. a vendor who declared other work is skipped ===');
 
 console.log('\n=== 2b. preferred outranks an undeclared vendor ===');
 {
-  const C = build({ services: [['VEN-0002','CLEAN_STANDARD','TRUE','preferred','TRUE','']] });
+  const C = build({ services: [['VEN-0002','CLEAN_DEEP','TRUE','preferred','TRUE','']] });
   post(C);
   t('VEN-0002 wins on preference despite being second in the sheet',
     bookedVendor(C) === 'VEN-0002', bookedVendor(C));
@@ -217,8 +221,8 @@ console.log('\n=== 2b. preferred outranks an undeclared vendor ===');
 console.log('\n=== 2c. avoid loses to neutral ===');
 {
   const C = build({ services: [
-    ['VEN-0001','CLEAN_STANDARD','TRUE','avoid','TRUE',''],
-    ['VEN-0002','CLEAN_STANDARD','TRUE','neutral','TRUE',''],
+    ['VEN-0001','CLEAN_DEEP','TRUE','avoid','TRUE',''],
+    ['VEN-0002','CLEAN_DEEP','TRUE','neutral','TRUE',''],
   ] });
   post(C);
   t('neutral VEN-0002 beats avoid VEN-0001', bookedVendor(C) === 'VEN-0002', bookedVendor(C));
@@ -226,7 +230,7 @@ console.log('\n=== 2c. avoid loses to neutral ===');
 
 console.log('\n=== 2d. an inactive declaration does not count ===');
 {
-  const C = build({ services: [['VEN-0002','CLEAN_STANDARD','TRUE','preferred','FALSE','']] });
+  const C = build({ services: [['VEN-0002','CLEAN_DEEP','TRUE','preferred','FALSE','']] });
   post(C);
   t('inactive row ignored, sheet order stands', bookedVendor(C) === 'VEN-0001', bookedVendor(C));
 }
@@ -282,7 +286,7 @@ console.log('\n=== 2f. unassigned capacity ===');
       [cellDate(2026, 8, 14), '9:00 AM', 'VEN-0001', 'open', '', '', ''],
       [cellDate(2026, 8, 14), '9:00 AM', '',         'open', '', '', ''],
     ],
-    services: [['VEN-0001','CLEAN_STANDARD','FALSE','neutral','TRUE','']],
+    services: [['VEN-0001','CLEAN_DEEP','FALSE','neutral','TRUE','']],
   });
   post(C);
   t('unassigned beats a vendor who does not offer the service',
@@ -292,8 +296,8 @@ console.log('\n=== 2f. unassigned capacity ===');
 console.log('\n=== 2e. ties keep sheet order ===');
 {
   const C = build({ services: [
-    ['VEN-0001','CLEAN_STANDARD','TRUE','preferred','TRUE',''],
-    ['VEN-0002','CLEAN_STANDARD','TRUE','preferred','TRUE',''],
+    ['VEN-0001','CLEAN_DEEP','TRUE','preferred','TRUE',''],
+    ['VEN-0002','CLEAN_DEEP','TRUE','preferred','TRUE',''],
   ] });
   post(C);
   t('first row wins among equals', bookedVendor(C) === 'VEN-0001', bookedVendor(C));
@@ -313,7 +317,7 @@ console.log('\n=== 3. no qualified vendor is a flag, not a refusal ===');
   t('slot still marked booked', bookedVendor(C) === 'VEN-0001');
   const body = C.mails.map(m => m.body).join('');
   t('notification says it needs a human', /NEEDS A HUMAN/.test(body));
-  t('and names the service it cannot do', /CLEAN_STANDARD/.test(body));
+  t('and names the service it cannot do', /CLEAN_DEEP/.test(body));
   t('JOBS still records who is holding it', jobsVendor(C) === 'VEN-0001', jobsVendor(C));
 }
 

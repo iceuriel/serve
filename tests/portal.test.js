@@ -1106,5 +1106,51 @@ head('r26: the booking text');
     /SRV-20260920-EEEEEE/.test(smsLogs));
 }
 
+
+/* ------------------------------------------------------------------
+   r36 — a first clean sold with a plan is still a first clean.
+
+   Reported from a real test booking: the customer chose a First Clean AND a
+   recurring cadence, and their portal called the upcoming visit a recurring
+   clean. The cadence describes what happens after this visit.
+   ------------------------------------------------------------------ */
+head('20. r36 — the cadence does not rename the visit');
+
+t('a first clean on a weekly plan is a first clean',
+  S.serviceCodeOf('First Clean', 'weekly') === 'CLEAN_DEEP',
+  S.serviceCodeOf('First Clean', 'weekly'));
+t('and on biweekly', S.serviceCodeOf('First Clean', 'biweekly') === 'CLEAN_DEEP');
+t('and on monthly', S.serviceCodeOf('First Clean', 'monthly') === 'CLEAN_DEEP');
+t('a first clean on its own is unchanged',
+  S.serviceCodeOf('First Clean', 'once') === 'CLEAN_DEEP');
+/* The cadence still names the service when nothing else does — this is what a
+   genuine recurring booking stores in service_type. */
+t('a recurring booking is still a recurring clean',
+  S.serviceCodeOf('standard', 'biweekly') === 'CLEAN_STANDARD',
+  S.serviceCodeOf('standard', 'biweekly'));
+t('a one-off with no service named is still a deep clean',
+  S.serviceCodeOf('', 'once') === 'CLEAN_DEEP');
+/* Move-out is decided before either and must stay that way: it is bookable on
+   a plan too, and it is neither of the other two. */
+t('move-out wins over any cadence',
+  S.serviceCodeOf('Move In / Move Out', 'weekly') === 'CLEAN_MOVEOUT');
+
+/* End to end, because the resolver being right is not the same as the portal
+   showing it. This is the shape of the booking that was reported. */
+seedJob('SRV-20261001-PLAN01', 'uriel@example.com', 'PROP-0001', { frequency: 'weekly' });
+const P20 = get({ portal: 'CON-0001', t: MINE });
+const planned = (P20.bookings || []).filter(b => b.bookingId === 'SRV-20261001-PLAN01')[0];
+t('the booking is in the portal', !!planned, 'SRV-20261001-PLAN01');
+t('and it is titled as the first clean they booked',
+  !!planned && planned.serviceLabel === 'First clean',
+  planned && planned.serviceLabel);
+t('the plan they chose is reported alongside the visit',
+  !!planned && planned.frequency === 'weekly', planned && planned.frequency);
+/* A one-off booking has a cadence too — "once" — and it must not read as a
+   plan. The renderer decides what to show; the payload just tells the truth. */
+const oneOff = (P20.bookings || []).filter(b => b.bookingId === 'SRV-20260920-AAAAAA')[0];
+t('a one-off booking reports once, not blank',
+  !!oneOff && oneOff.frequency === 'once', oneOff && oneOff.frequency);
+
 console.log('\n' + (bad ? bad + ' FAILURES' : 'ALL ASSERTIONS PASSED'));
 process.exit(bad ? 1 : 0);

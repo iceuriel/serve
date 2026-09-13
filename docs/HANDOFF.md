@@ -13,6 +13,75 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-13, Claude Code: r36, the cadence does not rename the visit
+
+**Committed, NOT deployed.** Paste `apps-script/webhook.gs` into Leads MASTER.
+No site files changed, so the push is independent of it.
+
+**Reported from a real test booking.** A customer chose a First Clean AND a
+recurring cadence, and his portal titled the upcoming visit "Recurring clean".
+The visit he is about to receive is a deep clean; the recurring part starts
+after it.
+
+**Cause.** `serviceCodeOf()` asked the frequency before it asked what was
+booked, so any first clean sold with a plan resolved to `CLEAN_STANDARD`. The
+docblock directly above it has described the correct rule since it was written
+— "a First Clean on a biweekly plan is the start of a recurring relationship,
+and a First Clean on its own is a deep clean" — and only the order of two lines
+disagreed with it. Same shape as the availability.gs header in r33: the prose
+was right and the code was not.
+
+**THIS MOVED A DISPATCH DECISION, not just a label.** `serviceCodeOf` has two
+callers. One is `getBooking`, which is the label on every surface. The other
+feeds `bookAvailabilitySlot`, which passes it to `slotRank(vendorId,
+serviceCode)` — so bookings of this shape were being matched against vendors
+who declared `CLEAN_STANDARD`, and are now matched against `CLEAN_DEEP`. A
+partner who offers standard but not deep no longer ranks first for a first
+clean. That is the correct behaviour — it is deep-clean work — but it is a live
+change to who gets sent. **Prices are untouched**: they are stamped on the JOBS
+row at booking and never derived from this function.
+
+**The portal booking row now carries `frequency`.** A deliberate whitelist
+addition: naming the service correctly still does not explain why someone who
+asked for weekly upkeep is looking at a first clean, and the projected
+recurring visit (queued below) cannot be derived without the cadence. The
+per-job ticket has carried it since r14; only the portal row left it out.
+
+**The dispatch suite was realigned, and the interesting part is not the
+failures.** `tests/slot-dispatch.test.js` books a First Clean on a biweekly
+plan and its premise comment asserted that resolves to `CLEAN_STANDARD` — the
+bug, written down as the fixture's starting assumption. Three assertions failed
+honestly. FOUR MORE WERE PASSING FOR THE WRONG REASON and are the ones worth
+remembering: under `CLEAN_DEEP` those vendors are disqualified for declaring a
+*different service*, not for the flag each test is actually about — 2d stopped
+exercising `active=FALSE`, 2e tied two DISQUALIFIED vendors instead of two
+qualified equals, and 2f stopped exercising `offers=FALSE`. All seven updated,
+with the false premise comment rewritten.
+
+**Verified.** 26/26 test files pass. Three deliberate mutations, each failing a
+specific assertion: restoring the reported bug (cadence decides again), making
+every booking a deep clean, and letting move-out stop being decided first.
+webhook.gs restored afterwards.
+
+**QUEUED — the rest of the same request, in the founder's stated order:**
+1. A scope dropdown on each booking ticket, rendered per service from
+   `SERVE_SCOPE`. It lives in `script.js` (which `/h` and `/j` never load), so
+   this means extracting it to `serve-scope.js` loaded by all four pages,
+   adding it to three `cp` lines in build-site.sh, and concatenating it in
+   `pricing-and-services.test.js`, which reaches it by slicing script.js.
+   NOTE: the booking-flow accordion (`INCLUDED_FIRST`) only knows First vs
+   Move-out and has no recurring variant, so it cannot be the source.
+2. A projected next recurring visit when a first clean is booked with a plan
+   (weekly +7d, biweekly +14d, monthly +1 month, same time).
+   **OPEN DECISION, ask the founder before building:** is that second visit a
+   REAL JOBS row or a PROJECTION? A projection has no vendor, no slot and no
+   price, and item 3 cannot cancel or reschedule something that is not a row.
+3. Cancel and reschedule buttons per upcoming booking, reschedule tied to the
+   AVAILABILITY feed with an earlier/later preference fallback. The founder
+   asked for this one last.
+
+---
+
 ## Current work — 2026-09-13, Claude Code: r34 and r35, the partner card
 
 **r34 is committed, pushed (`0b3d711`) and NOT yet deployed. r35 is committed

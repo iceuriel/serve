@@ -1,7 +1,26 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-13  ·  master  ·  r35 — reviews and work photos
+ * VERSION STAMP:  2026-09-13  ·  master  ·  r36 — the cadence does not rename the visit
+ *
+ * r36 = THE CADENCE DESCRIBES THE PLAN, NOT THIS VISIT. A customer who booked
+ *      a First Clean and asked for a weekly plan opened their portal and saw
+ *      "Recurring clean" as the upcoming service. The visit they are about to
+ *      receive is a deep clean; the weekly part starts after it.
+ *
+ *      serviceCodeOf() asked the frequency before it asked what was booked, so
+ *      any first clean with a plan attached resolved to CLEAN_STANDARD. The
+ *      docblock directly above it has described the correct rule since it was
+ *      written — "a First Clean on a biweekly plan is the start of a recurring
+ *      relationship, and a First Clean on its own is a deep clean" — and only
+ *      the order of two lines disagreed with it.
+ *
+ *      THIS ALSO MOVED A DISPATCH DECISION. The same function tells
+ *      bookAvailabilitySlot which service to rank vendors against, so those
+ *      bookings were matched on CLEAN_STANDARD. A first clean is deep-clean
+ *      work and is now matched as such — a partner who offers standard but not
+ *      deep no longer ranks first for it. Prices are untouched: they are
+ *      stamped on the row at booking and never derived from this.
  *
  * r35 = BORROWED REVIEWS AND WORK PHOTOS, TWO NEW OPS TABS. A partner card
  *      could say a company was rated 4.8 but never show a word anyone wrote or
@@ -1229,7 +1248,7 @@ function doGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-13 r35" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-13 r36" });
 }
 
 
@@ -1371,6 +1390,11 @@ function serviceCodeOf(label, frequency) {
   var s = String(label || "").toLowerCase();
   var f = String(frequency || "once").toLowerCase();
   if (s.indexOf("move") !== -1) return "CLEAN_MOVEOUT";
+  /* r36. WHAT WAS BOOKED WINS OVER THE CADENCE. This test used to sit below the
+     frequency one, which made every first clean sold with a plan report itself
+     as a recurring clean — to the customer, to the crew, and to the vendor
+     ranking. The plan is real, but it describes the visits after this one. */
+  if (s.indexOf("first") !== -1 || s.indexOf("deep") !== -1) return "CLEAN_DEEP";
   if (f && f !== "once")        return "CLEAN_STANDARD";
   return "CLEAN_DEEP";
 }
@@ -2854,6 +2878,13 @@ function buildPortalModel(ss, contact) {
         photos:       publicBookingPhotos(ss, b.bookingId),
         serviceCode:  b.serviceCode,
         serviceLabel: SERVICE_CODES[b.serviceCode] || b.serviceLabel,
+        /* r36. The plan the customer chose, beside the visit they are getting.
+           Without it the portal could name the service correctly and still not
+           explain why someone who asked for weekly upkeep is looking at a first
+           clean — which is the confusion that reported the r36 bug in the first
+           place. The per-job ticket has carried this since r14; only the portal
+           row left it out. */
+        frequency:    b.frequency,
         date:         b.scheduledDate,
         time:         b.startTime,
         when:         b.scheduleSummary,
