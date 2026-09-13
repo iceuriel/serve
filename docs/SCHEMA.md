@@ -992,6 +992,34 @@ workbook changed accounts — keep it current.
 > not a guarantee — a revision that changes an existing column's meaning would
 > break it, and would need the deployment to go first.
 
+#### Both are kept warm by a cron (2026-09-13)
+
+Apps Script sleeps an app that nobody has called, and the next caller pays the
+cold start. `wrangler.jsonc` therefore carries **two** cron triggers, and
+`scheduled()` in `src/worker.js` branches on `controller.cron`:
+
+| cron | what runs |
+|---|---|
+| `17 8 * * *` | `cleanupPhotoStorage()` — deletes purged room photos from R2 |
+| `*/5 * * * *` | `warmUpstreams()` — a GET to each `/exec`, purely to keep the container alive |
+
+**The strings are duplicated in `wrangler.jsonc` and in the `CRON_*` constants**
+— Cloudflare reads the config, the Worker reads the event — so a test asserts
+the two agree. Drift is silent and one-directional: the daily cleanup would
+simply stop running with nothing anywhere reporting it. For the same reason the
+destructive job runs ONLY on an exact match and any unrecognised schedule falls
+through to the harmless ping.
+
+The ping is a plain GET, never `?nocache=1`: the goal is a warm container, and a
+cache hit still executes the script. Its timeout is 25s — deliberately far
+longer than the 8s a customer-facing call gets, because nobody is waiting behind
+it and absorbing the cold start here is the entire point.
+
+**A cron that failed to register looks exactly like one that is not working.**
+After any deploy that changes `triggers`, confirm the schedules are listed under
+the Worker's Settings → Triggers in the Cloudflare dashboard; `wrangler deploy
+--dry-run` validates the config but does not report them.
+
 **Deploy settings both need:** Execute as **Me**, Who has access **Anyone**.
 Anything else and the browser gets a login page instead of JSON.
 
@@ -1037,9 +1065,19 @@ both confirmed returning 404.
   **Nothing breaks:** the booking form falls back to the earlier/later radios
   and the portal's plan card says it has no open times to show. But both are
   degraded for the first visitor after an idle period, and that visitor now
-  includes anyone confirming a recurring plan. The fix is a warm-up ping or a
-  longer timeout for this one route — not a change to either caller, which are
-  both behaving as designed.
+  includes anyone confirming a recurring plan or rescheduling a visit.
+
+  **MITIGATED 2026-09-13 by a warm ping, not cured.** A second cron trigger
+  (`*/5 * * * *`) calls `warmUpstreams()` in the Worker, which GETs both Apps
+  Script apps so a container is already awake when a customer arrives. The
+  visitor-facing timeouts were deliberately left alone: raising them would not
+  remove the wait, only move it into the customer's browser. **Low traffic is
+  what made this bite** — idle is the normal state of a quiet site, so "the
+  first visitor after idle" was close to every visitor. It is a mitigation
+  because a cold start is still possible: right after a Worker deploy, if the
+  cron misses, or if Google's undocumented idle threshold is shorter than five
+  minutes. Watch for `warm ... failed` lines in the Worker logs — that is the
+  only place a failing ping is ever visible.
 - Part of the original build spec was lost to a truncated paste — the `src` /
   "skins" / "redirects" sub-items of Task 1. All three are now built: `src` by
   the attribution work, skins and redirects re-specified and shipped 2026-07-28.

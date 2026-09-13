@@ -33,7 +33,18 @@
   "r2_buckets": [
     { "binding": "BOOKING_PHOTOS", "bucket_name": "serve-booking-photos" }
   ],
-  "triggers": { "crons": ["17 8 * * *"] },
+  // TWO SCHEDULES, DOING DIFFERENT THINGS. src/worker.js branches on
+  // controller.cron, so these strings must match the CRON_* constants there
+  // EXACTLY — a test asserts they do. Editing one without the other fails
+  // silently: the daily cleanup simply stops happening and nothing reports it.
+  //
+  //   17 8 * * *    daily photo-storage cleanup — deletes objects from R2
+  //   */5 * * * *   keeps both Apps Script apps warm; see warmUpstreams()
+  //
+  // The five-minute interval is matched to the availability feed's own 5-minute
+  // cache, so a ping lands about as the cache expires and the next visitor gets
+  // a warm container AND a fresh response.
+  "triggers": { "crons": ["17 8 * * *", "*/5 * * * *"] },
 
   "assets": {
     "directory": "./_site",

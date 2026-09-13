@@ -13,6 +13,106 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-13, Claude Code: the warm ping (Worker only)
+
+**NO APPS SCRIPT PASTE. `webhook.gs` is untouched and stays at r43** — nothing
+here changes the server, so there is no script-before-site ordering to respect.
+This is `src/worker.js` + `wrangler.jsonc`, and it deploys by pushing.
+
+### The problem it fixes
+
+Both upstreams are Apps Script web apps, and Apps Script sleeps an app nobody
+has called. The first request after that cold-starts, sometimes past the
+Worker's 8s budget for `/api/slots`. **What a customer sees is not an error** —
+every caller treats a failed feed as "no times available" by design, so a cold
+start is indistinguishable from genuine unavailability: the booking form drops
+to the earlier/later radios, the plan card says it has no times, and (since
+r43) somebody trying to move a visit is told to call. Nothing is logged where
+anyone would look.
+
+**Low traffic is what made this bite.** Idle is the normal state of a quiet
+site, so "the first visitor after idle" was close to *every* visitor. It gets
+better on its own as real traffic arrives, which is the reverse of how these
+usually go — and it is worst right now, before any spend on traffic.
+
+### What shipped
+
+A second cron trigger, `*/5 * * * *`, calling `warmUpstreams()` — a plain GET
+to each `/exec` purely to keep a container alive. Five minutes matches the
+feed's own 5-minute cache, so a ping lands about as the cache expires.
+
+**Both upstreams, not just the feed.** The webhook is the more expensive one to
+leave cold: it backs `/api/submit`, `/api/portal`, `/api/job`, `/api/photos`
+and `/api/vendor`, so a cold webhook is a slow portal for everyone and, at
+worst, a booking that exceeds its 12s budget and fails outright. This is
+slightly wider than the availability feed that prompted it, and deliberately so.
+
+**The visitor-facing timeouts were left exactly alone.** Raising them would not
+remove the wait, only move it into the customer's browser and make them watch
+it. The ping's own budget is 25s — long *because* nobody is waiting behind it;
+absorbing the cold start here is the whole point.
+
+**THE DANGEROUS PART WAS THE EXISTING CRON.** `17 8 * * *` already drives
+`cleanupPhotoStorage()`, which deletes objects from R2. One `scheduled()`
+handler now serves both, branching on `controller.cron`. **The destructive job
+runs only on an exact match**; anything unrecognised falls through to the
+harmless ping. That asymmetry is deliberate — a cron string edited in
+`wrangler.jsonc` but not in the worker fails as "photos stop being tidied up",
+which is recoverable and visible, rather than as "the deleter now runs every
+five minutes".
+
+The strings are necessarily duplicated (Cloudflare reads the config, the Worker
+reads the event), so **a test asserts the two agree**, in both directions.
+
+### The mutation run found a vacuous assertion of mine
+
+First run: 11 of 12 caught. The miss was `and nothing destructive is
+triggered` — my own assertion, which **could not fail**. The warm-cron case ran
+against an `ENV` with no `BOOKING_PHOTOS`/`PHOTO_BRIDGE_SECRET`, so
+`cleanupPhotoStorage` returned at its own guard and could never POST no matter
+what the branch did. Deleting the entire cleanup branch left it passing; the
+file only went red on a *different* assertion.
+
+Fixed by running that case against a photo-capable env, so the cleanup genuinely
+*could* fire and the assertion has something to prove. **12 of 12 caught after
+that, each on its named assertion.** This is the same shape as r42's "a guard
+proven only by the guard behind it" — an assertion that cannot fail is not an
+assertion, and only a mutation run says which is which.
+
+### Verified
+
+- **27/27 test files pass.** `worker-proxy.test.js` gained a cron section: both
+  branches, the unknown-schedule fallback, failure logging, the never-rejects
+  contract, the unconfigured-upstream skip, the config↔constant drift guard in
+  both directions, and that the ping's budget exceeds the customer-facing one.
+- **12 deliberate mutations, all 12 caught on a named assertion.**
+- `npx wrangler deploy --dry-run` exits 0 and bundles with every binding
+  resolved. The only warning is the pre-existing `commonjs-variable-in-esm`
+  note about `engine.generated.mjs`.
+
+### NOT verified, and it cannot be from here
+
+**`wrangler --dry-run` does not report trigger registration**, and there is no
+way to confirm from the repo that Cloudflare actually registered the new
+schedule. **A cron that failed to register looks exactly like one that is not
+working** — the site behaves normally either way, which is the whole failure
+mode being fixed.
+
+After the deploy, confirm one of:
+- the Cloudflare build log for this push shows both crons on the deploy step, or
+- the Worker's **Settings → Triggers → Cron Triggers** lists `17 8 * * *` and
+  `*/5 * * * *`.
+
+Then, after the next genuinely idle spell, `warm availability: ok in …ms` lines
+should appear in the Worker logs every five minutes. A `warm … failed` line is
+the only place a failing ping is ever visible.
+
+**This is a mitigation, not a cure.** A cold start is still possible right after
+a Worker deploy, if a cron run is missed, or if Google's undocumented idle
+threshold turns out to be shorter than five minutes.
+
+---
+
 ## Current work — 2026-09-13, Claude Code: r43, reschedule & cancel
 
 **COMMITTED, NOT DEPLOYED. Paste `apps-script/webhook.gs` into Leads MASTER

@@ -1008,6 +1008,148 @@ console.log('\n=== 7. the failure UI exists and is reachable ===');
     typeof health.can_price === 'boolean', health.can_price);
 }
 
+console.log('\n=== CRON TRIGGERS — warm the upstreams, never delete by accident ===');
+{
+  /* The cron strings are read from the WORKER'S OWN CONSTANTS rather than
+     repeated here, so changing an interval means editing two places (the
+     config and the constant) instead of three. What must never drift is those
+     two against each other — that is the assertion at the end of this block,
+     and it is the one that matters: a cron renamed in wrangler.jsonc and not in
+     the worker means the daily cleanup silently stops running forever. */
+  const cronConst = (name) =>
+    (new RegExp('const ' + name + '\\s*=\\s*"([^"]+)"').exec(SRC) || [, ''])[1];
+  const WARM_CRON  = cronConst('CRON_WARM_UPSTREAM');
+  const DAILY_CRON = cronConst('CRON_PHOTO_CLEANUP');
+
+  /* Without this, a renamed constant makes both '' — which equals nothing and
+     would leave every assertion below passing while testing the wrong thing. */
+  t('both cron constants were found in the worker',
+    !!WARM_CRON && !!DAILY_CRON && WARM_CRON !== DAILY_CRON, { WARM_CRON, DAILY_CRON });
+
+  const makeCtx = () => {
+    const pending = [];
+    return { waitUntil: (p) => pending.push(p),
+             settle: () => Promise.allSettled(pending) };
+  };
+  const targetsOf = (calls) => calls.filter(c => c.target).map(c => c.target);
+  const logsOf    = (calls) => calls.filter(c => c.log).map(c => c.log);
+
+  /* An env the photo cleanup COULD run in. Both blocks below use it, and in the
+     warm one that is the whole point: against plain ENV, cleanupPhotoStorage
+     returns at its own `if (!env.BOOKING_PHOTOS …)` guard and can never POST,
+     so "nothing destructive happened" would be true however the branch behaved.
+     A mutation run proved exactly that — deleting the branch left the assertion
+     passing. An assertion that cannot fail is not an assertion. */
+  const PHOTO_ENV = Object.assign({}, ENV, {
+    PHOTO_BRIDGE_SECRET: 'bridge', BOOKING_PHOTOS: { delete: async () => {} } });
+
+  /* ---- the five-minute ping ---- */
+  {
+    const { worker, calls } = loadWorker(ok('{"ok":true,"slots":[]}'));
+    const ctx = makeCtx();
+    await worker.scheduled({ cron: WARM_CRON }, PHOTO_ENV, ctx);
+    await ctx.settle();
+    const targets = targetsOf(calls);
+
+    t('the warm cron pings the availability feed',
+      targets.includes(ENV.AVAILABILITY_URL), targets);
+    /* The webhook backs /api/submit, /api/portal, /api/job and /api/vendor, so
+       it is the more expensive of the two to leave cold. */
+    t('and the booking webhook as well', targets.includes(ENV.WEBHOOK_URL), targets);
+    t('both are GETs, which write nothing',
+      calls.filter(c => c.target).every(c => !c.init || c.init.method === 'GET'));
+    /* THE ASSERTION THAT KEEPS THIS SAFE. cleanupPhotoStorage deletes objects
+       from R2; running it every five minutes is the accident this branch
+       exists to prevent. */
+    t('and nothing destructive is triggered',
+      !calls.some(c => c.init && String(c.init.body || '').includes('booking_photo')));
+  }
+
+  /* ---- the daily cleanup still happens, and only then ---- */
+  {
+    const { worker, calls } = loadWorker(ok('{"ok":true,"photos":[]}'));
+    const ctx = makeCtx();
+    await worker.scheduled({ cron: DAILY_CRON }, PHOTO_ENV, ctx);
+    await ctx.settle();
+
+    t('the daily cron still runs the photo cleanup',
+      calls.some(c => c.init && String(c.init.body || '').includes('booking_photo')));
+    t('and does NOT spend a ping on the feed',
+      !targetsOf(calls).includes(ENV.AVAILABILITY_URL), targetsOf(calls));
+  }
+
+  /* ---- an unrecognised schedule does the harmless thing, loudly ---- */
+  {
+    const { worker, calls } = loadWorker(ok('{}'));
+    const ctx = makeCtx();
+    await worker.scheduled({ cron: '0 0 1 1 *' }, ENV, ctx);
+    await ctx.settle();
+
+    t('an unknown schedule warms rather than deletes',
+      targetsOf(calls).includes(ENV.AVAILABILITY_URL), targetsOf(calls));
+    t('and says so where it will be seen',
+      logsOf(calls).some(m => m.includes('unknown cron schedule')), logsOf(calls));
+  }
+
+  /* ---- every failure mode is a log line, never a rejection ---- */
+  {
+    const { worker, calls } = loadWorker(boom('ETIMEDOUT'));
+    const ctx = makeCtx();
+    let threw = false;
+    try { await worker.scheduled({ cron: WARM_CRON }, ENV, ctx); }
+    catch (_) { threw = true; }
+    const settled = await ctx.settle();
+
+    t('scheduled() never throws on a dead upstream', !threw);
+    t('and the queued work resolves rather than rejecting',
+      settled.every(s => s.status === 'fulfilled'), settled.map(s => s.status));
+    /* A failed ping means the next real visitor eats the cold start. This line
+       is the only place that is ever visible. */
+    t('a failed ping is logged at error level',
+      logsOf(calls).some(m => /warm .* failed/.test(m)), logsOf(calls));
+  }
+
+  /* ---- an unconfigured upstream is skipped, not fatal ---- */
+  {
+    const { worker, calls } = loadWorker(ok('{}'));
+    const ctx = makeCtx();
+    await worker.scheduled({ cron: WARM_CRON },
+                           { WEBHOOK_URL: ENV.WEBHOOK_URL, ASSETS }, ctx);
+    await ctx.settle();
+    /* The call COUNT matters as much as the target. Without warmOne's `if
+       (!url) return`, an undefined URL still reaches fetch — and a target of
+       undefined is filtered out of targetsOf, so the list alone would look
+       identical while a junk request went out every five minutes. */
+    t('a missing feed URL still warms the other upstream, and only it',
+      targetsOf(calls).join() === ENV.WEBHOOK_URL &&
+      calls.filter(c => 'target' in c).length === 1,
+      { targets: targetsOf(calls), fetches: calls.filter(c => 'target' in c).length });
+  }
+
+  /* ---- the config and the code must agree, or a schedule dies silently ---- */
+  {
+    const cfg = fs.readFileSync(path.join(REPO_ROOT, 'wrangler.jsonc'), 'utf8');
+    const m = /"crons"\s*:\s*\[([^\]]*)\]/.exec(cfg);
+    const scheduled = m ? m[1].split(',').map(s => s.trim().replace(/^"|"$/g, ''))
+                              .filter(Boolean) : [];
+
+    t('wrangler.jsonc actually schedules both crons',
+      scheduled.includes(WARM_CRON) && scheduled.includes(DAILY_CRON), scheduled);
+    t('and schedules nothing the worker would not recognise',
+      scheduled.every(c => c === WARM_CRON || c === DAILY_CRON), scheduled);
+  }
+
+  /* ---- the budgets say what they mean ---- */
+  {
+    const warmMs  = Number((/const WARM_TIMEOUT_MS = (\d+)/.exec(SRC) || [, 0])[1]);
+    const slotsMs = Number((/slots:\s*(\d+)/.exec(SRC) || [, 0])[1]);
+    /* The whole point: nobody is waiting behind the ping, so it may absorb a
+       cold start that a customer must never be asked to sit through. */
+    t('the warm ping may wait far longer than a customer ever would',
+      warmMs > slotsMs && warmMs >= 20000, { warmMs, slotsMs });
+  }
+}
+
 console.log('\n' + (bad ? 'FAILURES: ' + bad : 'ALL CHECKS PASSED'));
 process.exit(bad ? 1 : 0);
 })();

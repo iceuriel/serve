@@ -95,9 +95,41 @@ const CAN_PRICE = (() => {
    this Worker's explanatory 502 rather than their fetch aborting blind. */
 const UPSTREAM_TIMEOUT_MS = { submit: 12000, slots: 8000 };
 
+/* THE WARM PING'S BUDGET IS DELIBERATELY THE OPPOSITE OF THE ONES ABOVE. Those
+   are short because a customer is waiting behind them. Nobody is waiting behind
+   this one, and absorbing a slow cold start HERE is the entire point — a ping
+   that gave up after 8s would fail in exactly the case it exists for. */
+const WARM_TIMEOUT_MS = 25000;
+
+/* The cron expressions from wrangler.jsonc, which scheduled() branches on.
+   They are necessarily duplicated — Cloudflare reads the config, this file
+   reads the event — so a test asserts the two agree. */
+const CRON_PHOTO_CLEANUP = "17 8 * * *";
+const CRON_WARM_UPSTREAM = "*/5 * * * *";
+
 export default {
+  /* ONE HANDLER, TWO SCHEDULES. controller.cron says which one fired.
+
+     THE DESTRUCTIVE JOB RUNS ONLY ON AN EXACT MATCH, and anything unrecognised
+     falls through to the harmless one. cleanupPhotoStorage deletes objects from
+     R2 and POSTs to the booking webhook; if a cron string is ever changed in
+     wrangler.jsonc and not here, the failure in this direction is "photos stop
+     being tidied up" — recoverable, and visible in storage. The other
+     direction, an unrecognised schedule running the deleter every five minutes,
+     is not a trade worth the symmetry. */
   async scheduled(controller, env, ctx) {
-    ctx.waitUntil(cleanupPhotoStorage(env));
+    const cron = controller && controller.cron;
+
+    if (cron === CRON_PHOTO_CLEANUP) {
+      ctx.waitUntil(cleanupPhotoStorage(env));
+      return;
+    }
+    if (cron !== CRON_WARM_UPSTREAM) {
+      console.error("unknown cron schedule " + JSON.stringify(cron) +
+                    " — warming only. Check wrangler.jsonc against the CRON_* " +
+                    "constants in src/worker.js.");
+    }
+    ctx.waitUntil(warmUpstreams(env));
   },
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -1478,6 +1510,67 @@ async function photoRequestBytes(request, limit) {
   return result;
 }
 
+
+/* ============================================================
+   KEEPING THE APPS SCRIPT APPS WARM
+   ============================================================
+
+   Both upstreams are Apps Script web apps, and Apps Script puts an app to sleep
+   when nobody has called it for a while. The first request after that has to
+   cold start, which can take longer than the budgets above allow — so THE FIRST
+   VISITOR AFTER A QUIET SPELL is the one who pays for it.
+
+   What they see is not an error, which is what makes this worth fixing rather
+   than watching. Every caller treats a failed feed as "no times available" by
+   design, so a cold start is indistinguishable from genuine unavailability: the
+   booking form quietly drops to the earlier/later radios, the plan card says it
+   has no times, and a customer trying to move a visit is told to call. Observed
+   2026-09-13 — `upstream_unreachable` on one probe and 14 slots moments later,
+   with the feed itself healthy both times.
+
+   LOW TRAFFIC MAKES THIS WORSE, NOT BETTER. Idle is the normal state of a site
+   with few visitors, so "the first visitor after idle" is close to every
+   visitor. It improves on its own as real traffic arrives, which is the reverse
+   of how these things usually go.
+
+   A PING IS THE FIX, NOT A LONGER VISITOR-FACING TIMEOUT. Raising that budget
+   would not remove the wait — it would move it into the customer's browser and
+   make them watch it.
+
+   BOTH UPSTREAMS, not just the feed. The webhook is the slower and more
+   expensive one to lose: it backs /api/submit, /api/portal, /api/job,
+   /api/photos and /api/vendor, so a cold webhook is a slow portal for everyone
+   and, at worst, a booking that exceeds its 12s budget and fails outright.
+   ============================================================ */
+async function warmUpstreams(env) {
+  /* Settled rather than all(): the two are independent, and one being
+     unreachable must not skip the other's ping. */
+  await Promise.allSettled([
+    warmOne(env.AVAILABILITY_URL, "availability"),
+    warmOne(env.WEBHOOK_URL, "webhook"),
+  ]);
+}
+
+/**
+ * One GET, purely to keep the container alive. Never throws — this runs inside
+ * waitUntil, where an unhandled rejection buys nothing a log line does not.
+ *
+ * A PLAIN GET ON PURPOSE. The availability feed caches its own response for
+ * five minutes, and `?nocache=1` would force a full recompute on every ping;
+ * what is wanted is a warm CONTAINER, and a cache hit still runs the script.
+ * The webhook's bare GET is its health stamp, which writes nothing at all.
+ */
+async function warmOne(url, label) {
+  if (!url) return;
+  const started = Date.now();
+  const res = await relay(url, { method: "GET" }, WARM_TIMEOUT_MS);
+  const ms = Date.now() - started;
+  /* Error level on failure, deliberately: a ping that fails means the next real
+     visitor eats the cold start, and this log line is the only place that would
+     ever be visible. */
+  if (res.ok) console.log("warm " + label + ": ok in " + ms + "ms");
+  else console.error("warm " + label + " failed after " + ms + "ms: " + res.error);
+}
 
 async function cleanupPhotoStorage(env) {
   if (!env.BOOKING_PHOTOS || !env.PHOTO_BRIDGE_SECRET || !env.WEBHOOK_URL) return;
