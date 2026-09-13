@@ -22,6 +22,26 @@
         return n;
     }
 
+    var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+                  'July', 'August', 'September', 'October', 'November', 'December'];
+
+    /**
+     * "2026-07-01" -> "July 2026".
+     *
+     * A customer wants to know roughly how long this company has worked with
+     * Serve, and a day number answers a question nobody asked. Anything that is
+     * not a full date is passed through untouched — partner_since is often just
+     * a year ("2024"), and a bare year is already the shortest true thing to
+     * say about a relationship.
+     */
+    function sinceLabel(v) {
+        var s = String(v || '').trim();
+        var m = /^(\d{4})-(\d{2})(?:-\d{2})?$/.exec(s);
+        if (!m) return s;
+        var name = MONTHS[Number(m[2]) - 1];
+        return name ? name + ' ' + m[1] : s;
+    }
+
     /** The assigned partner: logo, name, blurb, and the facts Serve stands behind. */
     function card(v) {
         var wrap = el('div', 'tk-partner');
@@ -42,10 +62,16 @@
         if (v.publicDescription) wrap.appendChild(el('p', 'tk-partner__desc', v.publicDescription));
 
         var facts = [];
-        if (v.partnerSince) facts.push('With Serve since ' + v.partnerSince);
+        if (v.partnerSince) facts.push('With Serve since ' + sinceLabel(v.partnerSince));
         if (v.insuranceVerified) facts.push('Bonded & insured');
-        /* A rating of 0 is "no rating", not zero stars. */
-        if (v.rating) facts.push(v.rating + '★' + (v.reviewCount ? ' (' + v.reviewCount + ')' : ''));
+        /* A rating of 0 is "no rating", not zero stars. WHERE IT CAME FROM IS
+           PART OF THE CLAIM: a bare number beside Serve's own name reads as
+           Serve's own score, so a rating carried over from Google says so. */
+        if (v.rating) {
+            facts.push(v.rating + '★' +
+                       (v.reviewCount ? ' (' + v.reviewCount + ')' : '') +
+                       (v.ratingSource ? ' on ' + v.ratingSource : ''));
+        }
         if (facts.length) wrap.appendChild(el('div', 'tk-partner__facts', facts.join(' · ')));
 
         return wrap;

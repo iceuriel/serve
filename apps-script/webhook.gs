@@ -1,7 +1,19 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-12  ·  master  ·  r33 — the slot keys read that way too
+ * VERSION STAMP:  2026-09-12  ·  master  ·  r34 — partner_since is a date cell too
+ *
+ * r34 = partner_since IS A DATE CELL TOO, AND IT REACHED A CUSTOMER. getVendor
+ *      read it with String(), so an operator formatting that column turned
+ *      every partner card into "With Serve since Wed Jul 01 2026 00:00:00
+ *      GMT-0400 (Eastern Standard Time)". Third time this fault has surfaced:
+ *      r23 on the JOBS cells, r32 on how they are read, and now the OPS
+ *      workbook, which neither release reached. Normalised here through that
+ *      workbook's own timezone; the card turns it into "July 2026".
+ *
+ *      The card also names a rating's source. public_rating is meant to carry
+ *      a number borrowed from somewhere public, and an unattributed one beside
+ *      Serve's own name reads as Serve's own score.
  *
  * r33 = THE SLOT KEYS ARE READ THE SAME WAY THE TICKETS ARE. r32 fixed the
  *      JOBS cells in THIS workbook. The AVAILABILITY cells in the OPS workbook
@@ -1191,7 +1203,7 @@ function doGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-12 r33" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-12 r34" });
 }
 
 
@@ -3314,7 +3326,16 @@ function getVendor(ss, vendorId) {
     internalEmail:     String(v.internal_email || ""),
     logoUrl:           String(v.logo_url || ""),
     publicDescription: String(v.public_description || ""),
-    partnerSince:      String(v.partner_since || ""),
+    /* r34: an operator who formats this column as a date turns the cell into a
+       Date, and String()ing one put "Wed Jul 01 2026 00:00:00 GMT-0400 (Eastern
+       Daylight Time)" on every customer's partner card. Same fault r23 fixed on
+       JOBS and r32 fixed the reading of — this is the OPS workbook, which
+       neither release reached. Normalised to YYYY-MM-DD here, through that
+       workbook's own timezone; how to say it is the card's business, not this
+       whitelist's. A value that is not a date (often just "2024") is untouched. */
+    partnerSince:      isDateValue(v.partner_since)
+                         ? dateCellText(v.partner_since, sheetTimeZone(opsBook()))
+                         : String(v.partner_since || ""),
     insuranceVerified: truthy(v.insurance_verified),
     serviceArea:       String(v.service_area || ""),
     /* Not a service code. "Luxury", "pet-safe", "post-construction" describe

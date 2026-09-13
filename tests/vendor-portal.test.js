@@ -140,7 +140,12 @@ function seedVendor(id, name, over) {
   set('internal_email', 'ops-' + id.toLowerCase() + '@example.com');
   set('public_rating', 4.8); set('public_review_count', 31);
   set('insurance_verified', true); set('client_visible', true);
-  set('default_payout_rate', 45); set('partner_since', '2024');
+  set('default_payout_rate', 45);
+  /* r34: an operator formatting this column hands back a Date, not text.
+     getVendor used to String() it, which put "Wed Jul 01 2026 00:00:00
+     GMT-0400" on the customer's partner card. Seeded the way the live sheet
+     can really be, so the normalisation is what is under test. */
+  set('partner_since', new Date(2026, 6, 1));
   Object.keys(over || {}).forEach(k => set(k, over[k]));
   opsTabs.VENDORS.appendRow(row);
 }
@@ -200,6 +205,10 @@ const V = get({ vendor: 'VEN-0001', t: MINE });
 t('the portal opens', V.ok === true, V.error);
 t('and found the company in Ops', V.company.displayName === 'Beacon Hill Cleaning Co.',
   V.company.displayName);
+t('a date-formatted partner_since is normalised, never stringified',
+  V.company.partnerSince === '2026-07-01', V.company.partnerSince);
+t('and no raw Date wording reaches any vendor surface',
+  !/GMT|00:00:00/.test(JSON.stringify(V)), V.company.partnerSince);
 t('VENDORS is not in Leads MASTER', !leadsTabs.VENDORS);
 
 /* ------------------------------------------------------------------ */

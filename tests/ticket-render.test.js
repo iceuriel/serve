@@ -171,6 +171,37 @@ byClass(noLogo, 'tk-partner__logo').length === 0
   : fail('an empty logo_url still rendered an <img>');
 t('the name still renders', byClass(noLogo, 'tk-partner__name').length, 1);
 
+/* The facts line, which nothing asserted until now — which is why it spent a
+   release able to print a raw Date. */
+const factsOf = (over) => {
+  const n = byClass(SP.card(Object.assign({}, VEN, over || {})), 'tk-partner__facts');
+  return n.length ? n[0]._text : '';
+};
+
+t('the relationship is a month and a year, not a day or a timestamp',
+  factsOf(), 'With Serve since July 2026 · Bonded & insured');
+t('a year-only partner_since is left exactly as it is',
+  factsOf({ partnerSince: '2024' }), 'With Serve since 2024 · Bonded & insured');
+t('a year and month needs no day to read well',
+  factsOf({ partnerSince: '2026-07' }), 'With Serve since July 2026 · Bonded & insured');
+/* Anything unparseable is somebody's typing, and echoing it is better than
+   dropping the fact or guessing at what they meant. */
+t('an unrecognised value is passed through rather than mangled',
+  factsOf({ partnerSince: 'the beginning' }),
+  'With Serve since the beginning · Bonded & insured');
+
+/* A number beside Serve's own name reads as Serve's score unless it says
+   otherwise, and these are borrowed from somewhere public. */
+t('a borrowed rating names its source',
+  factsOf({ rating: 4.8, reviewCount: 127, ratingSource: 'Google' }),
+  'With Serve since July 2026 · Bonded & insured · 4.8★ (127) on Google');
+t('a rating with no source claims none',
+  factsOf({ rating: 4.8, reviewCount: 127 }),
+  'With Serve since July 2026 · Bonded & insured · 4.8★ (127)');
+t('a source without a rating says nothing at all',
+  factsOf({ ratingSource: 'Google' }),
+  'With Serve since July 2026 · Bonded & insured');
+
 /* Serve has one completed job. A rating of 0 must not print as 0 stars. */
 const unrated = SP.card(Object.assign({}, VEN, { rating: 0, reviewCount: 0 }));
 /\u2605/.test(allText(unrated))
