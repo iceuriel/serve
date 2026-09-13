@@ -526,6 +526,48 @@ would list something the booking flow has no path to.
 **`default_payout_rate`, `internal_*` and `legal_name` appear in no view
 model**, not even the vendor's own portal.
 
+### VENDOR_REVIEWS — one row per quotation (r35)
+
+`vendor_id · quote · author · rating · source · source_url · reviewed_on ·
+client_visible`
+
+Serve quoting somebody else on a customer's page. **No write kind names this
+tab**, so a partner cannot add a review of themselves — the portal write path
+knows exactly `profile`, `service` and `operator`, and a tab none of them names
+cannot be reached at all.
+
+**`source` is per row on purpose.** A Google rating, a quote from the company's
+own site and a forum post are three different claims, and each says which it is.
+A quote with no visible source reads as marketing Serve wrote about its own
+partner, which is the one thing it must never look like.
+
+**`source_url` must be `http(s)`.** It becomes an `href` on a customer page, so
+a `javascript:` URL typed into the cell would otherwise be a live script there.
+Anything else is dropped and the review still renders, without a link.
+
+Quotes are **never truncated** — the cap is `MAX_CLIENT_REVIEWS` (3) on how many
+are shown. Trimming somebody's words is the thing attribution rules object to.
+
+### VENDOR_PHOTOS — one row per picture (r35)
+
+`vendor_id · image_url · caption · sort · client_visible`
+
+**`image_url` must be a same-origin `/images/…` path** — a file an operator put
+in the repo, exactly as `logo_url` already is. An offsite URL is dropped, so a
+photo row cannot be made to load a tracker from another host onto a customer's
+ticket, and `..` is refused outright. `build-site.sh` already copies `images/`
+wholesale, so a new photo publishes on the next push with no build change.
+
+`caption` doubles as the alt text. An uncaptioned photo falls back to naming its
+subject rather than rendering unlabelled: these are content a customer uses to
+decide whether to trust a company, not decoration.
+
+`sort` orders the strip ascending. `MAX_CLIENT_PHOTOS` is 6.
+
+**A missing tab costs the reviews or the photos, never the card** — the same
+failure shape as a missing `VENDORS` tab costing the card and never the
+booking list.
+
 ### VENDOR_SERVICES — one row per (vendor, service)
 
 `vendor_id · service_code · offers · preference · active · notes`

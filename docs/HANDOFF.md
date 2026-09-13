@@ -6,10 +6,69 @@ assistant with no access to this repo. Self-contained on purpose.
 **Companion doc:** `/docs/SCHEMA.md` — authoritative for every column's meaning
 and who writes it. This file is the narrative; that file is the contract.
 
-**Latest session: 2026-09-12.** Jump to
+**Latest session: 2026-09-13.** Jump to
 [what changed on 2026-09-08 / 09](#session-2026-09-08--09) for the current
 state. The sections below it describe earlier builds and remain accurate
 except where a later section supersedes them.
+
+---
+
+## Current work — 2026-09-13, Claude Code: r34 and r35, the partner card
+
+**r34 is committed, pushed (`0b3d711`) and NOT yet deployed. r35 is committed
+and needs the same paste.** Both are `apps-script/webhook.gs` → Leads MASTER.
+Either order with the site push: an un-normalised value renders no worse than
+before on the new card, and the new values render correctly on the old one, so
+there is no regression window.
+
+**r34 — `partner_since` was a date cell too.** The card read `"With Serve since
+" + partnerSince` and `getVendor` filled it with `String(v.partner_since)`.
+`opsRow` reads with `getValues()`, so an operator formatting that column hands
+back a Date and the card said `With Serve since Wed Jul 01 2026 00:00:00
+GMT-0400 (Eastern Daylight Time)`. THIRD appearance of one fault: r23 on the
+JOBS cells, r32 on how they are read, and this is the OPS workbook, which
+neither reached. Every Ops cell has always been raw. Normalised in `getVendor`
+through that workbook's own timezone, and only when the cell really is a Date —
+a plain `"2024"` is untouched. The card renders `July 2026`.
+
+r34 also made a rating name its source. `public_rating` and `rating_source`
+already existed and the card rendered `4.8★ (127)` while ignoring the source, so
+a number borrowed from Google sat beside Serve's name as though it were Serve's
+own score. It now reads `4.8★ (127) on Google`.
+
+**r35 — VENDOR_REVIEWS and VENDOR_PHOTOS.** Two new Ops tabs, read through the
+same `buildClientVendorProfile` whitelist as everything else a customer may
+learn about a company. Columns and rules are in SCHEMA. The founder fills them
+by hand; reviews come from anywhere public (Google, a company's own site, a
+forum) and each row carries its own `source`.
+
+**Two guards, because these cells are typed by hand and land in a browser.**
+`source_url` must be http(s), or a `javascript:` URL in a cell becomes a live
+script on a customer page. `image_url` must be a same-origin `/images/…` path,
+or a photo row could load a tracker from another host. Both drop the offending
+value and render everything else.
+
+**Neither tab is writable by a vendor**, structurally: the portal write path
+knows three kinds and none of them names these tabs.
+
+**A test bug worth remembering.** The r18 section signs off by pointing the
+assigned booking at VEN-0002, whose `client_visible` is FALSE, to prove that
+renders no card — and never points it back. Every r35 assertion appended after
+it therefore read a booking with no partner and passed vacuously on empty
+lists until the fixture was pointed back at VEN-0001. Anything added at the end
+of that file inherits the same trap.
+
+**Also:** `clientVendorReviews`/`clientVendorPhotos` memoise per script
+execution, which in production is per request. `tests/portal.test.js` runs every
+request in one persistent vm scope, so it resets `vendorExtrasMemo` between
+simulated requests — otherwise it reads a list cached before the rows existed.
+
+**Verified.** 26/26 test files pass for both releases. r34: three mutations.
+r35: five, covering both URL guards, both `client_visible` filters, and the
+link's `rel="noopener noreferrer"`. Every file restored afterwards.
+
+**Next:** paste r35 into Leads MASTER, create the two Ops tabs with the columns
+in SCHEMA, and drop photo files into `images/vendors/`.
 
 ---
 

@@ -98,6 +98,10 @@ function build() {
     VENDORS: makeSheet('VENDORS', ['vendor_id','status','display_name','logo_url',
       'public_description','partner_since','insurance_verified','service_area',
       'public_rating','public_review_count','rating_source','client_visible']),
+    VENDOR_REVIEWS: makeSheet('VENDOR_REVIEWS', ['vendor_id','quote','author','rating',
+      'source','source_url','reviewed_on','client_visible']),
+    VENDOR_PHOTOS: makeSheet('VENDOR_PHOTOS', ['vendor_id','image_url','caption',
+      'sort','client_visible']),
   };
   const logs = [];
   /* Harness state the stubs below share and the tests reach through the return
@@ -828,6 +832,110 @@ t('a missing VENDORS tab still returns the bookings',
   P18c.ok === true && (P18c.bookings || []).length === (P18.bookings || []).length,
   P18c.error);
 T.tabs.VENDORS = savedVendors;
+
+/* ------------------------------------------------------------------
+   r35: borrowed reviews and work photos.
+
+   Both are Serve quoting somebody else on a customer's page, so the view model
+   is where the guards live: every cell here is typed by hand, and two of these
+   columns become a URL in a browser. The names below are fixture names and no
+   review carries an address — privacy.test.js sweeps this file like any other.
+   ------------------------------------------------------------------ */
+head('19. r35 — reviews and photos a customer may see');
+/* r18 signs off with the assignment pointing at VEN-0002, whose
+   client_visible is FALSE, to prove that renders no card. Point it back at
+   VEN-0001 — without a card there is nothing for a review to hang on, and
+   every assertion below would pass vacuously on an empty list. */
+jrows[upcomingRows[0]][jvi] = 'VEN-0001';
+
+/* clientVendorReviews/Photos memoise per SCRIPT EXECUTION, which in production
+   is per request. This harness runs every request in one persistent scope, so
+   the reads above already cached "no reviews" for VEN-0001 before these rows
+   existed. Clearing it is what a new execution does for free. */
+const freshScope = () => { S.vendorExtrasMemo = {}; };
+
+const RV_H = ['vendor_id','quote','author','rating','source','source_url','reviewed_on','client_visible'];
+const PH_H = ['vendor_id','image_url','caption','sort','client_visible'];
+const rv = (over) => Object.assign({
+  vendor_id: 'VEN-0001', quote: 'They left the kitchen spotless.', author: 'A. Tenant',
+  rating: 5, source: 'Google', source_url: 'https://example.com/r/1',
+  reviewed_on: '2026-08-02', client_visible: true,
+}, over || {});
+const ph = (over) => Object.assign({
+  vendor_id: 'VEN-0001', image_url: '/images/vendors/bh-kitchen.jpg',
+  caption: 'Kitchen, Back Bay', sort: 1, client_visible: true,
+}, over || {});
+const pushRv = (o) => { const r = rv(o); T.tabs.VENDOR_REVIEWS.appendRow(RV_H.map(k => r[k])); };
+const pushPh = (o) => { const p = ph(o); T.tabs.VENDOR_PHOTOS.appendRow(PH_H.map(k => p[k])); };
+
+pushRv({});
+pushRv({ quote: 'On time twice in a row.', author: 'M. Homeowner', rating: 4,
+         source: 'Their website', source_url: '', reviewed_on: '2026-07-19' });
+/* Hidden, and the one that would be an XSS if an href were built from it. */
+pushRv({ quote: 'Not shown.', client_visible: false });
+pushRv({ quote: 'Nice work.', author: 'X', source: 'Forum',
+         source_url: 'javascript:alert(1)' });
+
+pushPh({});
+pushPh({ image_url: '/images/vendors/bh-bath.jpg', caption: '', sort: 2 });
+pushPh({ image_url: 'https://evil.example.org/track.gif', caption: 'offsite', sort: 3 });
+pushPh({ image_url: '/images/vendors/hidden.jpg', client_visible: false, sort: 4 });
+
+freshScope();
+const P19 = get({ portal: 'CON-0001', t: MINE });
+const b19 = (P19.bookings || []).filter(b => b.partner)[0] || {};
+const pr  = (b19.partner || {}).reviews || [];
+const pp  = (b19.partner || {}).photos  || [];
+
+t('the visible reviews reach the card', pr.length === 3, pr.map(r => r.quote));
+t('a hidden review does not', !pr.some(r => /Not shown/.test(r.quote)), pr.map(r => r.quote));
+t('the quote is carried whole, never trimmed',
+  pr[0] && pr[0].quote === 'They left the kitchen spotless.', pr[0] && pr[0].quote);
+t('with its author and its source',
+  !!pr[0] && pr[0].author === 'A. Tenant' && pr[0].source === 'Google', pr[0]);
+t('an http source_url is kept', pr[0] && pr[0].sourceUrl === 'https://example.com/r/1',
+  pr[0] && pr[0].sourceUrl);
+t('a review with no link still carries its source',
+  !!pr[1] && pr[1].source === 'Their website' && pr[1].sourceUrl === '', pr[1]);
+
+/* THE GUARD. A spreadsheet cell becomes an href on a customer's page. */
+const jsReview = pr.filter(r => /Nice work/.test(r.quote))[0];
+t('a javascript: source_url is dropped, and the review still renders',
+  !!jsReview && jsReview.sourceUrl === '', jsReview);
+t('no javascript: URL appears anywhere in the payload',
+  !/javascript:/i.test(JSON.stringify(P19)));
+
+t('the visible photos reach the card', pp.length === 2, pp.map(p => p.url));
+t('an offsite image_url is dropped', !pp.some(p => /evil/.test(p.url)), pp.map(p => p.url));
+t('a hidden photo is dropped too', !pp.some(p => /hidden/.test(p.url)), pp.map(p => p.url));
+t('photos come back in the operator order',
+  pp.map(p => p.sort).join() === '1,2', pp.map(p => p.sort));
+t('no offsite host appears anywhere in the payload',
+  !/evil\.example\.org/.test(JSON.stringify(P19)));
+
+/* A column added to either tab next month must not ride along. */
+t('reviews expose exactly the named fields',
+  pr.every(r => JSON.stringify(Object.keys(r).sort()) ===
+    JSON.stringify(['author','quote','rating','reviewedOn','source','sourceUrl'])),
+  pr[0] && Object.keys(pr[0]));
+t('photos expose exactly the named fields',
+  pp.every(p => JSON.stringify(Object.keys(p).sort()) ===
+    JSON.stringify(['caption','sort','url'])), pp[0] && Object.keys(pp[0]));
+
+/* Losing a tab must cost the tab, not the card. */
+const savedRev = T.tabs.VENDOR_REVIEWS;
+delete T.tabs.VENDOR_REVIEWS;
+freshScope();
+const P19b = get({ portal: 'CON-0001', t: MINE });
+const b19b = (P19b.bookings || []).filter(b => b.partner)[0] || {};
+t('a missing VENDOR_REVIEWS tab still renders the partner card',
+  !!(b19b.partner && b19b.partner.displayName), b19b.partner);
+t('and simply has no reviews', ((b19b.partner || {}).reviews || []).length === 0);
+t('while the photos are untouched by it',
+  ((b19b.partner || {}).photos || []).length === 2);
+T.tabs.VENDOR_REVIEWS = savedRev;
+freshScope();
+
 
 /* ============================================================
    r19 — the partner's own portal link rides along in the email

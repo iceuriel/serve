@@ -1,7 +1,33 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-12  ·  master  ·  r34 — partner_since is a date cell too
+ * VERSION STAMP:  2026-09-13  ·  master  ·  r35 — reviews and work photos
+ *
+ * r35 = BORROWED REVIEWS AND WORK PHOTOS, TWO NEW OPS TABS. A partner card
+ *      could say a company was rated 4.8 but never show a word anyone wrote or
+ *      a room anyone cleaned. VENDOR_REVIEWS and VENDOR_PHOTOS are read here,
+ *      through the same buildClientVendorProfile whitelist as everything else
+ *      a customer may learn about a company — one definition, not two.
+ *
+ *      NEITHER IS WRITABLE BY A VENDOR. The portal's write path knows exactly
+ *      three kinds — profile, service, operator — and a tab no kind names
+ *      cannot be reached at all. These are Serve's quotations of somebody
+ *      else's words, so a partner editing them would be forging a reference.
+ *
+ *      EVERY QUOTE CARRIES ITS SOURCE, per row: Google, their own site, a
+ *      forum. A quote with no visible attribution reads as Serve's own
+ *      marketing, which is the one thing it must never look like.
+ *
+ *      TWO URL GUARDS, BOTH BECAUSE THESE CELLS ARE TYPED BY HAND AND LAND ON
+ *      A CUSTOMER'S PAGE. `source_url` must be http(s) — a "javascript:" URL
+ *      in a spreadsheet cell would otherwise become a live script on a
+ *      customer's browser. `image_url` must be a same-origin /images/ path, so
+ *      a photo row cannot be made to load a tracker from somebody else's host.
+ *      Anything else is dropped, never rendered and never half-rendered.
+ *
+ *      Quotes are NOT truncated. The cap is on how many are shown, because
+ *      trimming somebody's words is the thing attribution rules object to.
+ *      A missing tab costs the reviews or the photos, never the card.
  *
  * r34 = partner_since IS A DATE CELL TOO, AND IT REACHED A CUSTOMER. getVendor
  *      read it with String(), so an operator formatting that column turned
@@ -1203,7 +1229,7 @@ function doGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-12 r34" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-13 r35" });
 }
 
 
@@ -1721,6 +1747,11 @@ function buildClientVendorProfile(vendor) {
     reviewCount:       typeof vendor.publicReviewCount === "number" && vendor.publicReviewCount > 0
                          ? vendor.publicReviewCount : null,
     ratingSource:      vendor.ratingSource || "",
+    /* r35. Other people's words and this company's own work. Both are capped
+       and both fail to an empty list, so a missing tab costs the reviews or the
+       photos and never the card itself. */
+    reviews:           clientVendorReviews(vendor.vendorId),
+    photos:            clientVendorPhotos(vendor.vendorId),
   };
 }
 
@@ -3133,6 +3164,8 @@ function writeInstruction(ss, booking, data) {
 const VENDORS_TAB          = "VENDORS";
 const VENDOR_SERVICES_TAB  = "VENDOR_SERVICES";
 const OPERATORS_TAB        = "OPERATORS";
+const VENDOR_REVIEWS_TAB   = "VENDOR_REVIEWS";
+const VENDOR_PHOTOS_TAB    = "VENDOR_PHOTOS";
 
 /** The Ops workbook. Never the active spreadsheet — this code runs bound to Leads. */
 function opsBook() {
@@ -3368,6 +3401,104 @@ function getVendorServices(vendorId) {
     });
 }
 
+
+/* ------------------------------------------------------------------
+   What other people have said, and what the work looks like.  r35
+
+   Both are Serve's, not the vendor's: no write path names these tabs, so a
+   partner cannot add a review of themselves. Read through the client
+   whitelist, capped, and dropped entirely rather than half-shown when a cell
+   is not what it claims to be.
+   ------------------------------------------------------------------ */
+
+var MAX_CLIENT_REVIEWS = 3;
+var MAX_CLIENT_PHOTOS  = 6;
+
+/* Execution-scoped. The portal builds a card per booking and several bookings
+   share a vendor; without this each one re-reads both tabs. */
+var vendorExtrasMemo = {};
+
+/** A link a customer's browser may follow. http(s) only — see r35. */
+function webUrl(v) {
+  var s = String(v || "").trim();
+  return /^https?:\/\//i.test(s) ? s : "";
+}
+
+/** An image this site actually serves. Same-origin /images/ only — see r35. */
+function siteImage(v) {
+  var s = String(v || "").trim();
+  if (s.indexOf("..") !== -1) return "";
+  return /^\/images\/[A-Za-z0-9._\/-]+$/.test(s) ? s : "";
+}
+
+/** A positive number, or null. Zero is "no rating", not zero stars. */
+function ratingOrNull(v) {
+  if (v === "" || v === null || v === undefined) return null;
+  var n = Number(v);
+  return isNaN(n) || n <= 0 ? null : n;
+}
+
+/**
+ * Quotations a customer may see, newest first as the sheet orders them.
+ *
+ * BUILT UP, NOT FILTERED DOWN, like every other client whitelist here: a column
+ * added to VENDOR_REVIEWS later cannot reach a browser until somebody names it.
+ */
+function clientVendorReviews(vendorId) {
+  var key = "rev:" + String(vendorId || "");
+  if (vendorExtrasMemo[key] !== undefined) return vendorExtrasMemo[key];
+  var out = [];
+  try {
+    var tz = sheetTimeZone(opsBook());
+    out = opsRows(VENDOR_REVIEWS_TAB, "vendor_id", vendorId)
+      .filter(function (r) { return truthy(r.client_visible); })
+      .filter(function (r) { return String(r.quote || "").trim() !== ""; })
+      .slice(0, MAX_CLIENT_REVIEWS)
+      .map(function (r) {
+        return {
+          quote:      String(r.quote || "").trim(),
+          author:     String(r.author || "").trim(),
+          source:     String(r.source || "").trim(),
+          sourceUrl:  webUrl(r.source_url),
+          rating:     ratingOrNull(r.rating),
+          reviewedOn: isDateValue(r.reviewed_on)
+                        ? dateCellText(r.reviewed_on, tz)
+                        : String(r.reviewed_on || "").trim(),
+        };
+      });
+  } catch (err) {
+    console.error("vendor reviews unavailable: " + err);
+    out = [];
+  }
+  vendorExtrasMemo[key] = out;
+  return out;
+}
+
+/** Photographs of this company's own work, in the order an operator chose. */
+function clientVendorPhotos(vendorId) {
+  var key = "pic:" + String(vendorId || "");
+  if (vendorExtrasMemo[key] !== undefined) return vendorExtrasMemo[key];
+  var out = [];
+  try {
+    out = opsRows(VENDOR_PHOTOS_TAB, "vendor_id", vendorId)
+      .filter(function (r) { return truthy(r.client_visible); })
+      .map(function (r) {
+        return {
+          url:     siteImage(r.image_url),
+          caption: String(r.caption || "").trim(),
+          sort:    Number(r.sort) || 0,
+        };
+      })
+      .filter(function (p) { return p.url !== ""; })
+      .sort(function (a, z) { return a.sort - z.sort; })
+      .slice(0, MAX_CLIENT_PHOTOS);
+  } catch (err) {
+    console.error("vendor photos unavailable: " + err);
+    out = [];
+  }
+  vendorExtrasMemo[key] = out;
+  return out;
+}
 /** The vendor's team. Serve-controlled numbers ride along for their own view. */
 function getOperators(vendorId) {
   return opsRows(OPERATORS_TAB, "vendor_id", vendorId).map(function (r) {

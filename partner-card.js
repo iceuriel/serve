@@ -42,6 +42,66 @@
         return name ? name + ' ' + m[1] : s;
     }
 
+    /**
+     * Photographs of the company's own work.
+     *
+     * The caption is the best alt text available — it is what the person who
+     * chose the picture said it was. The fallback names the subject rather
+     * than leaving a decorative-looking image unlabelled, because these are
+     * content: they are part of deciding whether to trust this company.
+     */
+    function photoStrip(photos) {
+        var strip = el('div', 'tk-partner__photos');
+        photos.forEach(function (p) {
+            var fig = el('figure', 'tk-partner__shot');
+            var img = el('img');
+            img.src = p.url;
+            img.alt = p.caption || 'Work by this company';
+            img.loading = 'lazy';
+            fig.appendChild(img);
+            if (p.caption) fig.appendChild(el('figcaption', null, p.caption));
+            strip.appendChild(fig);
+        });
+        return strip;
+    }
+
+    /**
+     * What other people have said, with where they said it.
+     *
+     * THE SOURCE IS NOT DECORATION. These are quotations from Google, a
+     * company's own site, a forum — borrowed words shown beside Serve's name.
+     * Without a visible source a quote reads as copy Serve wrote about its own
+     * partner. The link, when there is one, is the reader's way of checking.
+     */
+    function reviewList(reviews) {
+        var list = el('div', 'tk-partner__reviews');
+        reviews.forEach(function (r) {
+            var item = el('blockquote', 'tk-review');
+            if (r.rating) item.appendChild(el('div', 'tk-review__stars', r.rating + '★'));
+            item.appendChild(el('p', 'tk-review__quote', '“' + r.quote + '”'));
+
+            var by = el('div', 'tk-review__by');
+            if (r.author) by.appendChild(el('span', null, r.author));
+            if (r.source) {
+                var lead = r.author ? ' · ' : '';
+                if (r.sourceUrl) {
+                    var a = el('a', null, lead + r.source);
+                    a.href = r.sourceUrl;
+                    /* A customer's ticket is a signed link. noopener keeps the
+                       opened tab from reaching back into it. */
+                    a.target = '_blank';
+                    a.rel = 'noopener noreferrer';
+                    by.appendChild(a);
+                } else {
+                    by.appendChild(el('span', null, lead + r.source));
+                }
+            }
+            if (by.children.length) item.appendChild(by);
+            list.appendChild(item);
+        });
+        return list;
+    }
+
     /** The assigned partner: logo, name, blurb, and the facts Serve stands behind. */
     function card(v) {
         var wrap = el('div', 'tk-partner');
@@ -73,6 +133,11 @@
                        (v.ratingSource ? ' on ' + v.ratingSource : ''));
         }
         if (facts.length) wrap.appendChild(el('div', 'tk-partner__facts', facts.join(' · ')));
+
+        /* Pictures before words: the strip says what the work looks like at a
+           glance, the quotes are for someone already interested. */
+        if (v.photos && v.photos.length) wrap.appendChild(photoStrip(v.photos));
+        if (v.reviews && v.reviews.length) wrap.appendChild(reviewList(v.reviews));
 
         return wrap;
     }

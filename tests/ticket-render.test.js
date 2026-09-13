@@ -277,5 +277,55 @@ H_HTML.includes('partner-card.js')
   ? ok('and the build publishes it')
   : fail('partner-card.js is not on the build allow-list — both pages 404 it');
 
+
+head('G. r35 — borrowed words and pictures of the work');
+
+const WORKED = Object.assign({}, VEN, {
+  photos: [
+    { url: '/images/vendors/bh-kitchen.jpg', caption: 'Kitchen, Back Bay', sort: 1 },
+    { url: '/images/vendors/bh-bath.jpg', caption: '', sort: 2 },
+  ],
+  reviews: [
+    { quote: 'They left the kitchen spotless.', author: 'A. Tenant', source: 'Google',
+      sourceUrl: 'https://example.com/r/1', rating: 5, reviewedOn: '2026-08-02' },
+    { quote: 'On time twice in a row.', author: 'M. Homeowner', source: 'Their website',
+      sourceUrl: '', rating: 4, reviewedOn: '2026-07-19' },
+  ],
+});
+const worked = SP.card(WORKED);
+const shots  = byClass(worked, 'tk-partner__shot');
+const quotes = byClass(worked, 'tk-review');
+
+t('every photo renders', shots.length, 2);
+t('a caption becomes the alt text', shots[0].children[0].alt, 'Kitchen, Back Bay');
+/* An uncaptioned photo is still content, not decoration: it must say what it
+   is rather than announce itself as an empty image. */
+t('an uncaptioned photo still names its subject',
+  shots[1].children[0].alt, 'Work by this company');
+t('and photos are lazy', shots[0].children[0].loading, 'lazy');
+t('a caption also renders as a caption', shots[0].children[1].tagName, 'figcaption');
+t('and an empty one adds no element', shots[1].children.length, 1);
+
+t('every review renders', quotes.length, 2);
+t('the quote is shown in quotation marks and unaltered',
+  byClass(worked, 'tk-review__quote')[0]._text, '“They left the kitchen spotless.”');
+
+const by0 = byClass(worked, 'tk-review__by')[0];
+t('the author and the source are both shown',
+  by0.children.map(n => n._text).join(''), 'A. Tenant · Google');
+t('a source with a link is an anchor', by0.children[1].tagName, 'a');
+t('pointing at the source', by0.children[1].href, 'https://example.com/r/1');
+/* A ticket is a signed link. An opened tab must not reach back into it. */
+t('opened safely', by0.children[1].rel, 'noopener noreferrer');
+
+const by1 = byClass(worked, 'tk-review__by')[1];
+t('a source with no link is plain text, not a dead anchor',
+  by1.children[1].tagName, 'span');
+
+/* The state every vendor starts in. */
+const bare = SP.card(VEN);
+t('no photo strip when there are no photos', byClass(bare, 'tk-partner__photos').length, 0);
+t('no review list when there are none', byClass(bare, 'tk-partner__reviews').length, 0);
+
 console.log('\n' + (bad ? bad + ' FAILURES' : 'all ticket-render checks passed'));
 process.exit(bad ? 1 : 0);

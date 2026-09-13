@@ -4352,3 +4352,72 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
 .room-photos__dialog img { display: block; max-width: 100%; max-height: 78vh; margin: 12px auto 0; object-fit: contain; }
 @media (max-width: 480px) { .room-photos__grid { gap: 6px; } }
 .tk-room > .room-photos { padding: 0 .85rem .85rem; box-sizing: border-box; margin-top: 0; }
+
+
+/* ---- The partner's work, and what people said about it (r35) ------------ */
+
+/* A scrolling strip rather than a grid: on a phone a grid of four turns into
+   four stacked full-width photos and pushes everything else off the screen. */
+.tk-partner__photos {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    overflow-x: auto;
+    padding-bottom: 0.25rem;
+    -webkit-overflow-scrolling: touch;
+}
+.tk-partner__shot {
+    margin: 0;
+    flex: 0 0 auto;
+    width: 8.5rem;
+}
+.tk-partner__shot img {
+    display: block;
+    width: 100%;
+    height: 6rem;
+    object-fit: cover;
+    border-radius: calc(var(--radius) * 0.6);
+    background: var(--color-bg-light);
+}
+.tk-partner__shot figcaption {
+    font-size: 0.72rem;
+    line-height: 1.35;
+    color: var(--color-text-muted);
+    margin-top: 0.3rem;
+}
+
+.tk-partner__reviews {
+    margin-top: 0.85rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+}
+.tk-review {
+    margin: 0;
+    padding: 0.6rem 0.75rem;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: calc(var(--radius) * 0.6);
+}
+.tk-review__stars {
+    font-size: 0.78rem;
+    color: var(--color-accent);
+    font-weight: 700;
+}
+.tk-review__quote {
+    font-size: 0.86rem;
+    line-height: 1.5;
+    color: var(--color-text);
+    margin: 0.15rem 0 0;
+}
+/* The attribution is quiet but never hidden — a quote whose source is hard to
+   find is a quote pretending to be ours. */
+.tk-review__by {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+    margin-top: 0.35rem;
+}
+.tk-review__by a {
+    color: var(--color-text-muted);
+    text-decoration: underline;
+}
