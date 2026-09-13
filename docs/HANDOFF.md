@@ -15,20 +15,21 @@ except where a later section supersedes them.
 
 ## Current work — 2026-09-13, Claude Code: r42, confirm & schedule
 
-**TWO HALVES, AND THE ORDER MATTERS.**
+**DEPLOYED AND VERIFIED IN PRODUCTION. Both halves, in the right order.**
 
-1. **Paste `apps-script/webhook.gs` into Leads MASTER first.** Production
-   answered `{"ok":true,...,"version":"2026-09-13 r40"}` when probed at the
-   start of this session, so the server does not yet know `plan_confirm`.
-2. **Then push the site.**
+1. The founder pasted `apps-script/webhook.gs`. The health endpoint then
+   answered `{"ok":true,...,"version":"2026-09-13 r42"}` — checked BEFORE the
+   push, because "pasted and saved" and "deployed as a new version" are not the
+   same thing and only the stamp can say which happened.
+2. The site was pushed (`9146534..355ee07`) and the Pages build landed.
 
-Backwards is the one order that hurts: the site half puts a live "Choose a
-time" button on the portal, and against an r40 deployment its POST comes back
-`unknown_kind` — the customer taps Confirm and is told it did not go through.
-Script first, site second, as the rule in CLAUDE.md says.
+That order was the point: backwards, the site half puts a live "Choose a time"
+button on the portal while the server still answers `unknown_kind`, and the
+customer taps Confirm and is told it did not go through. Script first, site
+second, as the rule in CLAUDE.md says.
 
-**The gate is cleared.** The founder confirmed the r41 plan card is showing on
-a real portal, which is what this release builds on.
+**The gate was cleared first.** The founder confirmed the r41 plan card is
+showing on a real portal, which is what this release builds on.
 
 ### What shipped
 
@@ -111,8 +112,18 @@ under test, which is the worse half of that. Added.
 - The render test's feed is built **relative to today**, so the horizon rules
   are the thing under test and the file cannot rot into a calendar-flaky red.
 - `scripts/build-site.sh` was run: `_site/serve-slots.js` is staged.
-- **NOT verified in production** — nothing is deployed yet. See the two steps
-  at the top.
+- **VERIFIED IN PRODUCTION, not merely pushed.** The webhook health endpoint
+  answers `2026-09-13 r42`. `servecleaning.com/serve-slots.js` is HTTP 200 and
+  byte-identical to the repo (7,367); `portal.js` likewise (39,210) and carries
+  `plan_confirm`, `function planConfirm` and `ServeSlots.picker`. Both `/` and
+  `/h` serve the `serve-slots.js` script tag — the booking page needs it too
+  now, and a missing tag there would have degraded the booking funnel, not just
+  the portal. `style.css` carries every new rule. `/api/slots` answers
+  `ok:true` with 14 real slots.
+- The first probe of `serve-slots.js` was a 404 and `portal.js` was still the
+  old copy — the Pages build simply had not landed. Re-probed rather than
+  assumed. Byte counts were checked against the repo instead of trusting a
+  200, because a stale cached file also answers 200.
 
 **Not mine, left alone:** `AGENTS.md` and `CLAUDE.md` carry uncommitted
 continuity edits from the founder or Codex, and two new image files are

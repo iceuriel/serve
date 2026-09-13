@@ -957,6 +957,17 @@ both confirmed returning 404.
 - **Nothing releases a slot.** If a booking is cancelled, its `AVAILABILITY` row
   stays `booked`. The `job_id` written back is the handle for undoing that, but
   no code does it yet.
+- **The availability feed cold-starts slower than the Worker waits.** Observed
+  2026-09-13: `/api/slots` answered `{"ok":false,"error":"upstream_unreachable"}`
+  on a first probe and `ok:true` with 14 slots moments later — with the feed
+  itself healthy both times (`avail r3`, answering directly in well under the
+  cap). An Apps Script cold start can exceed the Worker's 8s `slots` timeout.
+  **Nothing breaks:** the booking form falls back to the earlier/later radios
+  and the portal's plan card says it has no open times to show. But both are
+  degraded for the first visitor after an idle period, and that visitor now
+  includes anyone confirming a recurring plan. The fix is a warm-up ping or a
+  longer timeout for this one route — not a change to either caller, which are
+  both behaving as designed.
 - Part of the original build spec was lost to a truncated paste — the `src` /
   "skins" / "redirects" sub-items of Task 1. All three are now built: `src` by
   the attribution work, skins and redirects re-specified and shipped 2026-07-28.
