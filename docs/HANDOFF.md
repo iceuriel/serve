@@ -57,6 +57,13 @@ exactly. 10 assertions failed before the fix; all pass after it.
 
 **Verified.** Red before, green after, then 27/27 test files pass.
 
+**Verified IN PRODUCTION**, not merely pushed: `servecleaning.com/portal.js`
+line 280 now serves `add(bodyEl, planCard(model.plan))`, confirmed by
+fetching the deployed file after the Pages build landed (~15s). The Apps
+Script side was verified the same way before any of this was written — the
+health endpoint answered version `2026-09-13 r40`, which is what ruled the
+server out as the cause.
+
 **STILL QUEUED, unchanged:** confirm & schedule (with a slot reader for /h),
 the same-provider request, reschedule/cancel with the anchor as source of
 truth, then the portal settings tab.
