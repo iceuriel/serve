@@ -869,5 +869,99 @@ const planCol = (n) => PLAN_COLS.indexOf(n);
     C.tabs.RECURRING_PLANS._rows.slice(1).length);
 }
 
+
+/* ------------------------------------------------------------------
+   r39 — plans for the bookings that came before r38.
+
+   createRecurringPlan runs inside doPost, so it only ever sees NEW bookings.
+   Every clean already sold with a cadence has no plan row and no prompt. This
+   is the founder's exact situation after deploying r38.
+
+   NOTE the fixture seeds quote_meta, contact_id and property_id by hand.
+   JOBS_HEADERS above has none of them, so a row written by post() would carry
+   no cadence price and no contact — and a plan with no contact_id can never
+   reach anybody's portal. Asserting only "a plan appeared" would pass while
+   proving nothing about the two fields that make it visible and correct.
+   ------------------------------------------------------------------ */
+const BACKFILL_JOBS = JOBS_HEADERS.concat(['quote_meta', 'contact_id', 'property_id']);
+const bfCol = (n) => BACKFILL_JOBS.indexOf(n);
+
+function backfillFixture(over) {
+  const C = build(LEADS_FULL);
+  C.tabs.JOBS = makeSheet('JOBS', BACKFILL_JOBS);
+  C.tabs.RECURRING_PLANS = makeSheet('RECURRING_PLANS', PLAN_COLS);
+  const row = new Array(BACKFILL_JOBS.length).fill('');
+  const set = (k, v) => { row[bfCol(k)] = v; };
+  set('job_id', 'SRV-20260801-OLD001');
+  set('lead_id', 'old@example.com');
+  set('service_type', 'First Clean');
+  set('frequency', 'weekly');
+  set('contact_id', 'CON-0001');
+  set('property_id', 'PROP-0001');
+  set('quote_meta', JSON.stringify({ recurring_weekly: 111, recurring_biweekly: 122 }));
+  Object.keys(over || {}).forEach(k => set(k, over[k]));
+  C.tabs.JOBS.appendRow(row);
+  return C;
+}
+
+{
+  const C = backfillFixture();
+  const report = C.sandbox.backfillRecurringPlans();
+  const rows = C.tabs.RECURRING_PLANS._rows.slice(1);
+  /* A backfill that writes nothing must FAIL these, not throw on rows[0]
+     and take the rest of the file down with it. */
+  const planRow = rows[0] || [];
+
+  t('the past booking is offered a plan', rows.length === 1, rows.length);
+  t('carrying the contact it belongs to, or it reaches nobody',
+    String(planRow[PLAN_COLS.indexOf('contact_id')]) === 'CON-0001',
+    planRow[PLAN_COLS.indexOf('contact_id')]);
+  t('priced from what they were quoted at the time, out of quote_meta',
+    String(planRow[PLAN_COLS.indexOf('quoted_price')]) === '111',
+    planRow[PLAN_COLS.indexOf('quoted_price')]);
+  t('pending, not booked', String(planRow[PLAN_COLS.indexOf('status')]) === 'pending');
+  t('and pointing back at the clean it follows',
+    String(planRow[PLAN_COLS.indexOf('origin_job_id')]) === 'SRV-20260801-OLD001');
+  t('the report says what it did', /Plans offered now:\s+1/.test(report), report);
+
+  /* IT MUST BOOK NOTHING. A backfill that quietly created cleans would be the
+     opposite of what a plan is for. */
+  t('no booking was created by backfilling',
+    C.tabs.JOBS._rows.slice(1).length === 1, C.tabs.JOBS._rows.slice(1).length);
+
+  /* Safe to run twice — this is the direct caller planAlreadyOffered exists
+     for, since doPost answers a replay upstream and never reaches it. */
+  const again = C.sandbox.backfillRecurringPlans();
+  t('running it a second time offers nothing again',
+    C.tabs.RECURRING_PLANS._rows.slice(1).length === 1,
+    C.tabs.RECURRING_PLANS._rows.slice(1).length);
+  t('and reports that it already had one', /Already had one:\s+1/.test(again), again);
+}
+{
+  /* A one-off booking is not a plan, however old it is. */
+  const C = backfillFixture({ frequency: 'once' });
+  C.sandbox.backfillRecurringPlans();
+  t('a past one-off booking is left alone',
+    C.tabs.RECURRING_PLANS._rows.slice(1).length === 0);
+}
+{
+  /* A move-out on a cadence is still not a first clean. */
+  const C = backfillFixture({ service_type: 'move_out' });
+  C.sandbox.backfillRecurringPlans();
+  t('a past move-out is left alone',
+    C.tabs.RECURRING_PLANS._rows.slice(1).length === 0);
+}
+{
+  /* The tab has to exist first, and the report has to say so rather than
+     failing silently — this is the state the founder is in before creating it. */
+  const C = backfillFixture();
+  delete C.tabs.RECURRING_PLANS;
+  const report = C.sandbox.backfillRecurringPlans();
+  t('with no tab it explains itself instead of throwing',
+    /No RECURRING_PLANS tab/.test(report), report);
+  t('and names where the columns are written down',
+    /SCHEMA/.test(report), report);
+}
+
 console.log('\n' + (bad ? 'FAILURES: ' + bad : 'ALL ASSERTIONS PASSED'));
 process.exit(bad ? 1 : 0);

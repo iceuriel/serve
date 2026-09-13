@@ -1,7 +1,24 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-13  ·  master  ·  r38 — a plan is an offer, not a booking
+ * VERSION STAMP:  2026-09-13  ·  master  ·  r39 — plans for earlier bookings
+ *
+ * r39 = PLANS FOR THE BOOKINGS THAT CAME BEFORE r38. createRecurringPlan runs
+ *      inside doPost, so it only ever sees NEW bookings. Every clean already
+ *      sold with a cadence — including the ones taken while this was being
+ *      built — has no plan row and shows no prompt in the portal.
+ *
+ *      backfillRecurringPlans() is the one-time answer: run it from the editor
+ *      and it offers a plan for every past booking that qualifies. It is the
+ *      direct caller planAlreadyOffered() exists for, so running it twice is
+ *      harmless — the second pass reports "already offered" and writes nothing.
+ *
+ *      THE WINDOW RUNS FROM THE BACKFILL, NOT FROM THE ORIGINAL BOOKING. Seven
+ *      days from a clean sold last week would arrive already expired, which is
+ *      not an offer at all. The customer gets a real week to decide.
+ *
+ *      IT TOUCHES NO BOOKING. It reads JOBS and writes only RECURRING_PLANS.
+ *      A row it cannot read is reported and skipped rather than guessed at.
  *
  * r38 = A PLAN IS AN OFFER, NOT A BOOKING. Somebody who books a first clean and
  *      picks a cadence has asked for one clean and expressed an intention about
@@ -1315,7 +1332,7 @@ function doGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-13 r38" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-13 r39" });
 }
 
 
@@ -5788,6 +5805,104 @@ function findOpenSlot() {
  *
  * Read-only. Writes nothing, to any tab.
  */
+
+/**
+ * Offer a plan for every past booking that was sold with a cadence.
+ * RUN THIS FROM THE EDITOR, once, after r38 is deployed and the
+ * RECURRING_PLANS tab exists.
+ *
+ * SAFE TO RUN TWICE. planAlreadyOffered() refuses a booking that already has a
+ * plan, so a second pass writes nothing and says so. That guard exists for
+ * exactly this caller — doPost never reaches it, because a replayed submission
+ * is answered upstream.
+ *
+ * Reads JOBS. Writes only RECURRING_PLANS. No booking is touched, no slot is
+ * held and no vendor is assigned — a backfilled plan is an offer like any
+ * other, and the customer still has to confirm it.
+ */
+function backfillRecurringPlans() {
+  var lines = [];
+  var say = function (s) { lines.push(s); };
+  try {
+    var ss = SPREADSHEET_ID ? SpreadsheetApp.openById(SPREADSHEET_ID)
+                            : SpreadsheetApp.getActiveSpreadsheet();
+
+    var plans = ss.getSheetByName(RECURRING_PLANS_TAB);
+    if (!plans) {
+      say("No " + RECURRING_PLANS_TAB + " tab in this workbook.");
+      say("Create it first — the column list is in docs/SCHEMA.md.");
+      return finish(lines);
+    }
+
+    var jobs = ss.getSheetByName(JOBS_TAB);
+    if (!jobs) { say("No " + JOBS_TAB + " tab."); return finish(lines); }
+    var h = sheetHeaders(jobs);
+    var last = jobs.getLastRow();
+    if (last < 2) { say("No bookings yet."); return finish(lines); }
+
+    var rows = jobs.getRange(2, 1, last - 1, h.length).getValues();
+    var at = function (row, name) { var i = h.indexOf(name); return i === -1 ? "" : row[i]; };
+
+    var offered = 0, already = 0, noCadence = 0, notFirst = 0, unreadable = 0;
+
+    for (var r = 0; r < rows.length; r++) {
+      var row = rows[r];
+      var jobId = String(at(row, "job_id") || "").trim();
+      if (!jobId) continue;
+
+      var meta = {};
+      try { meta = JSON.parse(at(row, "quote_meta") || "{}") || {}; }
+      catch (meta_err) { meta = {}; }
+
+      /* The payload createRecurringPlan expects, rebuilt from the stored row.
+         The cadence prices live in quote_meta and have since the calculator
+         shipped, so a backfilled plan quotes what the customer was shown
+         rather than a number recomputed against today's table. */
+      var data = {
+        service_type:        at(row, "service_type"),
+        frequency_selected:  at(row, "frequency"),
+        recurring_weekly:    meta.recurring_weekly,
+        recurring_biweekly:  meta.recurring_biweekly,
+        recurring_monthly:   meta.recurring_monthly,
+      };
+      var record = { job_id: jobId, lead_id: String(at(row, "lead_id") || "") };
+      var ids = {
+        contact_id:  String(at(row, "contact_id") || ""),
+        property_id: String(at(row, "property_id") || ""),
+      };
+
+      var outcome;
+      try {
+        outcome = createRecurringPlan(ss, data, record, ids);
+      } catch (rowErr) {
+        unreadable++;
+        say("  " + jobId + " — skipped, could not be read");
+        continue;
+      }
+
+      if (outcome === "offered")             { offered++;   say("  " + jobId + " — plan offered"); }
+      else if (outcome === "already offered"){ already++; }
+      else if (outcome === "no cadence")     { noCadence++; }
+      else if (outcome === "not a first clean") { notFirst++; }
+      else { say("  " + jobId + " — " + outcome); }
+    }
+
+    say("");
+    say("Plans offered now:        " + offered);
+    say("Already had one:          " + already);
+    say("No cadence (one-off):     " + noCadence);
+    say("Not a first clean:        " + notFirst);
+    if (unreadable) say("Unreadable rows:          " + unreadable);
+    say("");
+    say("Each offer is open for " + PLAN_WINDOW_DAYS + " days from now. Nothing was");
+    say("booked, no slot was held and no vendor was assigned.");
+
+  } catch (err) {
+    say("Backfill stopped before finishing: " + err);
+  }
+  return finish(lines);
+}
+
 function printVendorLinks() {
   var sheet = opsBook().getSheetByName(VENDORS_TAB);
   if (!sheet) { console.log("No " + VENDORS_TAB + " tab in the Ops workbook."); return; }

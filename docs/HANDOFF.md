@@ -13,6 +13,71 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-13, Claude Code: r39, plans for earlier bookings
+
+**Committed, NOT deployed. Two steps, and the second is run once by hand:**
+
+1. Paste `apps-script/webhook.gs` into Leads MASTER.
+2. Run **`backfillRecurringPlans()`** from the editor, once.
+
+**Why it exists.** `createRecurringPlan` is called from `doPost`, so it only
+ever sees NEW bookings. Every clean already sold with a cadence — including the
+founder's test booking, which is what reported this — has no plan row and shows
+no prompt in the portal. r38 was working correctly; there was simply nothing for
+it to show.
+
+**What the backfill does.** Walks JOBS, and for every past booking that is a
+first clean carrying a real cadence, offers a plan. Reads JOBS and writes only
+RECURRING_PLANS: no booking is touched, no slot held, no vendor assigned. Prints
+a count of offered / already had one / one-off / not a first clean.
+
+**Safe to run twice.** `planAlreadyOffered()` refuses a booking that already has
+a plan, and the second pass reports it. This is the direct caller that guard
+exists for — `doPost` answers a replayed submission upstream and never reaches
+it, which is what the r38 MISSED mutation exposed.
+
+**The window runs from the backfill, not the original booking.** Seven days
+measured from a clean sold last week would arrive already expired, which is not
+an offer at all.
+
+**TWO DEFECTS FOUND BY THE SUITE, both worth remembering.**
+
+1. **A version stamp must carry exactly ONE `rNN`.** The stamp read `r39 —
+   plans for the bookings before r38`. THREE suites parse that line:
+   `webhook-routing` uses a lazy `.*?` and read r39, while `geo-pricing` and
+   `sms-consent` use a greedy `[^\n]*` and read the LAST match — the r38 in the
+   prose. Both reported `["38","39"]` and failed. Describe the release in the
+   header body, never on the stamp line.
+2. **The missing-tab branch called `ss.getName()` and threw.** The one path
+   whose entire job is to say "create the tab first" answered `TypeError:
+   ss.getName is not a function`. Caught, so nothing corrupted, and useless
+   exactly when needed. Not every workbook object provides it.
+
+**Two test-harness defects of mine, same shapes as before.** The backfill
+assertions indexed `rows[0]`, so a mutation that wrote no plan threw and took
+every later assertion in the file with it — it counted as "caught" only because
+a FAIL printed first, which is luck, not evidence. And the mutation file
+anchored on a line that an earlier fix in the same release had already
+rewritten, so that guard went unproven until the anchor was updated.
+
+**A harness gap worth knowing.** `JOBS_HEADERS` in webhook-routing.test.js has
+no `quote_meta`, `contact_id` or `property_id`, so a row written by `post()`
+carries no cadence price and no contact. The backfill fixture seeds all three by
+hand and asserts the recovered price AND contact_id — a plan with no contact_id
+can never reach anybody's portal, so "a plan was written" alone would pass while
+proving nothing.
+
+**Verified.** 26/26 test files pass. Four deliberate mutations, each failing a
+specific assertion: the cadence never read off the row, the quoted price not
+recovered from quote_meta, the plan written without its contact, and a missing
+tab passed over in silence. webhook.gs restored.
+
+**STILL QUEUED, unchanged from r38:** confirm & schedule (with a slot reader for
+/h), the same-provider request, reschedule/cancel with the anchor as source of
+truth, then the portal settings tab.
+
+---
+
 ## Current work — 2026-09-13, Claude Code: r38, a plan is an offer not a booking
 
 **Committed, NOT deployed, and it needs a TAB CREATED before it does anything.**
