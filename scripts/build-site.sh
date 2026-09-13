@@ -53,19 +53,19 @@ mkdir -p "$OUT"
 # here does not blank the page — the booking flow just loses its category
 # chooser, which is dormant while cleaning is the only live service. Listed
 # anyway, because that stops being harmless the day a second category ships.
-cp index.html pricing.html services.html privacy.html sms-terms.html serve-geo-data.js pricing-engine.js serve-services.js script.js style.css "$OUT"/
+cp index.html pricing.html services.html privacy.html sms-terms.html serve-geo-data.js pricing-engine.js serve-services.js serve-scope.js script.js style.css "$OUT"/
 
 # j.html is served at /j and renders ONE job from an id in the query string.
 # It is not in the sitemap and carries noindex both in the markup and as an
 # X-Robots-Tag in _headers, because the URL exposes a home address and when the
 # house is empty. ticket.js is its only script.
-cp j.html ticket.js partner-card.js "$OUT"/
+cp j.html ticket.js partner-card.js serve-scope.js "$OUT"/
 
 # h.html is served at /h and is the CUSTOMER PORTAL — one contact, every
 # booking, one link that never changes. Same noindex + no-store treatment as
 # /j in _headers, plus Referrer-Policy: no-referrer, because the token in the
 # URL is the only thing between that link and a customer account.
-cp h.html portal.js "$OUT"/
+cp h.html portal.js serve-scope.js "$OUT"/
 cp booking-live.js booking-photos.js "$OUT"/
 
 # v.html is served at /v and is the VENDOR PORTAL — one partner company,

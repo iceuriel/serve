@@ -387,6 +387,10 @@
             bodyEl.appendChild(p);
         }
         add(bodyEl, block('Add-ons', b.addOns));
+        /* One definition, in serve-scope.js beside the data it renders. */
+        if (typeof ServeScope !== 'undefined') {
+            add(bodyEl, ServeScope.block(b.serviceCode, b.serviceLabel));
+        }
 
         /* 2. YOUR HOME — rooms, each with its own instruction */
         var rooms = (d.home && d.home.rooms) || [];

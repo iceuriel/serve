@@ -255,6 +255,7 @@ decor.every(n => n.attrs['aria-hidden'] === 'true')
 head('F. Both customer surfaces show who is coming');
 
 const PORTAL_JS = fs.readFileSync(path.join(REPO_ROOT, 'portal.js'), 'utf8');
+const JS_SITE   = fs.readFileSync(path.join(REPO_ROOT, 'script.js'), 'utf8');
 const J_HTML    = fs.readFileSync(path.join(REPO_ROOT, 'j.html'), 'utf8');
 const H_HTML    = fs.readFileSync(path.join(REPO_ROOT, 'h.html'), 'utf8');
 const BUILD     = fs.readFileSync(path.join(REPO_ROOT, 'scripts', 'build-site.sh'), 'utf8');
@@ -326,6 +327,106 @@ t('a source with no link is plain text, not a dead anchor',
 const bare = SP.card(VEN);
 t('no photo strip when there are no photos', byClass(bare, 'tk-partner__photos').length, 0);
 t('no review list when there are none', byClass(bare, 'tk-partner__reviews').length, 0);
+
+
+head('H. r37 — what a booking actually includes');
+/* NOTE: t() in THIS file is deep equality — t(label, got, want). The one in
+   portal.test.js is a boolean — t(label, cond, extra). A boolean passed here
+   with no `want` compares true against undefined and fails while the thing it
+   checks is perfectly correct. Every boolean below says `, true` on purpose. */
+/* SERVE_SCOPE moved out of script.js so the two token-bearing pages can read
+   it: they deliberately load nothing from the marketing bundle, so before this
+   neither could answer "what am I getting?" without a second copy of the list.
+   Driven through the real file against the same DOM shim as scheduleHead, so
+   what is asserted is the shipped renderer rather than a copy of its rules. */
+const SCOPE_JS = fs.readFileSync(path.join(REPO_ROOT, 'serve-scope.js'), 'utf8');
+const scopeBox = { console, document: { createElement: node } };
+scopeBox.window = scopeBox;
+vm.createContext(scopeBox);
+vm.runInContext(SCOPE_JS, scopeBox);
+const SS = scopeBox.ServeScope;
+
+const deep   = SS.forService('CLEAN_DEEP');
+const recur  = SS.forService('CLEAN_STANDARD');
+const movein = SS.forService('CLEAN_MOVEOUT');
+
+t('each service reads its own column, not another one',
+  JSON.stringify(recur.included) !== JSON.stringify(deep.included) &&
+  JSON.stringify(movein.included) !== JSON.stringify(deep.included), true);
+
+/* The coding the site would otherwise contradict itself on, asserted from the
+   side a customer reads rather than from the matrix. */
+t('the fridge is an ADD-ON on a first clean, never promised as included',
+  deep.addOns.indexOf('Inside the fridge') !== -1 &&
+  deep.included.indexOf('Inside the fridge') === -1, true);
+t('and is included on a move-out, where the price bundles it',
+  movein.included.indexOf('Inside the fridge') !== -1, true);
+t('linen change is included on a recurring plan only',
+  recur.included.indexOf('Linen change') !== -1 &&
+  deep.included.indexOf('Linen change') === -1, true);
+t('a recurring clean never promises grout scrubbing',
+  recur.included.indexOf('Grout scrubbed and brightened') === -1, true);
+
+/* An unknown code must render NOTHING. Another service's promises would be a
+   promise nobody made. */
+t('an unknown service yields no list at all',
+  SS.forService('CLEAN_SPACESHIP') === null, true);
+t('and so does a blank one', SS.forService('') === null, true);
+t('and the block itself is null, so a caller adds nothing',
+  SS.block('CLEAN_SPACESHIP', 'Whatever') === null, true);
+
+/* ---- the rendered block ---- */
+/* Falling back to an empty node rather than null: byClass() walks children,
+   so a null block would throw before any assertion could report on it. */
+const scBlock = SS.block('CLEAN_DEEP', 'First clean') || node('none');
+t('it is a details element, closed until asked', scBlock.tagName, 'details');
+t('the summary says what it is, in the words of their own service',
+  (byClass(scBlock, 'sc__sum')[0] || {})._text, "What's included in your first clean");
+const scItems = (byClass(scBlock, 'sc__list')[0] || { children: [] }).children.map(n => n._text);
+t('every included task is listed', scItems.length, deep.included.length);
+t('and they are the service own tasks', scItems[0], deep.included[0]);
+/* Add-ons appear under their own heading. A customer reading "inside the
+   fridge" under a heading that says "included" would be owed a fridge. */
+t('add-ons are separated under their own heading',
+  (byClass(scBlock, 'sc__h')[0] || {})._text, 'Available as paid add-ons');
+t('and listed apart from the included ones',
+  (byClass(scBlock, 'sc__list--addon')[0] || { children: [] }).children
+    .map(n => n._text).join(', '),
+  deep.addOns.join(', '));
+
+const recurBlock = SS.block('CLEAN_STANDARD', 'Recurring clean') || node('none');
+t('a service with no add-ons shows no add-on heading',
+  byClass(recurBlock, 'sc__h').length, 0);
+
+/* ---- one definition, both pages ---- */
+/* Two renderers building their own version of this block is how they drift
+   into describing one booking differently — the same reason scheduleHead is
+   defined once. */
+PORTAL_JS.includes('ServeScope.block(')
+  ? ok('the customer portal calls the shared block')
+  : fail('portal.js does not call ServeScope.block');
+JS.includes('ServeScope.block(')
+  ? ok('the per-job ticket calls it too')
+  : fail('ticket.js does not call ServeScope.block');
+/(function|var)\s+includedBlock/.test(PORTAL_JS + JS)
+  ? fail('a page builds its own included block instead of using the shared one')
+  : ok('neither page owns a copy of it');
+
+/* Both pages must load it and the build must publish it — the exact three-way
+   failure partner-card.js shipped with, where the code was right and the file
+   never reached the page. */
+J_HTML.includes('serve-scope.js')
+  ? ok('j.html loads serve-scope.js')
+  : fail('j.html renders the included list but never loads the file defining it');
+H_HTML.includes('serve-scope.js')
+  ? ok('h.html loads serve-scope.js')
+  : fail('h.html renders the included list but never loads the file defining it');
+BUILD.includes('serve-scope.js')
+  ? ok('and the build publishes it')
+  : fail('serve-scope.js is not on the build allow-list — every page 404s it');
+/const SERVE_SCOPE = \[/.test(JS_SITE)
+  ? fail('script.js still declares SERVE_SCOPE — two copies to keep in step')
+  : ok('script.js reads the shared copy rather than owning one');
 
 console.log('\n' + (bad ? bad + ' FAILURES' : 'all ticket-render checks passed'));
 process.exit(bad ? 1 : 0);

@@ -1994,50 +1994,11 @@ function servePriceCellHtml(size, service) {
 })();
 
 
-/* ------------------------------------------------------------
-   3. Scope of work — the canonical object
-
-   Deliberately a standalone data structure rather than markup. The room-by-room
-   matrix on /services renders from it today; the partner job brief and the
-   photo-verification shot list are meant to render from it next. One source,
-   three consumers — a task added here appears everywhere it should.
-
-     1 = included     0 = not included     2 = paid add-on
-
-   Fridge and oven interiors are coded 2 on First Clean because the calculator
-   sells them there as $45 / $40 toggles (PRICING.ADDONS), and 1 on move-in/out
-   because that service bundles them into its multiplier. Linen change is 1 on
-   recurring (free, per the plan), 0 on First Clean, and 0 on move-in/out, where
-   there are no beds to make.
-   ------------------------------------------------------------ */
-const SERVE_SCOPE = [
-    { group: 'Kitchen', tasks: [
-        { task: 'Counters, backsplash, and sink degreased', deep: 1, recurring: 1, moveinout: 1 },
-        { task: 'Exterior of all appliances',               deep: 1, recurring: 1, moveinout: 1 },
-        { task: 'Stovetop and range hood',                  deep: 1, recurring: 1, moveinout: 1 },
-        { task: 'Inside the fridge',                        deep: 2, recurring: 0, moveinout: 1 },
-        { task: 'Inside the oven',                          deep: 2, recurring: 0, moveinout: 1 },
-        { task: 'Inside cabinets and drawers',              deep: 0, recurring: 0, moveinout: 1 },
-    ]},
-    { group: 'Bathrooms', tasks: [
-        { task: 'Toilet, tub, and sink disinfected',        deep: 1, recurring: 1, moveinout: 1 },
-        { task: 'Mirrors and fixtures polished',            deep: 1, recurring: 1, moveinout: 1 },
-        { task: 'Shower glass and tile detailed',           deep: 1, recurring: 0, moveinout: 1 },
-        { task: 'Grout scrubbed and brightened',            deep: 1, recurring: 0, moveinout: 1 },
-    ]},
-    { group: 'Bedrooms &amp; living', tasks: [
-        { task: 'Surfaces dusted, floors vacuumed',         deep: 1, recurring: 1, moveinout: 1 },
-        { task: 'Under and behind movable furniture',       deep: 1, recurring: 0, moveinout: 1 },
-        { task: 'Closets and shelving',                     deep: 0, recurring: 0, moveinout: 1 },
-        { task: 'Linen change',                             deep: 0, recurring: 1, moveinout: 0 },
-    ]},
-    { group: 'Throughout', tasks: [
-        { task: 'Floors vacuumed and mopped',               deep: 1, recurring: 1, moveinout: 1 },
-        { task: 'Baseboards and door frames',               deep: 1, recurring: 0, moveinout: 1 },
-        { task: 'Switch plates and handles',                deep: 1, recurring: 0, moveinout: 1 },
-        { task: 'Interior windows, sills, and tracks',      deep: 0, recurring: 0, moveinout: 1 },
-    ]},
-];
+/* Scope of work — SERVE_SCOPE now lives in serve-scope.js, loaded as its
+   own tag before this file. It moved because /h and /j render from it too
+   and load nothing else from this bundle; see that file's header. The
+   marks and the matrix renderer below stay here — they are how /services
+   draws it, not what it says. */
 
 const SERVE_SCOPE_MARKS = {
     1: { glyph: '✓', label: 'Included',     cls: 'is-yes' },

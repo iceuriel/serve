@@ -13,6 +13,73 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-13, Claude Code: r37, what a booking actually includes
+
+**Committed, NOT deployed.** Paste `apps-script/webhook.gs` into Leads MASTER.
+The site half ships on push. Either order: the payload gains a field the old
+pages ignore, and the new pages render nothing without it.
+
+**Each booking on /h and /j now carries a closed "What's included" dropdown**,
+listing what that booking's own service covers, with paid add-ons named
+separately underneath. Closed by default — someone opening their portal wants
+the date and the price; what a deep clean covers is the second question.
+
+**`SERVE_SCOPE` moved out of `script.js` into `serve-scope.js`.** It had to:
+/h and /j carry a signed token and deliberately load nothing from the marketing
+bundle, so the data was unreachable from the two pages that most needed it. The
+file's own comment had said "one source, three consumers" since it was written.
+Four pages load it now and three `cp` lines publish it.
+
+**The renderer lives there too, not in the two pages.** Same reason
+`scheduleHead` lives in one file: two pages building their own version of a
+block is how they drift into describing one booking differently. Both call
+`ServeScope.block()`, and a test asserts neither owns a copy.
+
+**NOT the booking-flow accordion.** `INCLUDED_FIRST` in script.js only knows
+First vs Move-out and has no recurring column, so it cannot describe a
+recurring booking. `SERVE_SCOPE` has all three. Anyone tempted to unify them
+should start from SERVE_SCOPE, not from the accordion.
+
+**Named "What's included", not "Scope".** The partner ticket already has
+`section('Scope')` and it means the rooms and their instructions.
+
+**Lists are flat, not grouped**, because the group labels carry HTML entities
+(`Bedrooms &amp; living`) that are correct for the matrix's innerHTML and would
+render literally through textContent, which is how the token pages build nodes.
+
+**The portal booking row gained `serviceCode`** alongside r36's `frequency`.
+The label is prose and may be reworded; the code is the join into SERVE_SCOPE.
+An unknown code renders NOTHING rather than another service's promises.
+
+**Three test bugs of mine in this one, all worth remembering.** (1)
+`ticket-render.test.js`'s `t()` is DEEP EQUALITY — `t(label, got, want)` —
+while `portal.test.js`'s is a boolean. Eight assertions written in the wrong
+idiom compared `true` against `undefined` and failed while the thing they
+checked was correct; there is now a note in the file. (2) The render assertions
+indexed into `byClass(...)[0]` , so a mutation that emptied the list CRASHED the
+suite instead of failing — a crash proves nothing about whether an assertion
+bites. Every lookup degrades to an empty node now. (3) The mutation runner
+matched the `ok()` wording rather than the `fail()` wording and reported a MISS
+on a mutation the suite had caught.
+
+**Verified.** 26/26 test files pass. Five deliberate mutations, each failing a
+specific assertion: an unknown service falling back to the deep list, a
+recurring clean reading the deep column, paid add-ons promised as included, the
+add-on heading losing its class, and the portal not rendering the block at all.
+`serve-scope.js` and `portal.js` restored afterwards.
+
+**STILL QUEUED from the same request, in the founder's order:**
+2. A projected next recurring visit when a first clean is booked with a plan
+   (weekly +7d, biweekly +14d, monthly +1 month, same time). r36 put
+   `frequency` in the portal payload, which is the input it needs.
+   **OPEN DECISION, put to the founder and not yet answered:** is that second
+   visit a REAL JOBS row or a PROJECTION? A projection has no vendor, no slot
+   and no price, and item 3 cannot cancel or reschedule what is not a row.
+3. Cancel and reschedule per upcoming booking, reschedule tied to the
+   AVAILABILITY feed with an earlier/later fallback. Asked for last.
+
+---
+
 ## Current work — 2026-09-13, Claude Code: r36, the cadence does not rename the visit
 
 **Committed, NOT deployed.** Paste `apps-script/webhook.gs` into Leads MASTER.

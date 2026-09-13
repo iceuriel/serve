@@ -28,6 +28,7 @@ const read = f => fs.readFileSync(path.join(REPO_ROOT, f), 'utf8').replace(/\r\n
 const SITE     = read('script.js');
 const ENGINE   = read('pricing-engine.js');   // the engine moved out of script.js on 2026-09-01
 const GEO      = read('serve-geo-data.js');
+const SCOPE    = read('serve-scope.js');    // moved out of script.js in r37
 const INDEX    = read('index.html');
 const PRICING  = read('pricing.html');
 const SERVICES = read('services.html');
@@ -128,7 +129,7 @@ function runModule(opts) {
      than throwing — that is the degradation path, and it is asserted below. */
   const geo = opts.withoutGeo ? '' : GEO + '\n';
 
-  vm.runInContext(geo + engine + '\n' + shared + exports, box);
+  vm.runInContext(geo + SCOPE + '\n' + engine + '\n' + shared + exports, box);
   return { box, els, location, mod: box.__serve };
 }
 
@@ -297,7 +298,11 @@ const scope     = run.mod.SERVE_SCOPE;
 const scopeHtml = run.els.scopeRows.innerHTML;
 const taskCount = scope.reduce((n, g) => n + g.tasks.length, 0);
 
-t('SERVE_SCOPE is exported to module scope for its other two consumers', Array.isArray(scope));
+t('SERVE_SCOPE is exported to module scope for its other consumers', Array.isArray(scope));
+/* r37: it lives in serve-scope.js now, loaded by /services, /h and /j. This
+   suite concatenates it the way a page loads it as a separate tag. */
+t('and script.js no longer owns a second copy',
+  !/const SERVE_SCOPE = \[/.test(SITE), 'script.js still declares SERVE_SCOPE');
 t('every group rendered', (scopeHtml.match(/serve-matrix__group/g) || []).length === scope.length);
 t('every task rendered', (scopeHtml.match(/serve-matrix__task/g) || []).length === taskCount);
 t('every task has a mark in all three columns',

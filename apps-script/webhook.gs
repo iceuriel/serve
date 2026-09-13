@@ -1,9 +1,21 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-13  ·  master  ·  r36 — the cadence does not rename the visit
+ * VERSION STAMP:  2026-09-13  ·  master  ·  r37 — every booking says what it includes
  *
- * r36 = THE CADENCE DESCRIBES THE PLAN, NOT THIS VISIT. A customer who booked
+ * r37 = EVERY BOOKING SAYS WHAT IT ACTUALLY INCLUDES. The customer portal and
+ *      the per-job ticket render a closed "What's included" list from
+ *      SERVE_SCOPE, which moved into its own file (serve-scope.js) because
+ *      those two pages carry a signed token and load nothing from the
+ *      marketing bundle — so the data they most needed was the one thing they
+ *      could not reach.
+ *
+ *      THIS FILE'S PART IS ONE FIELD: the portal booking row now carries
+ *      `serviceCode` beside r36's `frequency`. The label is prose and may be
+ *      reworded at any time; the code is the join into that scope table. A
+ *      code the table has no column for renders NOTHING on the page rather
+ *      than another service's list, which would be a promise nobody made.
+ * * r36 = THE CADENCE DESCRIBES THE PLAN, NOT THIS VISIT. A customer who booked
  *      a First Clean and asked for a weekly plan opened their portal and saw
  *      "Recurring clean" as the upcoming service. The visit they are about to
  *      receive is a deep clean; the weekly part starts after it.
@@ -1248,7 +1260,7 @@ function doGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-13 r36" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-13 r37" });
 }
 
 
@@ -2876,6 +2888,10 @@ function buildPortalModel(ss, contact) {
       var row = {
         bookingId:    b.bookingId,
         photos:       publicBookingPhotos(ss, b.bookingId),
+        serviceCode:  b.serviceCode,
+        /* r37. The code, not only the label: the portal renders what a service
+           includes from SERVE_SCOPE, which is keyed by code. The label is prose
+           and may be reworded; the code is the join. */
         serviceCode:  b.serviceCode,
         serviceLabel: SERVICE_CODES[b.serviceCode] || b.serviceLabel,
         /* r36. The plan the customer chose, beside the visit they are getting.

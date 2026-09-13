@@ -299,6 +299,10 @@
         var inner = el('div', 'pb__body');
         if (b.propertyLabel) add(inner, line('Home', b.propertyLabel));
         if (b.addOns) add(inner, line('Add-ons', b.addOns));
+        /* One definition, in serve-scope.js beside the data it renders. */
+        if (typeof ServeScope !== 'undefined') {
+            add(inner, ServeScope.block(b.serviceCode, b.serviceLabel));
+        }
         if (b.completed) {
             if (typeof ServePhotos !== 'undefined') {
                 var pastRooms = [];
