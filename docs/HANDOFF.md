@@ -47,9 +47,21 @@ should start from SERVE_SCOPE, not from the accordion.
 (`Bedrooms &amp; living`) that are correct for the matrix's innerHTML and would
 render literally through textContent, which is how the token pages build nodes.
 
-**The portal booking row gained `serviceCode`** alongside r36's `frequency`.
-The label is prose and may be reworded; the code is the join into SERVE_SCOPE.
-An unknown code renders NOTHING rather than another service's promises.
+**CORRECTION to what r37's commit message says.** It claims the portal booking
+row "gained `serviceCode`". It did not — that key was already there, and r37
+only started USING it. Worse, the patch added a SECOND copy of the key to the
+same object literal: legal JavaScript, last one wins, so everything worked and
+no test could see it. Removed. The commit message is pushed and stands as
+written; this is the correction of record.
+
+Cause, because it will repeat otherwise: the check was `grep -n 'serviceLabel:'
+-A 10`, and `-A` prints only the lines AFTER a match. The existing key sat
+directly ABOVE the line searched for and was invisible. Use `-B` as well as
+`-A` before concluding a field is absent from a view model.
+
+What is true: the label is prose and may be reworded, the code is the join
+into SERVE_SCOPE, and an unknown code renders NOTHING rather than another
+service's promises.
 
 **Three test bugs of mine in this one, all worth remembering.** (1)
 `ticket-render.test.js`'s `t()` is DEEP EQUALITY — `t(label, got, want)` —

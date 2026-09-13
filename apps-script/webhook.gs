@@ -2888,10 +2888,12 @@ function buildPortalModel(ss, contact) {
       var row = {
         bookingId:    b.bookingId,
         photos:       publicBookingPhotos(ss, b.bookingId),
-        serviceCode:  b.serviceCode,
-        /* r37. The code, not only the label: the portal renders what a service
+        /* The code, not only the label: the portal renders what a service
            includes from SERVE_SCOPE, which is keyed by code. The label is prose
-           and may be reworded; the code is the join. */
+           and may be reworded; the code is the join.
+
+           This key was ALREADY on the row before r37 — that release only
+           started using it, and briefly added a second copy of it here. */
         serviceCode:  b.serviceCode,
         serviceLabel: SERVICE_CODES[b.serviceCode] || b.serviceLabel,
         /* r36. The plan the customer chose, beside the visit they are getting.
