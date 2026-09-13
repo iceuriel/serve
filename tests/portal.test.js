@@ -1194,11 +1194,16 @@ t('and the price they were quoted, not one recomputed today',
 t('it names the visit it follows rather than inventing a date',
   P21.plan && P21.plan.afterJobId === 'SRV-20260920-AAAAAA', P21.plan);
 
-/* A WHITELIST like every other view model here. */
+/* A WHITELIST like every other view model here.
+
+   Read through `|| {}` deliberately: a change that stops plans matching makes
+   this null, and Object.keys(null) THROWS — killing the file before every
+   later assertion, including ones in other sections that would have caught
+   the change honestly. Never dereference a value a mutation can null. */
 t('the plan exposes exactly the named fields',
-  JSON.stringify(Object.keys(P21.plan).sort()) ===
+  JSON.stringify(Object.keys(P21.plan || {}).sort()) ===
     JSON.stringify(['afterJobId','expiresAt','frequency','planId','price']),
-  Object.keys(P21.plan));
+  Object.keys(P21.plan || {}));
 
 /* NOTHING MAY BE BOOKED BY OFFERING A PLAN. This is the whole point of the
    release: an offer that quietly consumed a slot would be precisely the thing
@@ -1222,9 +1227,13 @@ t('an unreadable window leaves the plan standing rather than expiring it',
   !!planNow());
 
 /* ---- it is one customer's plan ---- */
+/* r40: distinguished by lead_id, not contact_id. Plans are matched on lead_id
+   now, so a fixture that differed only by contact_id would be VISIBLE here and
+   this assertion would silently stop testing isolation. */
 onlyPlan();
-pushPlan({ plan_id: 'PLN-THEIRS', contact_id: 'CON-0002' });
-t('another contact plan is not visible here', planNow() === null);
+pushPlan({ plan_id: 'PLN-THEIRS', contact_id: 'CON-0002',
+           lead_id: 'other@example.com' });
+t('another customer plan is not visible here', planNow() === null);
 
 /* ---- a confirmed plan is no longer an open offer ---- */
 onlyPlan();
@@ -1240,6 +1249,62 @@ t('a missing RECURRING_PLANS tab still returns the portal',
   P21b.ok === true && (P21b.bookings || []).length > 0, P21b.error);
 t('and simply offers no plan', P21b.plan === null, P21b.plan);
 T.tabs.RECURRING_PLANS = savedPlans;
+
+
+/* ------------------------------------------------------------------
+   r40 — a plan is found by lead_id, not contact_id.
+
+   The r39 backfill wrote ten plans and none appeared in a portal. They were
+   correct rows that matched nobody: the backfill read contact_id off the JOBS
+   row, and JOBS.contact_id is not reliably populated — it self-backfills onto
+   LEADS for older rows and never onto JOBS. The portal's own chain is
+   contact_id -> LEADS -> lead_id -> JOBS precisely to avoid depending on it.
+   ------------------------------------------------------------------ */
+head('22. r40 — a backfilled plan reaches the customer it belongs to');
+
+/* THE EXACT SHAPE THE BACKFILL PRODUCED: a real lead_id and a blank contact_id,
+   because the JOBS row it was built from had no contact to copy. */
+onlyPlan();
+pushPlan({ plan_id: 'PLN-BLANK', contact_id: '' });
+const blankContact = planNow();
+t('a plan with NO contact_id still reaches its customer',
+  !!blankContact && blankContact.planId === 'PLN-BLANK', blankContact);
+t('carrying the cadence and the price it was quoted at',
+  !!blankContact && blankContact.frequency === 'weekly' && blankContact.price === 111,
+  blankContact);
+
+/* lead_id is an email and cases drift between a form and a sheet. */
+onlyPlan();
+pushPlan({ plan_id: 'PLN-CASE', contact_id: '', lead_id: 'Uriel@Example.com  ' });
+t('and matches regardless of case or stray spaces', !!planNow(), planNow());
+/* That covers the ROW side — the stored lead is trimmed and lower-cased. The
+   lead being ASKED about is normalised too, and nothing above exercises it:
+   the portal always passes an already-clean address. Asked directly with a
+   messy one, it must still find the plan. */
+t('and tolerates a messy lead on the way in too',
+  !!S.clientRecurringPlan(T.ss, '  URIEL@Example.com  '),
+  S.clientRecurringPlan(T.ss, '  URIEL@Example.com  '));
+
+/* A plan belonging to somebody else must still be invisible — the isolation
+   this release could have quietly broken. */
+onlyPlan();
+pushPlan({ plan_id: 'PLN-OTHER', contact_id: 'CON-0001', lead_id: 'other@example.com' });
+t('a plan for another lead is not shown, even with this contact_id on it',
+  planNow() === null, planNow());
+
+/* A blank lead_id matches nothing rather than matching everything — the failure
+   mode that would show one customer another customer's plan. */
+onlyPlan();
+pushPlan({ plan_id: 'PLN-NOLEAD', contact_id: '', lead_id: '' });
+t('a plan with no lead_id at all reaches nobody', planNow() === null, planNow());
+
+/* THE GUARD ITSELF. The assertion above passes on the comparison — this
+   customer has a real lead_id, so a blank one on the row simply does not match.
+   It says nothing about what happens when the CALLER has no lead, which is
+   where '' !== '' is false and every blank-lead plan would match at once.
+   Asked directly, a blank lead must answer with nothing. */
+t('asked for a blank lead, it answers with nothing at all',
+  S.clientRecurringPlan(T.ss, '') === null, S.clientRecurringPlan(T.ss, ''));
 
 console.log('\n' + (bad ? bad + ' FAILURES' : 'ALL ASSERTIONS PASSED'));
 process.exit(bad ? 1 : 0);

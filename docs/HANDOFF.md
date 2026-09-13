@@ -13,6 +13,71 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-13, Claude Code: r40, a plan is found by lead_id
+
+**Committed, NOT deployed.** Paste `apps-script/webhook.gs` into Leads MASTER.
+No backfill re-run is needed — the ten plans r39 already wrote become visible
+the moment this is pasted.
+
+**The bug.** r39's backfill wrote ten plans and not one appeared in a portal.
+They were correct rows that matched nobody: the backfill read `contact_id` off
+the JOBS row, and `clientRecurringPlan` matched on it.
+
+**Why that was wrong, and it is written down a few hundred lines above the code
+that got it wrong.** The portal chain is `contact_id -> LEADS -> lead_id ->
+every JOBS row with that lead_id`, and the comment there says it exists
+precisely to avoid depending on `JOBS.contact_id`. That column is not reliably
+populated: it self-backfills onto LEADS for older rows and never onto JOBS. So
+every plan built from a booking taken before that column was filled carried a
+blank contact and was invisible — which is every booking the founder had.
+
+**The fix.** Plans are matched on `lead_id`, JOBS's own join key, which is
+always present and is the same seam `getContactBookings` uses. Both sides are
+trimmed and lower-cased, because a lead_id is an email and case drifts between
+a form and a sheet. `contact_id` stays on the row as reference data; it is
+simply no longer what anything matches on. Nothing needed repairing.
+
+**A test that would have silently stopped testing.** The r38 isolation check
+("another contact plan is not visible here") distinguished rows by `contact_id`
+while leaving the default `lead_id`. Under lead matching that row becomes
+VISIBLE, so the fixture now differs by `lead_id` — otherwise the assertion
+would have kept passing while no longer testing isolation at all.
+
+### THE RULE THIS RELEASE EARNED: never dereference a value a mutation can null
+
+Four of five r40 mutations first reported MISSED for ONE reason. r38's
+whitelist assertion did `Object.keys(P21.plan)`, and any mutation that stops
+plans matching makes that null — so the file THREW at that line and died before
+reaching the r40 assertions that would have failed honestly. The guards were
+fine; the file never got far enough to exercise them.
+
+That is the THIRD instance of this shape in one day: r37's `byClass(...)[0]`,
+r39's `rows[0]`, and now this. A crash proves nothing about the assertion that
+crashed, and worse, it silently disarms every assertion after it in the file.
+Read through `|| {}` / `|| []` in any assertion whose subject a change could
+remove.
+
+**Two mutations of mine were also wrong, and are recorded rather than quietly
+fixed.** One weakened the row comparison to prove the blank-lead guard, but
+`if (!want) return null;` returns before the loop, so it could never express
+itself — blank leads are defended twice and it was deleted rather than propped
+up with a contrived test. The other stripped normalisation from the CALLER side
+while the fixture's caller value was already clean, so it changed nothing; it
+now targets the ROW side, and the caller side gained a direct assertion of its
+own. Both sides of that comparison are now covered.
+
+**Verified.** 26/26 test files pass. Five deliberate mutations, each failing a
+specific assertion: matching on contact_id again (the r39 bug restored), a
+blank lead matching every plan, the stored lead no longer trimmed and
+lower-cased, the asked-about lead no longer normalised, and the portal asking
+by contact instead of lead. webhook.gs restored.
+
+**STILL QUEUED, unchanged:** confirm & schedule (with a slot reader for /h),
+the same-provider request, reschedule/cancel with the anchor as source of
+truth, then the portal settings tab.
+
+---
+
 ## Current work — 2026-09-13, Claude Code: r39, plans for earlier bookings
 
 **Committed, NOT deployed. Two steps, and the second is run once by hand:**

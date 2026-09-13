@@ -1,7 +1,27 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-13  ·  master  ·  r39 — plans for earlier bookings
+ * VERSION STAMP:  2026-09-13  ·  master  ·  r40 — a plan is found by lead_id
+ *
+ * r40 = A PLAN IS FOUND BY lead_id, NOT BY contact_id. The r39 backfill wrote
+ *      ten plans and not one of them appeared in a portal. They were correct
+ *      rows; they simply matched nobody.
+ *
+ *      THE CAUSE, AND IT IS WRITTEN DOWN A FEW HUNDRED LINES ABOVE: the portal
+ *      chain is contact_id -> LEADS -> lead_id -> every JOBS row with that
+ *      lead_id, and that chain exists precisely to avoid depending on
+ *      JOBS.contact_id, which is not reliably populated. contact_id
+ *      self-backfills onto LEADS for older rows, never onto JOBS. The backfill
+ *      read it off the JOBS row anyway, so every plan for a booking taken
+ *      before that column was filled carried a blank contact and was invisible.
+ *
+ *      Plans are now matched on lead_id, which is JOBS's own join key and is
+ *      always there. That fixes the rows already written — nothing has to be
+ *      repaired — and it is the same seam getContactBookings uses, so a plan is
+ *      found exactly the way that customer's bookings are.
+ *
+ *      contact_id stays ON the row as reference data. It is simply no longer
+ *      the thing anything matches on.
  *
  * r39 = PLANS FOR THE BOOKINGS THAT CAME BEFORE r38. createRecurringPlan runs
  *      inside doPost, so it only ever sees NEW bookings. Every clean already
@@ -1332,7 +1352,7 @@ function doGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-13 r39" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-13 r40" });
 }
 
 
@@ -3047,12 +3067,18 @@ function createRecurringPlan(ss, data, record, ids) {
 /**
  * The plan to show this customer, or null.
  *
+ * MATCHED ON lead_id, NOT contact_id. See r40: the portal's own chain is
+ * contact_id -> LEADS -> lead_id -> JOBS, and it is built that way because
+ * JOBS.contact_id is not reliably populated — it self-backfills onto LEADS for
+ * older rows and never onto JOBS. A plan keyed on it is invisible for exactly
+ * the customers who have been around longest.
+ *
  * A WHITELIST, like every other view model here: a column added to the tab
  * later cannot reach a browser until somebody names it. The newest PENDING plan
  * only — a customer with a lapsed one and a live one is being asked about the
  * live one.
  */
-function clientRecurringPlan(ss, contactId) {
+function clientRecurringPlan(ss, leadId) {
   try {
     var sheet = ss.getSheetByName(RECURRING_PLANS_TAB);
     if (!sheet) return null;
@@ -3061,12 +3087,15 @@ function clientRecurringPlan(ss, contactId) {
     if (last < 2) return null;
 
     var rows = sheet.getRange(2, 1, last - 1, h.length).getValues();
-    var want = String(contactId || "").trim();
+    /* Lower-cased and trimmed, the same way getContactBookings matches it: a
+       lead_id is an email address and cases drift between forms. */
+    var want = String(leadId || "").trim().toLowerCase();
+    if (!want) return null;
     var best = null;
     for (var r = 0; r < rows.length; r++) {
       var row = {};
       h.forEach(function (name, i) { row[name] = rows[r][i]; });
-      if (String(row.contact_id || "").trim() !== want) continue;
+      if (String(row.lead_id || "").trim().toLowerCase() !== want) continue;
       if (planStatus(row) !== "pending") continue;
       if (!best || String(row.created_at) > String(best.created_at)) best = row;
     }
@@ -3117,8 +3146,11 @@ function buildPortalModel(ss, contact) {
     homes:     homes,
     /* r38. The plan they were offered, if one is still open. null is the
        ordinary answer: most bookings carry no cadence, and a lapsed window
-       reads as null too. */
-    plan:      clientRecurringPlan(ss, contact.contactId),
+       reads as null too.
+
+       r40: matched on lead_id, the same seam getContactBookings uses above.
+       contact_id would miss every plan whose JOBS row predates that column. */
+    plan:      clientRecurringPlan(ss, contact.leadId),
     bookings:  bookings.map(function (b) {
       var done = !!b.completedDate;
       var row = {
