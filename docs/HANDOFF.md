@@ -13,6 +13,83 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-13, Claude Code: r38, a plan is an offer not a booking
+
+**Committed, NOT deployed, and it needs a TAB CREATED before it does anything.**
+
+1. Paste `apps-script/webhook.gs` into Leads MASTER.
+2. Create a `RECURRING_PLANS` tab in **Leads MASTER** with row 1 exactly:
+   `plan_id · contact_id · lead_id · origin_job_id · property_id · frequency ·
+   quoted_price · created_at · expires_at · status · anchor_date · anchor_time ·
+   preferred_vendor_id · confirmed_job_id`
+
+Until that tab exists nothing happens at all — no plan is recorded and the
+portal shows no prompt. That is the designed failure, not a bug: a missing tab
+costs the plan and never the booking.
+
+**THE FOUNDER'S DESIGN DECISION, recorded because it shapes everything after.**
+A customer who books a first clean and picks a cadence has asked for ONE clean
+and expressed an intention about the rest. The plan therefore writes **no JOBS
+row, holds no availability slot and assigns no vendor**. A slot held for a clean
+nobody confirmed is a slot a paying customer could have had. It becomes a real
+booking only when they confirm it and choose a time in their portal.
+
+**What r38 ships:** the plan is recorded in RECURRING_PLANS at booking time and
+shown in the portal as an offer — the cadence, the price they were quoted, and
+the date the price is held until. Seven-day window. Columns and rules are in
+SCHEMA.
+
+**The price needed no new capture.** `recurring_weekly` / `recurring_biweekly` /
+`recurring_monthly` have been written into `quote_meta` on every first clean
+since the calculator shipped, so the plan quotes what the customer was actually
+shown rather than a number recomputed later against today's table.
+
+**Nothing ever writes `expired`.** `planStatus()` compares the window against
+now on every read, so a lapsed plan simply reads as gone — no nightly trigger to
+fail silently, no stored state drifting while nobody looks. Both sides are
+parsed, not compared as text, because the stamps carry an offset.
+
+**The card is display-only on purpose.** Confirm-and-schedule is the next
+release; a button that does nothing is worse than no button.
+
+**A MISSED mutation worth remembering.** Disabling `planAlreadyOffered()`
+changed no test. Cause: `doPost` answers a duplicate `submission_id` and returns
+BEFORE `createRecurringPlan` is ever called, so the replay assertion was passing
+on the upstream guard and my comment claiming "a retried submission reaches
+this" was false. The guard is kept — it stops being decorative the moment there
+is a second caller, which is confirm-and-schedule and any backfill over bookings
+taken before r38 — and is now described honestly and exercised by a direct test.
+
+**`writeRow` is called with an explicit empty map** for this tab. It otherwise
+translates keys through `HEADER_MAP`, which is built for JOBS: `quoted_price`
+and `frequency` are real columns here, and a future entry there could silently
+rewrite one into a column this tab does not have, where writeRow drops it and
+logs a line nobody reads.
+
+**Verified.** 26/26 test files pass. Seven deliberate mutations, each failing a
+specific assertion: a lapsed window still reading as open, an unreadable window
+silently expiring an offer, one customer seeing another's plan, a confirmed plan
+offered again, a one-off booking offered a plan, the same plan offered twice to
+one booking, and a move-out sold a recurring plan. webhook.gs restored.
+
+**STILL QUEUED, in the founder's order:**
+- **Confirm & schedule.** A button on the plan card that pulls open slots from
+  the AVAILABILITY feed and creates the real booking. `/h` has no slot reader
+  today — `booking-live.js` is only a poller — so it needs one, reusing the
+  site's `filterSlots` horizon rules rather than a second implementation.
+  Confirmation should synthesise a booking-form payload and drive
+  `buildJobRecord`, NOT grow a parallel way to create a job. Mint the
+  `submission_id` deterministically from the plan so a double-tapped button
+  dedupes through the existing `alreadyWritten` guard into one booking.
+- **"Same service provider" request** — writes `preferred_vendor_id`, a dispatch
+  preference and never a promise shown to the customer.
+- **Reschedule / cancel** per upcoming booking. The ANCHOR is source of truth:
+  a one-off reschedule moves that visit only, and the next is counted from the
+  anchor rather than from the visit that moved.
+- **Then** a settings tab in the portal for the plan and home layout.
+
+---
+
 ## Current work — 2026-09-13, Claude Code: r37, what a booking actually includes
 
 **Committed, NOT deployed.** Paste `apps-script/webhook.gs` into Leads MASTER.

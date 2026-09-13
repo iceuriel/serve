@@ -276,10 +276,40 @@
             bodyEl.appendChild(el('h2', 'portal__h', 'Upcoming'));
             upcoming.forEach(function (b) { bodyEl.appendChild(bookingRow(b)); });
         }
+        /* r38. After the real bookings, because it is not one of them. */
+        add(bodyEl, planCard(d.plan));
         if (past.length) {
             bodyEl.appendChild(el('h2', 'portal__h', 'Past'));
             past.forEach(function (b) { bodyEl.appendChild(bookingRow(b)); });
         }
+    }
+
+    /**
+     * The recurring plan they were offered, which is NOT a booking.
+     *
+     * It reads as an offer with a deadline rather than as an appointment: no
+     * date, because nobody has chosen one, and the price they were quoted
+     * rather than a number recomputed today. Confirming it is the next
+     * release; until then this says plainly that it is waiting on them instead
+     * of showing a button that does nothing.
+     */
+    function planCard(plan) {
+        if (!plan || !plan.frequency) return null;
+        var wrap = el('div', 'plan');
+        wrap.appendChild(el('div', 'plan__tag', 'Not booked yet'));
+        wrap.appendChild(el('div', 'plan__title', 'Your ' + plan.frequency + ' plan'));
+
+        var price = money(plan.price);
+        if (price) wrap.appendChild(el('div', 'plan__price', price + ' per visit'));
+
+        wrap.appendChild(el('p', 'plan__body',
+            'You asked for ' + plan.frequency + ' cleans after your first visit. ' +
+            'Nothing is scheduled and nothing is charged until you confirm a time.'));
+        if (plan.expiresAt) {
+            wrap.appendChild(el('div', 'plan__when',
+                'This price is held until ' + (prettyDate(plan.expiresAt) || plan.expiresAt) + '.'));
+        }
+        return wrap;
     }
 
     /** The title line is service + date, as asked; the detail opens on click. */

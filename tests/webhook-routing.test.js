@@ -786,5 +786,88 @@ t('doGet with no params is still the health check',
   health.ok === true && !!stampRev && new RegExp('\\br' + stampRev + '\\b').test(health.version),
   health.version + ' vs stamp r' + stampRev);
 
+
+/* ------------------------------------------------------------------
+   r38 — a cadence is recorded as an OFFER at booking time, never as a job.
+   ------------------------------------------------------------------ */
+const PLAN_COLS = ['plan_id','contact_id','lead_id','origin_job_id','property_id',
+  'frequency','quoted_price','created_at','expires_at','status','anchor_date',
+  'anchor_time','preferred_vendor_id','confirmed_job_id'];
+const planCol = (n) => PLAN_COLS.indexOf(n);
+
+{
+  const C = build(LEADS_FULL);
+  C.tabs.RECURRING_PLANS = makeSheet('RECURRING_PLANS', PLAN_COLS);
+  const jobsBefore = C.tabs.JOBS._rows.length;
+  const r = C.post(Object.assign({}, BASE, { submission_id: 'plan-1' }));
+  const rows = C.tabs.RECURRING_PLANS._rows.slice(1);
+
+  t('a first clean with a cadence records one plan', rows.length === 1, rows.length);
+  t('priced at the cadence they chose',
+    String(rows[0][planCol('quoted_price')]) === '122', rows[0][planCol('quoted_price')]);
+  t('pending, not booked',
+    String(rows[0][planCol('status')]) === 'pending', rows[0][planCol('status')]);
+  t('and pointing at the clean it follows',
+    /^SRV-/.test(String(rows[0][planCol('origin_job_id')])), rows[0][planCol('origin_job_id')]);
+  t('the booking itself still succeeded', r.status === 'ok', r.status);
+  /* The rule the release exists for: an offer takes no capacity. */
+  t('exactly ONE job row was written, not two',
+    C.tabs.JOBS._rows.length === jobsBefore + 1, C.tabs.JOBS._rows.length - jobsBefore);
+
+  /* A replay must not offer the same plan twice — two deadlines and two prices
+     for one intention. NOTE what this proves: doPost answers a duplicate
+     submission_id and returns before the plan code runs at all, so this is the
+     UPSTREAM guard being verified. planAlreadyOffered is exercised directly
+     below, because disabling it does not move this assertion. */
+  C.post(Object.assign({}, BASE, { submission_id: 'plan-1' }));
+  t('a replay is stopped upstream, before any plan code runs',
+    C.tabs.RECURRING_PLANS._rows.slice(1).length === 1,
+    C.tabs.RECURRING_PLANS._rows.slice(1).length);
+}
+{
+  /* A one-off first clean has nothing to offer. */
+  const C = build(LEADS_FULL);
+  C.tabs.RECURRING_PLANS = makeSheet('RECURRING_PLANS', PLAN_COLS);
+  C.post(Object.assign({}, BASE, { submission_id: 'plan-once', frequency_selected: 'once' }));
+  t('a one-off booking records no plan',
+    C.tabs.RECURRING_PLANS._rows.slice(1).length === 0,
+    C.tabs.RECURRING_PLANS._rows.slice(1).length);
+}
+{
+  /* A move-out on a cadence is not a first clean and gets no plan. */
+  const C = build(LEADS_FULL);
+  C.tabs.RECURRING_PLANS = makeSheet('RECURRING_PLANS', PLAN_COLS);
+  C.post(Object.assign({}, BASE, { submission_id: 'plan-move',
+    service: 'move_out', service_type: 'move_out' }));
+  t('a move-out records no plan',
+    C.tabs.RECURRING_PLANS._rows.slice(1).length === 0);
+}
+{
+  /* A missing tab must cost the plan and nothing else. */
+  const C = build(LEADS_FULL);
+  const r = C.post(Object.assign({}, BASE, { submission_id: 'plan-notab' }));
+  t('a booking without the tab still succeeds', r.status === 'ok', r.status);
+  t('and the job row is still there', C.tabs.JOBS._rows.length === 2,
+    C.tabs.JOBS._rows.length);
+}
+{
+  /* planAlreadyOffered, where it actually bites: a caller reaching
+     createRecurringPlan directly, which is what confirming a plan and any
+     pre-r38 backfill will both do. The replay test above cannot reach it. */
+  const C = build(LEADS_FULL);
+  C.tabs.RECURRING_PLANS = makeSheet('RECURRING_PLANS', PLAN_COLS);
+  const ss = C.sandbox.SpreadsheetApp.getActiveSpreadsheet();
+  const planData = { service: 'first_clean', service_type: 'first_clean',
+                     frequency_selected: 'weekly', recurring_weekly: 111 };
+  const planRec  = { job_id: 'SRV-20260101-DIRECT', lead_id: 'direct@example.com' };
+  const first  = C.sandbox.createRecurringPlan(ss, planData, planRec, {});
+  const second = C.sandbox.createRecurringPlan(ss, planData, planRec, {});
+  t('a direct caller offers the plan once', first === 'offered', first);
+  t('offering the same plan twice is refused', second === 'already offered', second);
+  t('and only one row exists for that booking',
+    C.tabs.RECURRING_PLANS._rows.slice(1).length === 1,
+    C.tabs.RECURRING_PLANS._rows.slice(1).length);
+}
+
 console.log('\n' + (bad ? 'FAILURES: ' + bad : 'ALL ASSERTIONS PASSED'));
 process.exit(bad ? 1 : 0);

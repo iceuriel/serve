@@ -449,6 +449,50 @@ separately labelled from old booking notes and crew PROPERTY_MEMORY. Entry codes
 remain write-only and excluded from all view models. Both ticket views receive
 `photos`; portal booking rows include them for upcoming and completed bookings.
 
+### RECURRING_PLANS — one row per plan a customer was OFFERED (r38)
+
+`plan_id · contact_id · lead_id · origin_job_id · property_id · frequency ·
+quoted_price · created_at · expires_at · status · anchor_date · anchor_time ·
+preferred_vendor_id · confirmed_job_id`
+
+**A plan is an offer, not a booking.** Somebody who books a first clean and
+picks a cadence has asked for ONE clean and expressed an intention about the
+rest. Offering a plan writes **no JOBS row, holds no availability slot and
+assigns no vendor** — a slot held for a clean nobody confirmed is a slot a
+paying customer could have had. It becomes a real booking only when the
+customer confirms it and chooses a time in their portal.
+
+This is why it is its own tab rather than columns on JOBS: it has a lifecycle
+JOBS does not (`pending` → `confirmed`, or lapsed), a window that closes, and an
+anchor that later visits are counted from. JOBS is one row per *booking*.
+
+**`plan_id` is `PLN-` plus the origin job's suffix**, so it is derived from the
+booking it came from and one booking can never mint two plans.
+
+**`quoted_price` is what the customer was actually shown**, taken from
+`recurring_weekly` / `recurring_biweekly` / `recurring_monthly` in the origin
+booking's `quote_meta`. It is never recomputed later against today's table — the
+price on screen when they chose is the price being held.
+
+**NOTHING EVER WRITES `expired`.** `planStatus()` compares `expires_at` against
+now on every read, so a lapsed plan simply reads as gone. There is no nightly
+trigger to fail silently and no stored state that drifts while nobody is
+looking. Both sides are parsed rather than compared as text, because the stamps
+carry an offset and `-04:00` does not sort against `-05:00`.
+
+**`anchor_date` / `anchor_time` are the source of truth for every later visit**,
+set when the customer confirms. A one-off reschedule moves that visit only; the
+next one is counted from the anchor, not from the visit that moved.
+
+**`preferred_vendor_id`** records a request for the same partner as last time.
+It is a preference for dispatch, not a guarantee, and it is never shown to the
+customer as one.
+
+**Blank is the normal state.** Most bookings carry no cadence and so have no
+row here at all. A missing tab costs the plan prompt in the portal and nothing
+else — the booking, the portal and every other surface are unaffected.
+
+
 ### PROPERTIES — one row per address
 
 Live header row (17 cols), confirmed 2026-07-28:

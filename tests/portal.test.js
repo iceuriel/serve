@@ -98,6 +98,10 @@ function build() {
     VENDORS: makeSheet('VENDORS', ['vendor_id','status','display_name','logo_url',
       'public_description','partner_since','insurance_verified','service_area',
       'public_rating','public_review_count','rating_source','client_visible']),
+    RECURRING_PLANS: makeSheet('RECURRING_PLANS', ['plan_id','contact_id','lead_id',
+      'origin_job_id','property_id','frequency','quoted_price','created_at',
+      'expires_at','status','anchor_date','anchor_time','preferred_vendor_id',
+      'confirmed_job_id']),
     VENDOR_REVIEWS: makeSheet('VENDOR_REVIEWS', ['vendor_id','quote','author','rating',
       'source','source_url','reviewed_on','client_visible']),
     VENDOR_PHOTOS: makeSheet('VENDOR_PHOTOS', ['vendor_id','image_url','caption',
@@ -1151,6 +1155,91 @@ t('the plan they chose is reported alongside the visit',
 const oneOff = (P20.bookings || []).filter(b => b.bookingId === 'SRV-20260920-AAAAAA')[0];
 t('a one-off booking reports once, not blank',
   !!oneOff && oneOff.frequency === 'once', oneOff && oneOff.frequency);
+
+
+/* ------------------------------------------------------------------
+   r38 — a plan is an offer, not a booking.
+
+   Somebody who books a first clean and picks a cadence has asked for ONE clean
+   and expressed an intention about the rest. Nothing may be scheduled, no slot
+   held and no vendor assigned until they confirm it themselves.
+   ------------------------------------------------------------------ */
+head('21. r38 — the recurring plan a customer was offered');
+
+const PLAN_H = ['plan_id','contact_id','lead_id','origin_job_id','property_id',
+  'frequency','quoted_price','created_at','expires_at','status','anchor_date',
+  'anchor_time','preferred_vendor_id','confirmed_job_id'];
+const planStamp = (msFromNow) => new Date(Date.now() + msFromNow).toISOString();
+const pushPlan = (over) => {
+  const row = Object.assign({
+    plan_id: 'PLN-1', contact_id: 'CON-0001', lead_id: 'uriel@example.com',
+    origin_job_id: 'SRV-20260920-AAAAAA', property_id: 'PROP-0001',
+    frequency: 'weekly', quoted_price: 111,
+    created_at: planStamp(-1000), expires_at: planStamp(6 * 86400000),
+    status: 'pending', anchor_date: '', anchor_time: '',
+    preferred_vendor_id: '', confirmed_job_id: '',
+  }, over || {});
+  T.tabs.RECURRING_PLANS.appendRow(PLAN_H.map(k => row[k]));
+};
+const onlyPlan = () => { T.tabs.RECURRING_PLANS._rows.length = 1; };
+const planNow = () => get({ portal: 'CON-0001', t: MINE }).plan;
+
+pushPlan({});
+const P21 = get({ portal: 'CON-0001', t: MINE });
+t('the open plan reaches the portal', !!P21.plan, P21.plan);
+t('with the cadence they chose', P21.plan && P21.plan.frequency === 'weekly',
+  P21.plan && P21.plan.frequency);
+t('and the price they were quoted, not one recomputed today',
+  P21.plan && P21.plan.price === 111, P21.plan && P21.plan.price);
+t('it names the visit it follows rather than inventing a date',
+  P21.plan && P21.plan.afterJobId === 'SRV-20260920-AAAAAA', P21.plan);
+
+/* A WHITELIST like every other view model here. */
+t('the plan exposes exactly the named fields',
+  JSON.stringify(Object.keys(P21.plan).sort()) ===
+    JSON.stringify(['afterJobId','expiresAt','frequency','planId','price']),
+  Object.keys(P21.plan));
+
+/* NOTHING MAY BE BOOKED BY OFFERING A PLAN. This is the whole point of the
+   release: an offer that quietly consumed a slot would be precisely the thing
+   the founder said not to build. */
+t('offering a plan writes no JOBS row',
+  !(T.tabs.JOBS._rows || []).slice(1).some(r => /^PLN-/.test(String(r[0]))),
+  'a plan id appeared in JOBS');
+t('and no booking claims to be a recurring visit yet',
+  !(P21.bookings || []).some(b => b.bookingId && /^PLN-/.test(b.bookingId)));
+
+/* ---- the window closes on its own ---- */
+onlyPlan();
+pushPlan({ plan_id: 'PLN-OLD', expires_at: planStamp(-86400000) });
+t('a plan past its window reads as gone, with nothing having swept it',
+  planNow() === null, planNow());
+
+/* An unreadable window must not silently delete somebody's offer. */
+onlyPlan();
+pushPlan({ plan_id: 'PLN-ODD', expires_at: 'sometime next week' });
+t('an unreadable window leaves the plan standing rather than expiring it',
+  !!planNow());
+
+/* ---- it is one customer's plan ---- */
+onlyPlan();
+pushPlan({ plan_id: 'PLN-THEIRS', contact_id: 'CON-0002' });
+t('another contact plan is not visible here', planNow() === null);
+
+/* ---- a confirmed plan is no longer an open offer ---- */
+onlyPlan();
+pushPlan({ plan_id: 'PLN-DONE', status: 'confirmed' });
+t('a confirmed plan stops being an open offer', planNow() === null);
+
+/* ---- a missing tab costs the prompt, never the portal ---- */
+onlyPlan();
+const savedPlans = T.tabs.RECURRING_PLANS;
+delete T.tabs.RECURRING_PLANS;
+const P21b = get({ portal: 'CON-0001', t: MINE });
+t('a missing RECURRING_PLANS tab still returns the portal',
+  P21b.ok === true && (P21b.bookings || []).length > 0, P21b.error);
+t('and simply offers no plan', P21b.plan === null, P21b.plan);
+T.tabs.RECURRING_PLANS = savedPlans;
 
 console.log('\n' + (bad ? bad + ' FAILURES' : 'ALL ASSERTIONS PASSED'));
 process.exit(bad ? 1 : 0);

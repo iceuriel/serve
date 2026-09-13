@@ -4462,3 +4462,47 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
     color: var(--color-text);
 }
 .sc__list--addon { color: var(--color-text-muted); }
+
+/* ---- The recurring plan: an offer, not a booking (r38) ------------------ */
+/* Deliberately not styled like a booking row. Someone scanning this page should
+   be able to tell at a glance which of these is happening and which is waiting
+   on them — hence the dashed edge and the tag, not a card that looks booked. */
+.plan {
+    margin-top: 0.9rem;
+    padding: 0.85rem 1rem;
+    border: 1px dashed var(--color-border);
+    border-radius: var(--radius);
+    background: var(--color-bg-light);
+}
+.plan__tag {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-accent);
+}
+.plan__title {
+    font-family: var(--flow-serif);
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--color-dark);
+    margin-top: 0.15rem;
+    text-transform: capitalize;
+}
+.plan__price {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--color-dark);
+    margin-top: 0.2rem;
+}
+.plan__body {
+    font-size: 0.86rem;
+    line-height: 1.55;
+    color: var(--color-text);
+    margin: 0.4rem 0 0;
+}
+.plan__when {
+    font-size: 0.78rem;
+    color: var(--color-text-muted);
+    margin-top: 0.4rem;
+}

@@ -1,7 +1,33 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-13  ·  master  ·  r37 — every booking says what it includes
+ * VERSION STAMP:  2026-09-13  ·  master  ·  r38 — a plan is an offer, not a booking
+ *
+ * r38 = A PLAN IS AN OFFER, NOT A BOOKING. Somebody who books a first clean and
+ *      picks a cadence has asked for one clean and expressed an intention about
+ *      the rest. Until r38 the cadence was a column on that one row and nothing
+ *      else: no second visit existed anywhere, and the portal could not say
+ *      what the plan would cost or when it would start.
+ *
+ *      IT DOES NOT BECOME A JOB HERE. No JOBS row, no availability slot, no
+ *      vendor — because a slot held for a clean nobody has confirmed is a slot
+ *      a paying customer could have had. The plan is recorded in its own tab
+ *      and shown to the customer with the price they were quoted, and it
+ *      becomes a real booking only when they confirm and choose a time.
+ *
+ *      SEVEN DAYS, AND EXPIRY IS EVALUATED ON READ. A pending plan past its
+ *      window simply reads as expired; nothing has to run overnight to make
+ *      that true, so there is no trigger to fail silently and no state that
+ *      drifts while nobody is looking.
+ *
+ *      THE PRICE WAS ALREADY CAPTURED. recurring_weekly / recurring_biweekly /
+ *      recurring_monthly have been written into quote_meta on every first
+ *      clean since the calculator shipped. The plan quotes what they were
+ *      actually shown, not a price recomputed later against today's table.
+ *
+ *      NOTHING HERE MAY FAIL A BOOKING. Creating the plan sits in the same band
+ *      as the vendor stamp, the SMS and the email — each wrapped on its own. A
+ *      missing RECURRING_PLANS tab costs the plan prompt and nothing else.
  *
  * r37 = EVERY BOOKING SAYS WHAT IT ACTUALLY INCLUDES. The customer portal and
  *      the per-job ticket render a closed "What's included" list from
@@ -923,6 +949,20 @@ const INSTRUCTIONS_HEADERS = [
    nonsecret saved flag and timestamp. Hiding a column is not access control.
    No view model reads the private workbook or returns a code. */
 const PROPERTY_ACCESS_TAB = "PROPERTY_ACCESS";
+
+/* r38. A plan a customer has been offered and has not yet confirmed. Its own
+   tab because it has a lifecycle JOBS does not: pending -> confirmed or
+   expired, an anchor day and time that later visits are counted from, and a
+   window that closes. JOBS is one row per BOOKING, and a pending plan is not
+   one.
+
+   Row 1, in Leads MASTER:
+
+     plan_id | contact_id | lead_id | origin_job_id | property_id | frequency |
+     quoted_price | created_at | expires_at | status | anchor_date |
+     anchor_time | preferred_vendor_id | confirmed_job_id
+*/
+const RECURRING_PLANS_TAB = "RECURRING_PLANS";
 const PROPERTY_ACCESS_HEADERS = [
   "property_id",
   "occupancy_choice", "occupancy_detail",
@@ -1096,6 +1136,21 @@ function doPost(e) {
       console.error("vendor_id stamp failed (booking stands): " + stampErr);
     }
 
+    /* r38. The cadence they chose, recorded as an OFFER rather than a booking.
+       No slot is held and no vendor assigned until they confirm it. In the same
+       band as the vendor stamp and the SMS: wrapped on its own, so a failure
+       costs the plan prompt rather than the clean. */
+    var planResult = "skipped";
+    try {
+      planResult = createRecurringPlan(ss, data, record, {
+        contact_id:  leadResult.contact_id || "",
+        property_id: propertyResult.property_id || "",
+      });
+    } catch (planErr) {
+      planResult = "failed";
+      console.error("recurring plan not recorded (booking stands): " + planErr);
+    }
+    console.log("recurring plan " + record.job_id + ": " + planResult);
     /* r26. The customer's own text, after the row exists and after the dedupe,
        so a retried submission cannot text anybody twice. Returns a reason
        rather than throwing; "no consent" and "twilio not configured" are
@@ -1260,7 +1315,7 @@ function doGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-13 r37" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-13 r38" });
 }
 
 
@@ -2856,6 +2911,166 @@ function accessQuestionList(access) {
  * read-only record. One request, no second token, and a finished job is not a
  * form.
  */
+
+/* ============================================================
+   THE RECURRING PLAN  —  r38
+
+   An offer, recorded when a first clean is booked with a cadence attached and
+   shown in the customer's portal until they confirm it or it lapses.
+
+   status is `pending`, `confirmed` or `expired`. NOTHING EVER WRITES
+   `expired` — see planStatus(): the window is read, never swept.
+   ============================================================ */
+
+var PLAN_WINDOW_DAYS = 7;
+
+/** How the cadence is priced, from what the customer was actually shown. */
+function recurringPriceFor(data, frequency) {
+  var f = String(frequency || "").toLowerCase();
+  if (f === "weekly")   return valOrBlank(data.recurring_weekly);
+  if (f === "biweekly") return valOrBlank(data.recurring_biweekly);
+  if (f === "monthly")  return valOrBlank(data.recurring_monthly);
+  return "";
+}
+
+/**
+ * Deterministic, so one booking can never mint two plans.
+ *
+ * Derived from the job it came from rather than randomly, so any caller that
+ * asks twice about one booking gets one answer. NOT because of replays: doPost
+ * returns on a duplicate submission_id long before this is reached.
+ */
+function planIdFor(jobId) {
+  return "PLN-" + String(jobId || "").replace(/^SRV-/, "");
+}
+
+/** The window this plan closes at, in the same stamp shape as received_at. */
+function planExpiresAt(fromMs) {
+  var at = new Date((fromMs || new Date().getTime()) + PLAN_WINDOW_DAYS * 86400000);
+  return Utilities.formatDate(at, BUSINESS_TZ, "yyyy-MM-dd'T'HH:mm:ssXXX");
+}
+
+/**
+ * Has this plan already been offered?
+ *
+ * Its own check rather than alreadyWritten(), which matches on a
+ * `submission_id` column. Carrying a column named for something this tab does
+ * not have, purely to borrow that helper, would read as a mistake later.
+ *
+ * WHAT THIS ACTUALLY DEFENDS: a caller reaching createRecurringPlan directly.
+ * The replay path never gets here — doPost answers a duplicate submission_id
+ * and returns. The direct callers are the ones coming: confirming a plan, and
+ * any backfill over bookings taken before r38.
+ */
+function planAlreadyOffered(sheet, planId) {
+  var h = sheetHeaders(sheet);
+  var col = h.indexOf("plan_id");
+  var last = sheet.getLastRow();
+  if (col === -1 || last < 2) return false;
+  var values = sheet.getRange(2, col + 1, last - 1, 1).getValues();
+  var needle = String(planId).trim();
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i][0]).trim() === needle) return true;
+  }
+  return false;
+}
+
+/**
+ * What a stored row's status actually is right now.
+ *
+ * A pending row past its window is expired and says so, without anything having
+ * written that. Both sides are PARSED rather than compared as text: the stamps
+ * carry an offset, and -04:00 and -05:00 do not sort against each other.
+ */
+function planStatus(row) {
+  var stored = String(row.status || "pending").toLowerCase();
+  if (stored !== "pending") return stored;
+  var ends = Date.parse(String(row.expires_at || ""));
+  if (!ends) return "pending";                 // unreadable window: do not expire it
+  return ends < new Date().getTime() ? "expired" : "pending";
+}
+
+/**
+ * Record the plan a first clean was sold with. Never throws; the caller sits in
+ * the band where nothing may fail a booking.
+ *
+ * ONLY for a first clean carrying a real cadence. A move-out on a plan is not a
+ * thing, and a first clean booked once has nothing to offer.
+ */
+function createRecurringPlan(ss, data, record, ids) {
+  var frequency = String(data.frequency_selected || "").toLowerCase();
+  if (!frequency || frequency === "once") return "no cadence";
+  if (serviceCodeOf(serviceLabel(data), frequency) !== "CLEAN_DEEP") return "not a first clean";
+
+  var sheet = ss.getSheetByName(RECURRING_PLANS_TAB);
+  if (!sheet) return "no " + RECURRING_PLANS_TAB + " tab";
+
+  var planId = planIdFor(record.job_id);
+  if (planAlreadyOffered(sheet, planId)) return "already offered";
+
+  /* An EMPTY translation map on purpose. writeRow() otherwise runs keys through
+     HEADER_MAP, which is built for JOBS — `quoted_price` and `frequency` are
+     real columns here, and a future entry there could silently rewrite one into
+     a column this tab does not have. */
+  writeRow(sheet, {
+    plan_id:       planId,
+    contact_id:    (ids && ids.contact_id) || "",
+    lead_id:       record.lead_id || "",
+    origin_job_id: record.job_id,
+    property_id:   (ids && ids.property_id) || "",
+    frequency:     frequency,
+    quoted_price:  recurringPriceFor(data, frequency),
+    created_at:    receivedAt(),
+    expires_at:    planExpiresAt(new Date().getTime()),
+    status:        "pending",
+  }, {});
+  return "offered";
+}
+
+/**
+ * The plan to show this customer, or null.
+ *
+ * A WHITELIST, like every other view model here: a column added to the tab
+ * later cannot reach a browser until somebody names it. The newest PENDING plan
+ * only — a customer with a lapsed one and a live one is being asked about the
+ * live one.
+ */
+function clientRecurringPlan(ss, contactId) {
+  try {
+    var sheet = ss.getSheetByName(RECURRING_PLANS_TAB);
+    if (!sheet) return null;
+    var h = sheetHeaders(sheet);
+    var last = sheet.getLastRow();
+    if (last < 2) return null;
+
+    var rows = sheet.getRange(2, 1, last - 1, h.length).getValues();
+    var want = String(contactId || "").trim();
+    var best = null;
+    for (var r = 0; r < rows.length; r++) {
+      var row = {};
+      h.forEach(function (name, i) { row[name] = rows[r][i]; });
+      if (String(row.contact_id || "").trim() !== want) continue;
+      if (planStatus(row) !== "pending") continue;
+      if (!best || String(row.created_at) > String(best.created_at)) best = row;
+    }
+    if (!best) return null;
+
+    return {
+      planId:    String(best.plan_id || ""),
+      frequency: String(best.frequency || ""),
+      price:     best.quoted_price === "" || best.quoted_price === undefined
+                   ? null : Number(best.quoted_price),
+      expiresAt: String(best.expires_at || "").slice(0, 10),
+      /* The visit it follows, so the portal can say "after your first clean"
+         rather than naming a date nobody has chosen yet. */
+      afterJobId: String(best.origin_job_id || ""),
+    };
+  } catch (err) {
+    console.error("recurring plan unavailable: " + err);
+    return null;
+  }
+}
+
 function buildPortalModel(ss, contact) {
   var bookings = getContactBookings(ss, contact.leadId);
   /* A customer with a standing partner has the same vendor on every row. */
@@ -2883,6 +3098,10 @@ function buildPortalModel(ss, contact) {
     firstName: contact.firstName,
     name:      contact.name,
     homes:     homes,
+    /* r38. The plan they were offered, if one is still open. null is the
+       ordinary answer: most bookings carry no cadence, and a lapsed window
+       reads as null too. */
+    plan:      clientRecurringPlan(ss, contact.contactId),
     bookings:  bookings.map(function (b) {
       var done = !!b.completedDate;
       var row = {
