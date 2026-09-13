@@ -481,12 +481,50 @@ looking. Both sides are parsed rather than compared as text, because the stamps
 carry an offset and `-04:00` does not sort against `-05:00`.
 
 **`anchor_date` / `anchor_time` are the source of truth for every later visit**,
-set when the customer confirms. A one-off reschedule moves that visit only; the
-next one is counted from the anchor, not from the visit that moved.
+written when the customer confirms. A one-off reschedule moves that visit only;
+the next one is counted from the anchor, not from the visit that moved.
 
 **`preferred_vendor_id`** records a request for the same partner as last time.
 It is a preference for dispatch, not a guarantee, and it is never shown to the
-customer as one.
+customer as one. **Nothing reads it yet** — dispatch is a human's, and this is
+what the human is told. Same posture as `OPERATORS.show_to_customer`.
+
+### Confirming a plan — `plan_confirm`, the portal write that books (r42)
+
+A fourth portal write kind, beside `instruction` and `access`, and **the only
+one that creates a booking**. `handlePortalWrite` proves the plan carries this
+contact's `lead_id` *and* that the origin booking does too, then:
+
+| | what it writes |
+|---|---|
+| `JOBS` | one new row: `CLEAN_STANDARD` ("Recurring clean"), the cadence, the chosen date and time, **`quoted_price` from the plan row** — never recomputed against today's table — the home and people copied from the origin booking, and the payout rate in force at that moment |
+| `AVAILABILITY` (Ops) | the chosen row flips to `booked` and takes the new `job_id`, through the same `bookAvailabilitySlot` the website uses. A conflict is flagged to a human, never refused to the customer |
+| `JOBS.vendor_id` | the consumed slot's partner, blank cells only |
+| `RECURRING_PLANS` | `status` → `confirmed`, the anchor, `confirmed_job_id`, and `preferred_vendor_id` if they asked |
+
+**It creates that job the one way jobs are created** — the payload is
+synthesised and handed to `buildJobRecord` / `writeRow` /
+`bookAvailabilitySlot` / `stampJobVendor`, the same calls in the same order as
+`doPost`. A second way to write a JOBS row would be a second place to forget
+every column added later.
+
+**`submission_id` is `PLNC-<plan_id>-01`.** Deterministic, so a double-tapped
+button dedupes through `alreadyWritten()` into one booking — which is also the
+only guard covering the instant between the JOBS write and the status write.
+**The `-01` is load-bearing:** `job_id` is the date plus the last six
+characters of the submission id, and a `plan_id` is its origin job's id with
+the prefix swapped, so an id derived from the plan alone would collide exactly
+when somebody confirms a visit for the same day as their first clean.
+
+**Attribution is deliberately blank** on these rows. The booking came from a
+customer opening their own portal, not from a campaign; `confirmed_job_id` is
+where it came from.
+
+**The time is validated, not passed along.** An unreadable date or time is
+refused (`bad_slot`) rather than written — it would match no `AVAILABILITY`
+row, consume nothing, and leave a customer holding a confirmation for a visit
+no cleaner can see. The browser picks from `/api/slots` through the same
+horizon rules the booking form uses (`serve-slots.js`).
 
 **Blank is the normal state.** Most bookings carry no cadence and so have no
 row here at all. A missing tab costs the plan prompt in the portal and nothing

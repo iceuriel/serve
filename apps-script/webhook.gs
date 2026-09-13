@@ -1,7 +1,7 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-13  ·  master  ·  r40 — a plan is found by lead_id
+ * VERSION STAMP:  2026-09-13  ·  master  ·  r42 — a plan can be confirmed and scheduled
  *
  * r40 = A PLAN IS FOUND BY lead_id, NOT BY contact_id. The r39 backfill wrote
  *      ten plans and not one of them appeared in a portal. They were correct
@@ -1352,7 +1352,7 @@ function doGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-13 r40" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-13 r42" });
 }
 
 
@@ -3117,6 +3117,306 @@ function clientRecurringPlan(ss, leadId) {
   }
 }
 
+/* ============================================================
+   CONFIRM & SCHEDULE — where the offer becomes a booking (r42)
+   ============================================================ */
+
+/** A time exactly as the availability feed publishes it: "9:00 AM". */
+var PLAN_TIME_SHAPE = /^\d{1,2}:\d{2}\s*[AP]M$/i;
+
+/**
+ * The plan as the PORTAL needs it: the open offer, plus whether there is a
+ * previous company to offer asking for again.
+ *
+ * A SEPARATE STEP FROM clientRecurringPlan ON PURPOSE. That one answers "is an
+ * offer open?" out of a single tab. This answers a question that needs the
+ * booking list — and it answers as a BOOLEAN. The browser is never handed a
+ * vendor_id and so can never name one; which company it means is resolved on
+ * this side, from the origin booking, at the moment it is confirmed.
+ */
+function planForPortal(plan, bookings) {
+  if (!plan) return null;
+  var origin = null;
+  for (var i = 0; i < (bookings || []).length; i++) {
+    if (bookings[i].bookingId === plan.afterJobId) { origin = bookings[i]; break; }
+  }
+  plan.samePartner = !!(origin && String(origin.vendorId || "").trim());
+  return plan;
+}
+
+/** Where a plan sits on the sheet, so it can be updated rather than re-found. */
+function findPlanRow(sheet, planId) {
+  var h = sheetHeaders(sheet);
+  var col = h.indexOf("plan_id");
+  var last = sheet.getLastRow();
+  if (col === -1 || last < 2) return null;
+
+  var values = sheet.getRange(2, 1, last - 1, h.length).getValues();
+  var needle = String(planId).trim();
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i][col]).trim() !== needle) continue;
+    var row = {};
+    h.forEach(function (name, c) { row[name] = values[i][c]; });
+    return { row: row, rowNumber: i + 2, headers: h };
+  }
+  return null;
+}
+
+/**
+ * Write named cells on one plan row.
+ *
+ * A column this tab does not have is SKIPPED, never created. Same rule as
+ * writeRow: the sheet's header row decides what exists, and a script that
+ * widens a tab behind somebody's back is how a spreadsheet stops being
+ * readable by the person who owns it.
+ */
+function setPlanCells(sheet, found, fields) {
+  Object.keys(fields).forEach(function (name) {
+    var c = found.headers.indexOf(name);
+    if (c === -1) { console.log("No " + name + " column on " + RECURRING_PLANS_TAB); return; }
+    sheet.getRange(found.rowNumber, c + 1).setValue(fields[name]);
+  });
+}
+
+/**
+ * The submission_id a confirmation carries. Deterministic, so a double-tapped
+ * button dedupes through alreadyWritten() into ONE booking.
+ *
+ * THE SUFFIX IS LOAD-BEARING, and it is not decoration. makeJobId builds
+ * "SRV-<date>-<last six alphanumerics of the submission id>". A plan_id is its
+ * origin job's id with the prefix swapped, so an id derived from the plan alone
+ * ends in the same six characters the FIRST CLEAN's job_id does — and a plan
+ * confirmed for the same calendar day as that first clean would mint a job_id
+ * identical to it. Two JOBS rows sharing an id means getBooking answers with
+ * the wrong one forever, on every surface. The "-01" keeps the tails apart.
+ */
+function planSubmissionId(planId) {
+  return "PLNC-" + String(planId).trim() + "-01";
+}
+
+/**
+ * CONFIRM A RECURRING PLAN: the customer picks a time and the offer becomes a
+ * real booking — a JOBS row, a consumed AVAILABILITY slot, a vendor stamp.
+ *
+ * THE OWNERSHIP CHECK IS THE SECURITY MODEL, as everywhere else in the portal,
+ * and here it is checked TWICE: the plan must carry this contact's lead_id, and
+ * so must the booking the plan came from. This is the only portal write that
+ * creates a booking, so "not yours" must be unreachable rather than unlikely.
+ *
+ * IT CREATES A JOB THE ONE WAY JOBS ARE CREATED. The payload below is
+ * synthesised and then handed to buildJobRecord / writeRow / bookAvailabilitySlot
+ * / stampJobVendor — the same calls, in the same order, that doPost makes for a
+ * booking off the website. A second way to write a JOBS row would be a second
+ * place for every future column to be forgotten.
+ *
+ * Never throws: handlePortalWrite is wrapped, and a customer who tapped
+ * Confirm must get an answer they can read rather than a stack trace.
+ */
+function confirmRecurringPlan(ss, contact, data) {
+  var planId = String(data.plan_id || "").trim();
+  var sheet  = ss.getSheetByName(RECURRING_PLANS_TAB);
+  if (!planId || !sheet) return json({ ok: false, error: "not_found" });
+
+  var found = findPlanRow(sheet, planId);
+  if (!found) return json({ ok: false, error: "not_found" });
+
+  /* OWNERSHIP, on lead_id — the same seam the portal reads plans through, and
+     for the same reason: JOBS.contact_id is not reliably populated. See r40. */
+  var want = String(contact.leadId || "").trim().toLowerCase();
+  if (!want || String(found.row.lead_id || "").trim().toLowerCase() !== want) {
+    return json({ ok: false, error: "not_found" });
+  }
+
+  var status = planStatus(found.row);
+  if (status === "confirmed") {
+    return json({ ok: false, error: "already_confirmed",
+                  job_id: String(found.row.confirmed_job_id || "") });
+  }
+  if (status !== "pending") return json({ ok: false, error: "expired" });
+
+  var frequency = String(found.row.frequency || "").trim().toLowerCase();
+  if (!frequency || frequency === "once") return json({ ok: false, error: "not_found" });
+
+  /* THE TIME IS VALIDATED, NOT MERELY PASSED ALONG. An unreadable time matches
+     no AVAILABILITY row, consumes nothing, and leaves a customer holding a
+     confirmation for a visit no cleaner can see. */
+  var slotDate = String(data.slot_date || "").trim();
+  var slotTime = String(data.slot_time || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(slotDate) || !PLAN_TIME_SHAPE.test(slotTime)) {
+    return json({ ok: false, error: "bad_slot" });
+  }
+  var sched = normalizeSchedule({ slot_date: slotDate, slot_time: slotTime });
+  if (sched.shape !== "slot") return json({ ok: false, error: "bad_slot" });
+
+  /* The booking this plan came from carries the home, the size and the people.
+     It must belong to them too — a plan row is not permission to read a job. */
+  var origin = getBooking(ss, String(found.row.origin_job_id || ""));
+  if (!origin || String(origin.customerId || "").trim().toLowerCase() !== want) {
+    return json({ ok: false, error: "not_found" });
+  }
+
+  /* THE SAME COMPANY, RESOLVED HERE. The browser sends yes or no; which vendor
+     that means is read off the origin booking. A payload naming a vendor could
+     otherwise request any company on the network — and dispatch would have no
+     way to tell that request apart from one Serve made. */
+  var asked = data.same_provider === true ||
+              String(data.same_provider).trim().toLowerCase() === "true";
+  var preferredVendor = asked ? String(origin.vendorId || "").trim() : "";
+
+  var payload = {
+    name:  origin.customerName, email: origin.customerEmail, phone: origin.customerPhone,
+    address: origin.address, unit: origin.unit, zip: origin.zip,
+    bedrooms: origin.beds, bathrooms: origin.baths, levels: origin.levels,
+    condition: origin.condition,
+    /* A recurring clean, not another first clean. serviceCodeOf reads this
+       label plus the cadence and answers CLEAN_STANDARD, which is what the
+       scope block, the vendor ranking and both tickets key off. */
+    service_type:       SERVICE_CODES.CLEAN_STANDARD,
+    frequency_selected: frequency,
+    /* THE PRICE THEY WERE QUOTED, carried from the plan row rather than
+       recomputed against today's table. That is the whole promise of the held
+       window: the number on screen when they chose is the number they pay. */
+    quote_price:        found.row.quoted_price,
+    first_visit_total:  found.row.quoted_price,
+    steady_state_price: found.row.quoted_price,
+    pets_flag:          origin.petsFlag ? "TRUE" : "FALSE",
+    slot_date: sched.date, slot_time: sched.time,
+    submission_id: planSubmissionId(planId),
+    /* The share in force NOW, stamped onto this booking, exactly as doPost
+       does it — a rate change tomorrow must not reprice a job a partner has
+       already accepted. */
+    payout_rate: currentPayoutRate(),
+    /* ATTRIBUTION IS DELIBERATELY BLANK. This booking came from a customer
+       opening their own portal, not from a campaign, and inventing a src tag
+       here would put a channel in the attribution data that nobody spent
+       anything on. The plan row's confirmed_job_id is where it came from. */
+  };
+
+  var jobs = requireTab(ss, JOBS_TAB);
+
+  /* A DOUBLE-TAPPED BUTTON MAKES ONE BOOKING. The id is derived from the plan,
+     so a second confirmation carries the same one and stops here — the same
+     guard doPost uses for a retried form. It also covers the window where the
+     JOBS row is written and the status write below has not landed yet, which
+     is the one gap the status check above cannot close. */
+  if (alreadyWritten(jobs, payload.submission_id)) {
+    return json({ ok: true, duplicate: true, job_id: makeJobId(payload, sched),
+                  when: sched.summary });
+  }
+
+  var record = buildJobRecord(payload, sched, origin.customerId, jobs, {
+    property_id: origin.propertyId || "",
+    contact_id:  contact.contactId || "",
+  });
+  writeRow(jobs, record);
+  var jobRow = jobs.getLastRow();
+
+  /* Everything below happens AFTER the booking is safely recorded, and none of
+     it may fail the booking. Same band, same rule, as the website's path. */
+  var slotResult = { ok: true, action: "skipped" };
+  try {
+    slotResult = bookAvailabilitySlot(sched, record.job_id,
+                   serviceCodeOf(payload.service_type, frequency));
+  } catch (slotErr) {
+    slotResult = { ok: false, action: "failed", error: String(slotErr) };
+    console.error("plan confirm slot write-back failed (booking stands): " + slotErr);
+  }
+  try {
+    stampJobVendor(jobs, jobRow, slotResult.vendorId);
+  } catch (stampErr) {
+    console.error("plan confirm vendor stamp failed (booking stands): " + stampErr);
+  }
+
+  /* THE ANCHOR. Every later visit is counted from this date and time, not from
+     whatever the most recent visit happened to be moved to. See SCHEMA. */
+  try {
+    setPlanCells(sheet, found, {
+      status:              "confirmed",
+      anchor_date:         sched.date,
+      anchor_time:         sched.time,
+      confirmed_job_id:    record.job_id,
+      preferred_vendor_id: preferredVendor,
+    });
+  } catch (planErr) {
+    console.error("plan row not updated (booking stands): " + planErr);
+  }
+
+  try {
+    sendPlanConfirmedEmail({ payload: payload, record: record, sched: sched,
+                             planRow: found.row, preferredVendor: preferredVendor,
+                             slotResult: slotResult, contactId: contact.contactId });
+  } catch (mailErr) {
+    console.error("plan confirmation email failed (booking stands): " + mailErr);
+  }
+
+  return json({ ok: true, duplicate: false, job_id: record.job_id,
+                when: sched.summary, slot_action: slotResult.action });
+}
+
+/**
+ * Tell a human that an offer turned into a real visit.
+ *
+ * ITS OWN EMAIL RATHER THAN THE RESERVATION ONE, because the two need
+ * different things done about them: nobody has to be called about a website
+ * booking, and a same-company request is an instruction to dispatch that would
+ * be invisible inside "a visitor just reserved a clean".
+ */
+function sendPlanConfirmedEmail(ctx) {
+  var slotResult = ctx.slotResult || { action: "n/a" };
+
+  var warn = "";
+  if (slotResult.action === "conflict") {
+    warn += "*** SLOT CONFLICT — that time was already taken. ***\n" +
+            "*** " + (slotResult.reason || "") + " ***\n" +
+            "*** The booking IS recorded. Call them and move it, or find a ***\n" +
+            "*** second cleaner for the slot. They have not been told. ***\n\n";
+  }
+  if (slotResult.action === "failed") {
+    warn += "*** AVAILABILITY WRITE-BACK FAILED — the slot still reads open. ***\n" +
+            "*** " + (slotResult.error || "") + " ***\n" +
+            "*** Mark it booked by hand or it can be sold again. ***\n\n";
+  }
+
+  var flags = [];
+  if (slotResult.action === "conflict") flags.push("SLOT CONFLICT");
+  if (slotResult.action === "failed")   flags.push("SLOT NOT MARKED");
+  if (ctx.preferredVendor)              flags.push("SAME COMPANY ASKED FOR");
+
+  MailApp.sendEmail(
+    notifyEmail(),
+    "Serve Plan Confirmed — " + (ctx.payload.name || "Unknown") + " · " +
+      (ctx.payload.frequency_selected || "") +
+      (flags.length ? " · " + flags.join(" · ") : ""),
+    warn +
+    "A customer confirmed their recurring plan in their portal.\n" +
+    "THIS IS A REAL BOOKING — a slot was taken for it.\n\n" +
+    "— WHEN —\n" + ctx.sched.summary + "\n\n" +
+    "— WHAT —\n" +
+    "Plan:      " + String(ctx.planRow.plan_id || "") +
+      " (" + (ctx.payload.frequency_selected || "") + ")\n" +
+    "Follows:   " + String(ctx.planRow.origin_job_id || "") + "\n" +
+    "job_id:    " + ctx.record.job_id + "\n" +
+    "Price:     " + money(ctx.payload.quote_price) + " per visit, as quoted\n" +
+    "Address:   " + (ctx.payload.address || "") +
+      (isSet(ctx.payload.unit) ? ", " + ctx.payload.unit : "") + "\n" +
+    "ZIP:       " + (ctx.payload.zip || "") + "\n" +
+    "Slot:      " + slotResult.action +
+      (slotResult.action === "booked"
+        ? " — AVAILABILITY row " + slotResult.row +
+          (isSet(slotResult.vendorId) ? ", vendor " + slotResult.vendorId : "")
+        : (slotResult.reason ? " — " + slotResult.reason : "")) + "\n\n" +
+    "— WHAT THEY ASKED FOR —\n" +
+    (ctx.preferredVendor
+      ? "THE SAME COMPANY AS LAST TIME: " + ctx.preferredVendor + "\n" +
+        "Recorded as a preference on the plan row. Nothing dispatches on it\n" +
+        "automatically — assign it yourself, and tell them nothing: they were\n" +
+        "told this is a request, not a guarantee.\n"
+      : "(no company preference)\n") +
+    ticketBlock(ctx.record.job_id, ctx.contactId,
+                slotResult.vendorId, slotResult.action));
+}
+
+
 function buildPortalModel(ss, contact) {
   var bookings = getContactBookings(ss, contact.leadId);
   /* A customer with a standing partner has the same vendor on every row. */
@@ -3149,8 +3449,12 @@ function buildPortalModel(ss, contact) {
        reads as null too.
 
        r40: matched on lead_id, the same seam getContactBookings uses above.
-       contact_id would miss every plan whose JOBS row predates that column. */
-    plan:      clientRecurringPlan(ss, contact.leadId),
+       contact_id would miss every plan whose JOBS row predates that column.
+
+       r42: planForPortal adds ONE field — whether there is a previous company
+       to offer asking for again. It needs the booking list, which is why it is
+       a second step rather than another read inside clientRecurringPlan. */
+    plan:      planForPortal(clientRecurringPlan(ss, contact.leadId), bookings),
     bookings:  bookings.map(function (b) {
       var done = !!b.completedDate;
       var row = {
@@ -3309,6 +3613,11 @@ function handlePortalWrite(ss, data) {
       if (!owns) return json({ ok: false, error: "not_found" });
       return writeAccess(ss, propertyId, data);
     }
+
+    /* r42. Confirming the recurring plan they were offered. THE ONLY PORTAL
+       WRITE THAT CREATES A BOOKING — it proves ownership twice and then goes
+       through the same job-creation path the website does. */
+    if (kind === "plan_confirm") return confirmRecurringPlan(ss, contact, data);
 
     return json({ ok: false, error: "unknown_kind" });
 

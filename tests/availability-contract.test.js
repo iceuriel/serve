@@ -15,11 +15,14 @@ const t = (label, cond, extra) => {
   if (!cond) bad++;
 };
 
-/* ---------- the site's real slot-consumption code ---------- */
-const siteStart = SITE_SRC.indexOf('const HORIZON_DAYS');
-const siteEnd   = SITE_SRC.indexOf('/* Swap which time control is live');
-if (siteStart === -1 || siteEnd === -1) throw new Error('could not slice the site scheduler code');
-const siteSlice = SITE_SRC.slice(siteStart, siteEnd);
+/* ---------- the site's real slot-consumption code ----------
+   r42: the horizon rules live in serve-slots.js now, because the portal asks
+   the same question when a customer confirms a recurring plan. The whole
+   module is loaded rather than sliced, and what this file proves about the
+   feed is therefore proved for BOTH pages at once. script.js is still read
+   below — see the delegation check, which is what would catch the booking page
+   quietly growing a second copy. */
+const RULES_SRC = fs.readFileSync(require('path').join(REPO_ROOT, 'serve-slots.js'), 'utf8');
 
 /* The site's filterSlots() compares each slot against "today". Left on the real
    clock this test passes for a few days after the fixture dates and then starts
@@ -36,9 +39,22 @@ class PinnedDate extends RealDate {
 
 const siteBox = { console, document: undefined, Date: PinnedDate };
 vm.createContext(siteBox);
-vm.runInContext(siteSlice, siteBox);
+vm.runInContext(RULES_SRC, siteBox);
+/* Aliased under the names the rest of this file has always used: they still
+   mean what they meant, they simply live in one place now. */
+vm.runInContext('var filterSlots = ServeSlots.filterSlots, ' +
+                'parseSlotDate = ServeSlots.parseSlotDate, ' +
+                'formatSlotDate = ServeSlots.formatSlotDate, ' +
+                'HORIZON_DAYS = ServeSlots.HORIZON_DAYS;', siteBox);
 const siteEval = expr => vm.runInContext(expr, siteBox);
-console.log('sliced site scheduler code: ' + siteSlice.split('\n').length + ' lines');
+console.log('loaded the shared slot rules: ' + RULES_SRC.split('\n').length + ' lines');
+
+/* THE DRIFT THIS FILE EXISTS TO CATCH, now that there are two callers: the
+   booking page growing its own copy of the rules again. Delegation is the
+   whole point — a second implementation would pass every test in here while
+   offering customers a different set of days than the portal does. */
+t('the booking page delegates to the shared rules rather than keeping a copy',
+  /ServeSlots\.filterSlots/.test(SITE_SRC) && !/horizon\.setDate/.test(SITE_SRC));
 
 /* ---------- Apps Script sandbox ---------- */
 const TZ = 'America/New_York';

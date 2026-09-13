@@ -1,19 +1,25 @@
 /* Feed the REAL slots from testAvailability() through the site's actual
-   filterSlots / formatSlotDate, sliced live out of script.js. */
+   filterSlots / formatSlotDate.
+
+   r42: these moved out of script.js into serve-slots.js, because the portal
+   now asks the same question when a customer confirms a recurring plan. So the
+   whole module is loaded rather than sliced out of the page — and what this
+   file proves is now proved for BOTH callers at once, which is the point of
+   there being one implementation. script.js is still read below, where
+   setTimeUi is sliced; that part is the booking page's own and stayed there. */
 /* Repo-relative so this runs from a clean clone on any machine. */
 const REPO_ROOT = require('path').resolve(__dirname, '..');
 const fs = require('fs');
 const vm = require('vm');
 
-const SITE = fs.readFileSync(require('path').join(REPO_ROOT, 'script.js'), 'utf8');
-const slice = SITE.slice(SITE.indexOf('const HORIZON_DAYS'),
-                         SITE.indexOf('/* Swap which time control is live'));
+const SITE  = fs.readFileSync(require('path').join(REPO_ROOT, 'script.js'), 'utf8');
+const RULES = fs.readFileSync(require('path').join(REPO_ROOT, 'serve-slots.js'), 'utf8');
 const box = { console };
 vm.createContext(box);
-vm.runInContext(slice, box);
-const filterSlots     = vm.runInContext('filterSlots', box);
-const formatSlotDate  = vm.runInContext('formatSlotDate', box);
-const HORIZON_DAYS    = vm.runInContext('HORIZON_DAYS', box);
+vm.runInContext(RULES, box);
+const filterSlots     = vm.runInContext('ServeSlots.filterSlots', box);
+const formatSlotDate  = vm.runInContext('ServeSlots.formatSlotDate', box);
+const HORIZON_DAYS    = vm.runInContext('ServeSlots.HORIZON_DAYS', box);
 
 /* Verbatim from the execution log. */
 const LIVE = [

@@ -1149,7 +1149,9 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
        or has no open slots, the time-preference radios stay live and the
        customer can always book. See prefetchAvailability for the fail-safes.
        ======================================================== */
-    const HORIZON_DAYS = 21;
+    /* The horizon rules moved to serve-slots.js when /h started asking the same
+       question. See the header there — two copies of "what may a customer
+       pick?" is how two pages start disagreeing about it. */
 
     let availSlots  = null;        // session cache of bookable slots
     let availFetched = false;
@@ -1210,30 +1212,11 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
             });
     }
 
-    /* Bookable = open > 0, today through the three-week horizon */
-    function filterSlots(slots) {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const horizon = new Date(today);
-        horizon.setDate(horizon.getDate() + HORIZON_DAYS);
-        return slots.filter(s => {
-            if (!s || !s.date || !s.time || !(s.open > 0)) return false;
-            const d = parseSlotDate(s.date);
-            return isFinite(d.getTime()) && d >= today && d <= horizon;
-        });
-    }
-
-    /* "2026-07-25" -> local Date (avoids the UTC-midnight off-by-one) */
-    function parseSlotDate(str) {
-        const p = String(str).split('-');
-        return new Date(+p[0], +p[1] - 1, +p[2]);
-    }
-
-    function formatSlotDate(str) {
-        return parseSlotDate(str).toLocaleDateString('en-US', {
-            weekday: 'long', month: 'short', day: 'numeric',
-        });
-    }
+    /* Bookable = open > 0, today through the three-week horizon.
+       ONE implementation, in serve-slots.js, shared with the portal. */
+    function filterSlots(slots)    { return ServeSlots.filterSlots(slots); }
+    function parseSlotDate(str)    { return ServeSlots.parseSlotDate(str); }
+    function formatSlotDate(str)   { return ServeSlots.formatSlotDate(str); }
 
     function slotLabel() {
         return formatSlotDate(state.slotDate) + ' at ' + state.slotTime;
@@ -1252,34 +1235,17 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
         $('scheduler-live').hidden     = mode !== 'scheduler';
     }
 
-    /* Build the agenda: one section per day, one chip per open time */
+    /* Build the agenda: one section per day, one chip per open time.
+       Drawn by serve-slots.js so /h and this page render the same thing.
+
+       NO onPick ARGUMENT ON PURPOSE. This page has its own delegated click
+       handler on #scheduler-days (below), which also drives `state` and the
+       step's validity; passing a callback as well would put two listeners on
+       one click, each with its own idea of which chip is selected. */
     function renderSchedulerDays(slots) {
         const container = $('scheduler-days');
         container.innerHTML = '';
-        let currentDate = null, rowEl = null;
-        slots.forEach(s => {
-            if (s.date !== currentDate) {
-                currentDate = s.date;
-                const day  = document.createElement('div');
-                day.className = 'scheduler-day';
-                const head = document.createElement('div');
-                head.className = 'scheduler-day__head';
-                head.textContent = formatSlotDate(s.date);
-                rowEl = document.createElement('div');
-                rowEl.className = 'scheduler-day__times';
-                day.appendChild(head);
-                day.appendChild(rowEl);
-                container.appendChild(day);
-            }
-            const chip = document.createElement('button');
-            chip.type = 'button';
-            chip.className = 'slot-chip';
-            chip.textContent = s.time;
-            chip.setAttribute('data-date', s.date);
-            chip.setAttribute('data-time', s.time);
-            chip.setAttribute('aria-pressed', 'false');
-            rowEl.appendChild(chip);
-        });
+        container.appendChild(ServeSlots.picker(slots));
     }
 
     function clearSlotSelection() {

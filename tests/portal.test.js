@@ -79,6 +79,12 @@ function makeSheet(name, headers) {
         }
         return o;
       },
+      /* r42: real Sheets has BOTH, and code that reads one cell uses this one.
+         Without it stampJobVendor threw on `cell.getValue()`, the caller's
+         wrapper swallowed it, and the vendor stamp silently did nothing — in
+         the harness only. A missing stub is indistinguishable from a bug in
+         the code under test, which is the worse half of that. */
+      getValue: () => (rows[r - 1] || [])[c - 1],
       setValue: v => {
         while (rows.length < r) rows.push([]);
         while (rows[r - 1].length < c) rows[r - 1].push('');
@@ -102,6 +108,12 @@ function build() {
       'origin_job_id','property_id','frequency','quoted_price','created_at',
       'expires_at','status','anchor_date','anchor_time','preferred_vendor_id',
       'confirmed_job_id']),
+    /* r42. openById returns this same book, so the Ops capacity tab sits here
+       too. It exists so confirming a plan can be watched CONSUMING a slot —
+       the difference between an offer and a booking is that one of them takes
+       capacity away from somebody else. */
+    AVAILABILITY: makeSheet('AVAILABILITY', ['date','start_time','vendor_id',
+      'status','job_id']),
     VENDOR_REVIEWS: makeSheet('VENDOR_REVIEWS', ['vendor_id','quote','author','rating',
       'source','source_url','reviewed_on','client_visible']),
     VENDOR_PHOTOS: makeSheet('VENDOR_PHOTOS', ['vendor_id','image_url','caption',
@@ -1202,7 +1214,7 @@ t('it names the visit it follows rather than inventing a date',
    the change honestly. Never dereference a value a mutation can null. */
 t('the plan exposes exactly the named fields',
   JSON.stringify(Object.keys(P21.plan || {}).sort()) ===
-    JSON.stringify(['afterJobId','expiresAt','frequency','planId','price']),
+    JSON.stringify(['afterJobId','expiresAt','frequency','planId','price','samePartner']),
   Object.keys(P21.plan || {}));
 
 /* NOTHING MAY BE BOOKED BY OFFERING A PLAN. This is the whole point of the
@@ -1305,6 +1317,251 @@ t('a plan with no lead_id at all reaches nobody', planNow() === null, planNow())
    Asked directly, a blank lead must answer with nothing. */
 t('asked for a blank lead, it answers with nothing at all',
   S.clientRecurringPlan(T.ss, '') === null, S.clientRecurringPlan(T.ss, ''));
+
+/* ------------------------------------------------------------------
+   r42 — confirm & schedule: the offer becomes a booking.
+
+   r38 proved that OFFERING a plan holds nothing. This is the other half of
+   that promise: the moment a customer picks a time, a JOBS row is written, a
+   slot is taken away from everybody else, and the anchor every later visit is
+   counted from is set.
+
+   It is the only portal write that creates a booking, which is why ownership
+   is proved on both the plan and the booking it came from, why the time is
+   validated rather than passed along, and why the double-tap guard is
+   asserted directly rather than assumed.
+   ------------------------------------------------------------------ */
+head('23. r42 — confirming a plan books a real visit');
+
+const AVAIL_H = ['date','start_time','vendor_id','status','job_id'];
+const pushSlot = (date, time, vendor) =>
+  T.tabs.AVAILABILITY.appendRow([date, time, vendor || '', 'open', '']);
+const slotRow = (date, time) => (T.tabs.AVAILABILITY._rows || []).slice(1)
+  .filter(r => r[0] === date && r[1] === time)[0] || [];
+const slotCell = (date, time, col) => slotRow(date, time)[AVAIL_H.indexOf(col)];
+
+const jobsRows = () => (T.tabs.JOBS._rows || []).slice(1);
+const jobCell  = (jobId, col) => (jobsRows()
+  .filter(r => String(r[JOBS_HEADERS.indexOf('job_id')]).trim() === jobId)[0] || [])
+  [JOBS_HEADERS.indexOf(col)];
+const planCell = (planId, col) => ((T.tabs.RECURRING_PLANS._rows || []).slice(1)
+  .filter(r => String(r[0]).trim() === planId)[0] || [])[PLAN_H.indexOf(col)];
+const setPlanCell = (planId, col, v) => {
+  const rows = T.tabs.RECURRING_PLANS._rows;
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]).trim() === planId) rows[i][PLAN_H.indexOf(col)] = v;
+  }
+};
+const setJobCell = (jobId, col, v) => {
+  const rows = T.tabs.JOBS._rows;
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][JOBS_HEADERS.indexOf('job_id')]).trim() === jobId) {
+      rows[i][JOBS_HEADERS.indexOf(col)] = v;
+    }
+  }
+};
+const confirm = (over, tok, cid) => write(Object.assign(
+  { kind: 'plan_confirm', plan_id: 'PLN-CONF',
+    slot_date: '2026-10-02', slot_time: '9:00 AM' }, over || {}), tok, cid);
+
+/* The origin booking gets a partner, so "the same company as last time" has a
+   company to mean. */
+setJobCell('SRV-20260920-AAAAAA', 'vendor_id', 'VEN-ORIGIN');
+
+onlyPlan();
+pushPlan({ plan_id: 'PLN-CONF' });
+pushSlot('2026-10-02', '9:00 AM', 'VEN-SLOT');
+
+const jobsBefore = jobsRows().length;
+const C1 = confirm();
+
+t('it confirms', C1.ok === true, C1);
+t('and names the booking it made', /^SRV-/.test(String(C1.job_id || '')), C1.job_id);
+const NEW = String(C1.job_id || '');
+t('exactly one JOBS row was written',
+  jobsRows().length === jobsBefore + 1, jobsRows().length - jobsBefore);
+
+t('it is a RECURRING clean, not a second first clean',
+  jobCell(NEW, 'service_type') === 'Recurring clean', jobCell(NEW, 'service_type'));
+t('carrying the cadence they chose',
+  jobCell(NEW, 'frequency') === 'weekly', jobCell(NEW, 'frequency'));
+t('at the price the plan held, not one recomputed today',
+  Number(jobCell(NEW, 'quoted_price')) === 111, jobCell(NEW, 'quoted_price'));
+t('on the day and at the time they picked',
+  jobCell(NEW, 'scheduled_date') === '2026-10-02' && jobCell(NEW, 'start_time') === '9:00 AM',
+  [jobCell(NEW, 'scheduled_date'), jobCell(NEW, 'start_time')]);
+t('joined to the same customer', jobCell(NEW, 'lead_id') === 'uriel@example.com',
+  jobCell(NEW, 'lead_id'));
+t('and the same home', jobCell(NEW, 'property_id') === 'PROP-0001',
+  jobCell(NEW, 'property_id'));
+t('the home it will clean is the one they already have',
+  jobCell(NEW, 'address') === '123 Beacon St', jobCell(NEW, 'address'));
+
+/* THE ID MUST NOT COLLIDE WITH THE BOOKING IT CAME FROM. A job_id is built
+   from the date plus the last six characters of the submission_id, and a plan
+   id is its origin job's id with the prefix swapped — so an id derived from
+   the plan ALONE ends in the same six characters the first clean's does. A
+   plan confirmed for the same calendar day as that clean would then mint the
+   identical job_id, and getBooking would answer with the wrong row forever. */
+t('its job_id is not the origin booking\'s', NEW !== 'SRV-20260920-AAAAAA', NEW);
+
+/* A BOOKING TAKES CAPACITY. This is the whole difference between the offer
+   r38 shipped and the booking this release makes out of it. */
+t('the slot is now booked', slotCell('2026-10-02', '9:00 AM', 'status') === 'booked',
+  slotCell('2026-10-02', '9:00 AM', 'status'));
+t('and carries the job that took it',
+  slotCell('2026-10-02', '9:00 AM', 'job_id') === NEW,
+  slotCell('2026-10-02', '9:00 AM', 'job_id'));
+t('the partner whose capacity it was is stamped on the job',
+  jobCell(NEW, 'vendor_id') === 'VEN-SLOT', jobCell(NEW, 'vendor_id'));
+
+/* THE ANCHOR. Every later visit is counted from this, not from wherever a
+   one-off reschedule moves a single visit to. */
+t('the plan reads confirmed', planCell('PLN-CONF', 'status') === 'confirmed',
+  planCell('PLN-CONF', 'status'));
+t('with the anchor every later visit is counted from',
+  planCell('PLN-CONF', 'anchor_date') === '2026-10-02' &&
+  planCell('PLN-CONF', 'anchor_time') === '9:00 AM',
+  [planCell('PLN-CONF', 'anchor_date'), planCell('PLN-CONF', 'anchor_time')]);
+t('and the booking it turned into',
+  planCell('PLN-CONF', 'confirmed_job_id') === NEW,
+  planCell('PLN-CONF', 'confirmed_job_id'));
+t('the portal stops offering it', planNow() === null, planNow());
+t('and the visit is in their bookings instead',
+  (get({ portal: 'CON-0001', t: MINE }).bookings || []).some(b => b.bookingId === NEW));
+
+/* ---- a double-tapped button makes ONE booking ---- */
+t('confirming the same plan again is refused',
+  confirm().error === 'already_confirmed', confirm());
+
+/* THE GUARD UNDER THE GUARD. The status check above answers the second tap.
+   It cannot answer the tap that arrives after the JOBS row is written and
+   before the status write lands — so put the row back the way that window
+   leaves it and prove the deterministic submission_id still stops a second
+   booking on its own. */
+const beforeRace = jobsRows().length;
+setPlanCell('PLN-CONF', 'status', 'pending');
+const C3 = confirm();
+t('a confirmation racing its own status write still books once',
+  C3.ok === true && C3.duplicate === true, C3);
+t('and writes no second JOBS row', jobsRows().length === beforeRace,
+  jobsRows().length - beforeRace);
+
+/* ---- THE OWNERSHIP CHECK, on the one write that creates a booking ---- */
+onlyPlan();
+pushPlan({ plan_id: 'PLN-MINE' });
+pushSlot('2026-10-03', '9:00 AM', '');
+const beforeTheft = jobsRows().length;
+t('another customer cannot confirm this plan',
+  confirm({ plan_id: 'PLN-MINE', slot_date: '2026-10-03' }, THEIRS, 'CON-0002')
+    .error === 'not_found');
+t('and nothing was booked by trying', jobsRows().length === beforeTheft);
+t('an unknown plan looks exactly like one that is not theirs',
+  confirm({ plan_id: 'PLN-NOPE', slot_date: '2026-10-03' }).error === 'not_found');
+
+/* THE PLAN'S OWN lead_id IS A SEPARATE GUARD FROM THE BOOKING'S — and the
+   assertions above do not test it. A mutation run proved it: disabling the
+   plan's lead check changed nothing, because every attempt to confirm
+   somebody else's plan ALSO reached somebody else's origin booking, and the
+   second check answered first. A guard proven only by the guard behind it is
+   not proven at all; that is the r40 lesson in a new place.
+
+   This is the fixture that separates them: a plan row carrying ANOTHER
+   customer's lead_id while pointing at THIS customer's booking — what a
+   mis-keyed backfill leaves behind. The origin check passes here. Only the
+   plan's own lead_id refuses it. */
+onlyPlan();
+pushPlan({ plan_id: 'PLN-CROSSED', lead_id: 'other@example.com',
+           origin_job_id: 'SRV-20260920-AAAAAA' });
+pushSlot('2026-10-04', '9:00 AM', '');
+const beforeCrossed = jobsRows().length;
+const CROSSED = confirm({ plan_id: 'PLN-CROSSED', slot_date: '2026-10-04' });
+t('a plan carrying another customer\'s lead is refused, though the booking is mine',
+  CROSSED.error === 'not_found', CROSSED);
+t('and refusing it booked nothing',
+  jobsRows().length === beforeCrossed, jobsRows().length - beforeCrossed);
+
+/* ---- the window closes on confirmation too, not only on display ---- */
+onlyPlan();
+pushPlan({ plan_id: 'PLN-LATE', expires_at: planStamp(-86400000) });
+t('a lapsed plan cannot be confirmed at the held price',
+  confirm({ plan_id: 'PLN-LATE', slot_date: '2026-10-03' }).error === 'expired');
+
+/* ---- the time is validated, not merely passed along ----
+   An unreadable time matches no AVAILABILITY row, consumes nothing, and would
+   leave a customer holding a confirmation for a visit no cleaner can see. */
+onlyPlan();
+pushPlan({ plan_id: 'PLN-TIME' });
+const beforeJunk = jobsRows().length;
+t('a time in no recognisable shape is refused',
+  confirm({ plan_id: 'PLN-TIME', slot_time: 'sometime Tuesday' }).error === 'bad_slot');
+t('and a date that is not a date',
+  confirm({ plan_id: 'PLN-TIME', slot_date: 'next week' }).error === 'bad_slot');
+t('neither booked anything', jobsRows().length === beforeJunk);
+
+/* ---- the one day on which the job_id could collide ----
+   THE SUFFIX ON THE SUBMISSION ID IS LOAD-BEARING, and only a confirmation on
+   the origin booking's OWN DAY can prove it. A job_id is the date plus the
+   last six characters of the submission_id, and a plan_id is its origin job's
+   id with the prefix swapped — so an id derived from the plan alone ends in
+   the same six characters the first clean's does. On this one date that makes
+   the two job_ids identical, and getBooking would answer every later question
+   about either booking with the same row. */
+onlyPlan();
+pushPlan({ plan_id: 'PLN-20260920-AAAAAA' });
+pushSlot('2026-09-20', '3:00 PM', '');
+const C6 = confirm({ plan_id: 'PLN-20260920-AAAAAA',
+                     slot_date: '2026-09-20', slot_time: '3:00 PM' });
+t('a plan confirmed for the same day as its own first clean still gets its own id',
+  C6.ok === true && C6.job_id !== 'SRV-20260920-AAAAAA', C6);
+t('and there are not two rows answering to one id',
+  jobsRows().filter(r => String(r[JOBS_HEADERS.indexOf('job_id')]).trim() ===
+    'SRV-20260920-AAAAAA').length === 1,
+  jobsRows().filter(r => String(r[JOBS_HEADERS.indexOf('job_id')]).trim() ===
+    'SRV-20260920-AAAAAA').length);
+
+/* ---- "the same company", resolved on this side ---- */
+onlyPlan();
+pushPlan({ plan_id: 'PLN-SAME' });
+pushSlot('2026-10-05', '1:00 PM', 'VEN-SLOT2');
+const C4 = confirm({ plan_id: 'PLN-SAME', slot_date: '2026-10-05',
+                     slot_time: '1:00 PM', same_provider: true });
+t('asking for the same company is recorded on the plan',
+  C4.ok === true && planCell('PLN-SAME', 'preferred_vendor_id') === 'VEN-ORIGIN',
+  planCell('PLN-SAME', 'preferred_vendor_id'));
+
+/* THE BROWSER NEVER NAMES THE COMPANY. It sends yes or no; which vendor that
+   means is read off the origin booking here. A payload that could name one
+   would be a request for any company on the network, indistinguishable at
+   dispatch from a request Serve made itself. */
+onlyPlan();
+pushPlan({ plan_id: 'PLN-INJECT' });
+pushSlot('2026-10-06', '1:00 PM', '');
+confirm({ plan_id: 'PLN-INJECT', slot_date: '2026-10-06', slot_time: '1:00 PM',
+          same_provider: true, preferred_vendor_id: 'VEN-PICKED-BY-THE-BROWSER',
+          vendor_id: 'VEN-PICKED-BY-THE-BROWSER' });
+t('a payload naming a vendor cannot request that vendor',
+  planCell('PLN-INJECT', 'preferred_vendor_id') === 'VEN-ORIGIN',
+  planCell('PLN-INJECT', 'preferred_vendor_id'));
+
+onlyPlan();
+pushPlan({ plan_id: 'PLN-NOASK' });
+pushSlot('2026-10-07', '1:00 PM', '');
+confirm({ plan_id: 'PLN-NOASK', slot_date: '2026-10-07', slot_time: '1:00 PM' });
+t('not asking records no preference at all',
+  planCell('PLN-NOASK', 'preferred_vendor_id') === '',
+  planCell('PLN-NOASK', 'preferred_vendor_id'));
+
+/* ---- the portal only offers the question when there is an answer ---- */
+onlyPlan();
+pushPlan({ plan_id: 'PLN-FLAG' });
+t('the portal says there is a previous company to ask for',
+  (planNow() || {}).samePartner === true, planNow());
+setJobCell('SRV-20260920-AAAAAA', 'vendor_id', '');
+t('and says there is not when nobody was ever assigned',
+  (planNow() || {}).samePartner === false, planNow());
+t('a vendor_id still never reaches the browser',
+  !JSON.stringify(planNow() || {}).includes('VEN-'), planNow());
 
 console.log('\n' + (bad ? bad + ' FAILURES' : 'ALL ASSERTIONS PASSED'));
 process.exit(bad ? 1 : 0);

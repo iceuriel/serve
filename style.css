@@ -1603,6 +1603,12 @@ a {
     color: var(--color-text-muted);
 }
 
+/* The agenda's wrapper, built by serve-slots.js for both pages that show it.
+   LAYOUT-TRANSPARENT ON PURPOSE: the booking page used to append day blocks
+   straight into #scheduler-days, and this wrapper must not become a box that
+   any future rule on that container has to reckon with. */
+.slotpick { display: contents; }
+
 .scheduler-day { margin-bottom: 0.875rem; }
 .scheduler-day:last-child { margin-bottom: 0; }
 
@@ -4505,4 +4511,78 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
     font-size: 0.78rem;
     color: var(--color-text-muted);
     margin-top: 0.4rem;
+}
+
+/* ---- Confirming the plan: choosing a time, from the portal (r42) -------- */
+/* The card keeps its dashed, not-yet-booked look right up until the moment it
+   becomes a booking. Styling these controls like a confirmed appointment would
+   tell someone their visit was scheduled while they were still choosing. */
+.plan__confirm { margin-top: 0.75rem; }
+
+/* "Choose a time" is exploratory — pick one, pick another, change your mind —
+   so it is the quiet button. */
+.plan__cta {
+    font-family: var(--flow-sans);
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--color-dark);
+    background: transparent;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 0.5rem 1.05rem;
+    cursor: pointer;
+}
+.plan__cta:hover:not(:disabled) { border-color: var(--color-dark); }
+.plan__cta:disabled { opacity: 0.55; cursor: default; }
+
+/* This one books a visit. It should look like the thing that does. */
+.plan__go {
+    color: #fff;
+    background: var(--color-dark);
+    border-color: var(--color-dark);
+}
+.plan__go:hover:not(:disabled) {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+}
+
+.plan__pick { margin-top: 0.75rem; }
+
+/* The chosen time, said back to them in full before they commit to it. */
+.plan__chosen {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--color-dark);
+    margin-top: 0.6rem;
+}
+
+/* The same-company request. A REQUEST — the note under it says so, and that
+   note is not decoration: Serve assigns the visit, and promising a particular
+   company is a promise we cannot keep from here. */
+/* The checkbox and its caveat reveal together, so they are spaced together —
+   the note is part of the question, not a remark underneath it. */
+.plan__samewrap { margin-top: 0.7rem; }
+.plan__same {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    line-height: 1.45;
+    color: var(--color-text);
+    cursor: pointer;
+}
+.plan__same input { margin-top: 0.2rem; flex: 0 0 auto; }
+.plan__samenote {
+    display: block;
+    font-size: 0.76rem;
+    color: var(--color-text-muted);
+    margin-top: 0.25rem;
+}
+
+.plan__row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    margin-top: 0.8rem;
 }

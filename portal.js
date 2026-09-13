@@ -20,7 +20,9 @@
 (function () {
     'use strict';
 
-    var API = '/api/portal';
+    var API   = '/api/portal';
+    /* The same feed the booking form reads, through the same Worker route. */
+    var SLOTS = '/api/slots';
 
     var stateEl = document.getElementById('p-state');
     var navEl   = document.getElementById('p-nav');
@@ -55,7 +57,13 @@
 
     if (!id || !token) { fail('This link is incomplete.'); return; }
 
-    fetch(API + '?id=' + encodeURIComponent(id) + '&t=' + encodeURIComponent(token))
+    /* One address for this account, built once. The first load, the live
+       refresh and the reload after a plan confirmation all ask the same
+       question, and three hand-built copies of a signed URL is three chances
+       to drop the token. */
+    var LOAD = API + '?id=' + encodeURIComponent(id) + '&t=' + encodeURIComponent(token);
+
+    fetch(LOAD)
         .then(function (r) { return r.json(); })
         .then(function (d) {
             /* view === portal, not merely ok. An older deployment has no
@@ -71,7 +79,7 @@
             model = d;
             start();
             if (typeof ServeLive !== 'undefined') ServeLive.watch({
-                url: API + '?id=' + encodeURIComponent(id) + '&t=' + encodeURIComponent(token),
+                url: LOAD,
                 view: 'portal', root: bodyEl, initial: d,
                 onData: function (next) { model = next; paint(); }
             });
@@ -135,11 +143,11 @@
        No optimistic UI. A note the customer believes was saved and was not is
        worse than a half-second wait — the cleaner arrives without it and
        nobody finds out until the day. ======================================= */
-    function save(payload, statusEl, btn) {
-        statusEl.textContent = 'Saving…';
-        statusEl.className = 'tk-save';
-        if (btn) btn.disabled = true;
-
+    /* THE ONE PLACE A PORTAL WRITE IS ADDRESSED AND SENT. Both callers below
+       decide for themselves what a failure should say — saving a note and
+       booking a visit do not fail in the same words — but neither rebuilds the
+       envelope or re-reads the token. */
+    function postWrite(payload) {
         var body = { event_type: 'portal_write', contact_id: id, t: token };
         Object.keys(payload).forEach(function (k) { body[k] = payload[k]; });
 
@@ -148,7 +156,31 @@
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
             body: JSON.stringify(body),
         })
-        .then(function (r) { return r.json(); })
+        .then(function (r) { return r.json(); });
+    }
+
+    /* Ask the server what this account looks like now, and repaint.
+       Used after a confirmation, where the page the customer is looking at has
+       just stopped being true: the offer is a booking and belongs in the list
+       above rather than in a card asking them to choose a time. */
+    function reload() {
+        return fetch(LOAD)
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d || d.ok !== true || d.view !== 'portal') return false;
+                model = d;
+                paint();
+                return true;
+            })
+            .catch(function () { return false; });
+    }
+
+    function save(payload, statusEl, btn) {
+        statusEl.textContent = 'Saving…';
+        statusEl.className = 'tk-save';
+        if (btn) btn.disabled = true;
+
+        return postWrite(payload)
         .then(function (d) {
             if (btn) btn.disabled = false;
             if (d && d.ok) {
@@ -294,10 +326,8 @@
      * The recurring plan they were offered, which is NOT a booking.
      *
      * It reads as an offer with a deadline rather than as an appointment: no
-     * date, because nobody has chosen one, and the price they were quoted
-     * rather than a number recomputed today. Confirming it is the next
-     * release; until then this says plainly that it is waiting on them instead
-     * of showing a button that does nothing.
+     * date, because nobody has chosen one until they choose one here, and the
+     * price they were quoted rather than a number recomputed today.
      */
     function planCard(plan) {
         if (!plan || !plan.frequency) return null;
@@ -315,7 +345,151 @@
             wrap.appendChild(el('div', 'plan__when',
                 'This price is held until ' + (prettyDate(plan.expiresAt) || plan.expiresAt) + '.'));
         }
+        add(wrap, planConfirm(plan));
         return wrap;
+    }
+
+    /**
+     * CONFIRM & SCHEDULE (r42) — where the offer becomes a booking.
+     *
+     * The times come from the same feed and the same horizon rules the booking
+     * form uses, through serve-slots.js. Two implementations of "what may a
+     * customer pick?" is how this page would start offering a date the site
+     * itself refuses.
+     *
+     * NOTHING IS REDRAWN OPTIMISTICALLY. On success the whole account is
+     * re-read and repainted, so what the customer ends up looking at is what
+     * was actually recorded — a visit somebody believes is booked and is not
+     * is the worst failure this page has.
+     *
+     * Without serve-slots.js this returns null and the card stays exactly what
+     * it was before this release: a legible offer with no button. A control
+     * that throws on click would be worse than no control.
+     */
+    function planConfirm(plan) {
+        if (typeof ServeSlots === 'undefined') return null;
+
+        var box    = el('div', 'plan__confirm');
+        var picked = { date: '', time: '' };
+
+        var cta = el('button', 'plan__cta', 'Choose a time');
+        cta.type = 'button';
+        box.appendChild(cta);
+
+        var pickWrap = el('div', 'plan__pick');
+        pickWrap.hidden = true;
+        box.appendChild(pickWrap);
+
+        var chosen = el('div', 'plan__chosen');
+        chosen.hidden = true;
+        box.appendChild(chosen);
+
+        /* Offered ONLY when there is a previous company to ask for. A checkbox
+           asking for "the same cleaner" on a first booking would be asking
+           about somebody who does not exist yet. */
+        var sameWrap = null, sameBox = null;
+        if (plan.samePartner) {
+            sameWrap = el('div', 'plan__samewrap');
+            var lbl = el('label', 'plan__same');
+            sameBox = document.createElement('input');
+            sameBox.type = 'checkbox';
+            lbl.appendChild(sameBox);
+            lbl.appendChild(el('span', null,
+                'Ask for the same cleaning company as your first visit'));
+            sameWrap.appendChild(lbl);
+            /* Not decoration. Serve assigns the visit, and a promise about
+               which company turns up is one this page cannot keep. */
+            sameWrap.appendChild(el('div', 'plan__samenote',
+                'We pass this on when we assign the visit. It is a request, not a guarantee.'));
+            sameWrap.hidden = true;
+            box.appendChild(sameWrap);
+        }
+
+        var row = el('div', 'plan__row');
+        /* Two buttons, two weights. Choosing a time is exploratory and can be
+           undone by choosing another; this one books a visit. */
+        var go  = el('button', 'plan__cta plan__go', 'Confirm ' + plan.frequency + ' plan');
+        go.type = 'button';
+        var status = el('span', 'tk-save');
+        row.appendChild(go);
+        row.appendChild(status);
+        row.hidden = true;
+        box.appendChild(row);
+
+        cta.addEventListener('click', function () {
+            cta.disabled = true;
+            pickWrap.hidden = false;
+            pickWrap.textContent = 'Loading times…';
+
+            ServeSlots.load(SLOTS).then(function (slots) {
+                pickWrap.textContent = '';
+                cta.hidden = true;
+                /* An empty feed is an ordinary outcome, not an error screen:
+                   unreachable, slow, or genuinely nothing open all land here,
+                   and all of them mean the same thing to the customer. */
+                if (!slots.length) {
+                    pickWrap.appendChild(el('p', 'plan__body',
+                        'We have no open times on screen right now. Call or email us ' +
+                        'below and we will find one with you.'));
+                    return;
+                }
+                pickWrap.appendChild(ServeSlots.picker(slots, function (date, time) {
+                    picked.date = date;
+                    picked.time = time;
+                    chosen.hidden = false;
+                    chosen.textContent = 'Your first ' + plan.frequency + ' visit: ' +
+                        (prettyDate(date) || date) + ' at ' + time;
+                    if (sameWrap) sameWrap.hidden = false;
+                    row.hidden = false;
+                    status.textContent = '';
+                    status.className = 'tk-save';
+                }));
+            });
+        });
+
+        go.addEventListener('click', function () {
+            if (!picked.date || !picked.time) return;
+            go.disabled = true;
+            status.textContent = 'Booking…';
+            status.className = 'tk-save';
+
+            postWrite({
+                kind:          'plan_confirm',
+                plan_id:       plan.planId,
+                slot_date:     picked.date,
+                slot_time:     picked.time,
+                same_provider: !!(sameBox && sameBox.checked),
+            })
+            .then(function (d) {
+                if (d && d.ok) {
+                    status.textContent = 'Booked';
+                    status.className = 'tk-save is-ok';
+                    return reload();
+                }
+                go.disabled = false;
+                status.textContent = planError(d && d.error);
+                status.className = 'tk-save is-bad';
+            })
+            .catch(function () {
+                go.disabled = false;
+                status.textContent = 'That did not go through. Please try again.';
+                status.className = 'tk-save is-bad';
+            });
+        });
+
+        return box;
+    }
+
+    /* Each of these is a real state rather than a generic failure: the window
+       closed, it is already booked, or the time went stale between loading the
+       list and choosing from it. */
+    function planError(code) {
+        if (code === 'expired') {
+            return 'That price is no longer being held. Please call us and we will sort it out.';
+        }
+        if (code === 'already_confirmed') return 'That plan is already booked.';
+        if (code === 'bad_slot')          return 'That time is no longer available. Please pick another.';
+        return 'That did not go through. Please try again.';
     }
 
     /** The title line is service + date, as asked; the detail opens on click. */

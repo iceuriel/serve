@@ -13,6 +13,118 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-13, Claude Code: r42, confirm & schedule
+
+**TWO HALVES, AND THE ORDER MATTERS.**
+
+1. **Paste `apps-script/webhook.gs` into Leads MASTER first.** Production
+   answered `{"ok":true,...,"version":"2026-09-13 r40"}` when probed at the
+   start of this session, so the server does not yet know `plan_confirm`.
+2. **Then push the site.**
+
+Backwards is the one order that hurts: the site half puts a live "Choose a
+time" button on the portal, and against an r40 deployment its POST comes back
+`unknown_kind` — the customer taps Confirm and is told it did not go through.
+Script first, site second, as the rule in CLAUDE.md says.
+
+**The gate is cleared.** The founder confirmed the r41 plan card is showing on
+a real portal, which is what this release builds on.
+
+### What shipped
+
+**Confirm & schedule.** The plan card now offers a time. Times come from
+`/api/slots` — the same feed the booking form reads — and the customer picks a
+day and a slot, is shown exactly which visit they are about to book, and
+confirms. That writes a real `JOBS` row (`CLEAN_STANDARD`, the cadence, **the
+price the plan held** rather than one recomputed today), flips the
+`AVAILABILITY` row to `booked`, stamps the slot's partner onto the job, and
+sets `status=confirmed` plus the **anchor** every later visit is counted from.
+
+**The same-company request.** A checkbox, offered only when there IS a previous
+company, that records `preferred_vendor_id`. **The browser sends yes or no and
+never a vendor id** — which company that means is read off the origin booking
+on the server, or a payload could request any company on the network and
+dispatch could not tell that apart from a request Serve made. Nothing reads the
+column yet; the ops email says plainly that assignment is still a human's.
+
+**It creates that job the one way jobs are created.** The payload is
+synthesised and handed to `buildJobRecord` / `writeRow` /
+`bookAvailabilitySlot` / `stampJobVendor` — the same calls in the same order as
+`doPost`, not a second way to write a JOBS row.
+
+**`serve-slots.js` is new**, and `script.js` now delegates to it. The horizon
+rules had to leave the booking page for the same reason `SERVE_SCOPE` did: /h
+loads nothing from the marketing bundle, and two copies of "what may a customer
+pick?" is how two pages start offering different days. `live-slots.test.js` and
+`availability-contract.test.js` were repointed onto the module, so what they
+prove is now proved for both callers at once — and the contract test gained an
+assertion that the booking page has not grown its own copy back.
+
+**r38's promise is kept on both sides.** Offering a plan still holds nothing.
+Confirming one is what takes capacity away from somebody else.
+
+### The hazard that shaped the id
+
+`submission_id` is `PLNC-<plan_id>-01`, deterministic so a double-tapped button
+dedupes into one booking. **The `-01` is load-bearing.** A `job_id` is the date
+plus the last six characters of the submission id, and a `plan_id` is its
+origin job's id with the prefix swapped — so an id derived from the plan alone
+ends in the same six characters the first clean's does, and a plan confirmed
+for the *same day* as that clean would mint an identical `job_id`. Two rows
+answering to one id means `getBooking` returns the wrong one forever. There is
+now a test that confirms a plan on exactly that day.
+
+### THE MISSED MUTATION, and it was the ownership check
+
+The first mutation run disabled the plan's `lead_id` ownership check — the most
+important guard in the release — and **the suite stayed green.** Not because
+the check is redundant: because every attempt to confirm someone else's plan
+also reached someone else's *origin booking*, and the second check answered
+first. A guard proven only by the guard behind it is not proven at all. That is
+the r40 rule ("a crash proves nothing about the assertion that crashed") in a
+new shape, and it is the third release in a row where the cause was one guard
+standing in front of another.
+
+The fixture that separates them is a plan row carrying **another customer's
+lead_id while pointing at this customer's booking** — what a mis-keyed backfill
+leaves behind. With it in place the mutation books `SRV-20261004-SSED01` for
+the wrong person and the file goes red.
+
+**A test-harness gap found the same way.** The fake `getRange()` had
+`getValues` but no `getValue`, so `stampJobVendor`'s `cell.getValue()` threw,
+the caller's wrapper swallowed it, and the vendor stamp silently did nothing —
+in the harness only. A missing stub is indistinguishable from a bug in the code
+under test, which is the worse half of that. Added.
+
+### Verified
+
+- **27/27 test files pass.** `portal.test.js` gained section 23 (the server
+  side) and `portal-render.test.js` gained D/E/F, which drive the real
+  `portal.js` and the real `serve-slots.js` through a click.
+- **13 deliberate mutations, all 13 caught**, each on a named assertion:
+  ownership, a browser-named vendor, a non-deterministic submission id, the
+  dropped `-01`, an unwritten anchor, unvalidated times, a lapsed plan
+  confirmable, no slot consumed, no vendor stamped, every plan claiming a
+  previous company, the browser dropping the horizon rules, the same-company
+  request never sent, and a confirm control reachable before a time is chosen.
+  The suite was green again after restore.
+- The render test's feed is built **relative to today**, so the horizon rules
+  are the thing under test and the file cannot rot into a calendar-flaky red.
+- `scripts/build-site.sh` was run: `_site/serve-slots.js` is staged.
+- **NOT verified in production** — nothing is deployed yet. See the two steps
+  at the top.
+
+**Not mine, left alone:** `AGENTS.md` and `CLAUDE.md` carry uncommitted
+continuity edits from the founder or Codex, and two new image files are
+untracked. None are in this commit.
+
+**STILL QUEUED, in the founder's order:** reschedule / cancel per upcoming
+booking with the **anchor as source of truth** (a one-off move shifts that
+visit only; the next is counted from the anchor), then the portal settings tab
+for the plan and home layout.
+
+---
+
 ## Current work — 2026-09-13, Claude Code: r41, the plan card reaches the page
 
 **A SITE FIX. `webhook.gs` is untouched and needs no paste.** r40 is already
