@@ -434,7 +434,7 @@ t('the tagline survived the reorder', /hero__tagline">Made to Serve/.test(INDEX)
    — it may already be printed on something — so the hero points at a copy. */
 t('the hero wears the Boston mark',
   /hero__logo" src="images\/serve-logo-boston\.svg"/.test(INDEX));
-t('and its alt names the city', /alt="Serve Home Cleaning, Boston"/.test(INDEX));
+t('and its alt names the area', /alt="Serve Home Cleaning, Greater Boston"/.test(INDEX));
 t('serve-logo-v2.svg is untouched by the page',
   !INDEX.includes('serve-logo-v2.svg') ||
   INDEX.indexOf('serve-logo-v2.svg') > INDEX.indexOf('serve-logo-boston.svg'));
@@ -444,11 +444,11 @@ const markLines = (MARK.match(/<text/g) || []).length;
 t('the mark has three lines of type', markLines === 3, markLines);
 t('Serve, then the category, then the city',
   MARK.indexOf('>Serve<') < MARK.indexOf('>HOME CLEANING<') &&
-  MARK.indexOf('>HOME CLEANING<') < MARK.indexOf('>BOSTON<'));
+  MARK.indexOf('>HOME CLEANING<') < MARK.indexOf('>GREATER BOSTON<'));
 /* Boston wears the wordmark's white, not the category's blue, so it reads as
    part of the name rather than as a second subtitle. */
 t('the city is set in the wordmark white',
-  /fill="#ffffff"[^>]*>BOSTON</.test(MARK));
+  /fill="#ffffff"[^>]*>GREATER BOSTON</.test(MARK));
 t('the viewBox grew to fit it — a third line outside it renders as nothing',
   /viewBox="40 10 200 254"/.test(MARK));
 

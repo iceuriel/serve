@@ -13,6 +13,23 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-14, Claude Code: hero mark reads GREATER BOSTON
+
+**LOCAL EDITS ONLY — not committed or pushed.** Founder asked "GREATER" in
+front of "BOSTON" under Serve / HOME CLEANING, on every hero variant (all three
+use the one `images/serve-logo-boston.svg`).
+- `images/serve-logo-boston.svg` — third line "GREATER BOSTON" at font-size
+  16, letter-spacing 4.3 (was BOSTON at 19 / 4.5). Measured in Chrome with
+  getBBox: at 19 / 4.5 it is 229 units, past the 200-unit viewBox; at 16 / 4.3
+  it is 199.9, flush with HOME CLEANING (199.7). viewBox, baselines and colour
+  unchanged; aria-label updated.
+- `index.html` — hero logo alt "Serve Home Cleaning, Greater Boston".
+- `tests/pricing-and-services.test.js` — 7a mark assertions follow the text.
+- Not touched: the founder's untracked `images/serve-logo-boston-9-09.svg`
+  (a separate draft: BOSTON at 14 / 5, viewBox height 265), which no page uses.
+Checked: `node tests/run-all.js` all 31 pass; headless screenshots untagged at
+1400px and `?src=poster` at 540px look right.
+
 ## Current work — 2026-09-14, Claude Code: new hero sub copy
 
 **PUSHED (`e050f20`) AND VERIFIED IN PRODUCTION (2026-09-14).** Production
