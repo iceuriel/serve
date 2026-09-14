@@ -15,7 +15,15 @@ except where a later section supersedes them.
 
 ## Current work — 2026-09-14, Claude Code: the authored hero gets the ZIP check too
 
-**LOCAL EDITS ONLY — not committed or pushed.** Founder asked, for the
+**PUSHED (`2fe2bce`) AND VERIFIED IN PRODUCTION (2026-09-14).** Production
+`index.html`, `style.css` and `script.js` match the repo (ignoring CR). In
+headless Chrome over CDP against servecleaning.com, untagged: the headline
+reads "A Clean Home, / One Less Thing to Manage", no hero button, no visible
+tagline, order headline → sub → ZIP check → note → "Serve handles the rest…".
+Typing 02116 at 1280px showed "We serve 02116", filled Build's ZIP and scrolled
+to Build; typing 99999 at 390px (mobile emulation) showed "We're not in 99999
+yet." with the waitlist link and no scroll. No console errors. No Apps Script
+change. Founder asked, for the
 untagged hero: headline in Times New Roman with a comma ("A Clean Home, / One
 Less Thing to Manage"); the ZIP check in place of the Instant Booking button;
 "Made to Serve your needs" removed; "Serve handles the rest…" under "Instantly
@@ -40,8 +48,7 @@ quote & book in under 1 minute", styled as on the skins.
 Checked: `node tests/run-all.js` all 31 pass; headless screenshots of the
 untagged, `?src=deed` and `?src=poster` heroes at 1400px, and untagged at
 540px, look right. Not checked: typing a ZIP in a real browser on the untagged
-hero (the wiring is unchanged and unit-tested), a real phone. Next: founder
-review, then commit and push (no Apps Script change).
+hero locally — since done in production, above. Not checked: a real phone.
 
 ## Current work — 2026-09-14, Claude Code: skin headlines in Times, ZIP placeholder
 
