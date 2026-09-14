@@ -167,10 +167,40 @@
         </div>
         <div class="hero__content">
             <h1 class="hero__headline">A Clean Home<br>One Less Thing to Manage</h1>
-            <p class="hero__sub">Serve manages, coordinates, and books your service through partnerships with local &amp; trusted Boston vendors.</p>
-            <p class="hero__tagline">Made to Serve <strong>your</strong> needs</p>
-            <a href="#quote" class="btn btn--primary serve-pulse">Instant Booking</a>
-            <p class="hero__note">Instantly quote &amp; book in under 1 minute</p>
+            <!-- Two bodies under the ONE headline. The first is the hero
+                 everyone sees. The second is the move-in skin: script.js
+                 (HERO_SKINS) shows it, and hides the first, for visitors whose
+                 first touch was a deed- / db- / mv- link such as /movein. It
+                 ships hidden, so without JavaScript — or on any failure — the
+                 authored hero stands. Three lines appear in both bodies; change
+                 one and change the other. -->
+            <div class="hero__body" id="hero-body-default">
+                <p class="hero__sub">Serve manages, coordinates, and books your service through partnerships with local &amp; trusted Boston vendors.</p>
+                <p class="hero__tagline">Made to Serve <strong>your</strong> needs</p>
+                <a href="#quote" class="btn btn--primary serve-pulse">Instant Booking</a>
+                <p class="hero__note">Instantly quote &amp; book in under 1 minute</p>
+            </div>
+            <div class="hero__body hero__body--movein" id="hero-body-movein" hidden>
+                <!-- The ZIP check IS the call to action here. It asks the same
+                     question as Build's first field and answers it by filling
+                     that field in, so coverage is decided in one place only. A
+                     ZIP we serve gets a green check and a scroll down to Build
+                     with the ZIP already entered. -->
+                <form class="hero-zip" id="hero-zip-form" novalidate>
+                    <label class="hero-zip__label" for="hero-zip">Check if we're in your area</label>
+                    <div class="hero-zip__field">
+                        <input class="flow-input hero-zip__input" type="text" id="hero-zip" name="hero_zip" inputmode="numeric"
+                               autocomplete="postal-code" maxlength="5" placeholder="ZIP code" enterkeyhint="go">
+                        <span class="hero-zip__check" aria-hidden="true">&#10003;</span>
+                    </div>
+                    <p class="hero-zip__status" id="hero-zip-status" aria-live="polite"></p>
+                    <a href="#quote" class="hero-zip__waitlist" id="hero-zip-waitlist" hidden>Get notified when we are &darr;</a>
+                </form>
+                <p class="hero__note">Instantly quote &amp; book in under 1 minute</p>
+                <p class="hero__lead">Serve handles the rest&hellip;</p>
+                <p class="hero__sub">Serve manages, coordinates, and books your service through partnerships with local &amp; trusted Boston vendors.</p>
+                <p class="hero__tagline">Made to Serve <strong>your</strong> needs</p>
+            </div>
         </div>
     </section>
 

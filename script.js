@@ -190,8 +190,13 @@ const SERVE_ATTRIBUTION = readAttribution();
 /* ============================================================
    HERO SKIN — headline varies by intent segment
 
-   Same page, same offer, same CTA. Only the headline changes, because that is
-   the line deciding whether someone reads the second one.
+   Same page, same offer. The headline changes, because that is the line
+   deciding whether someone reads the second one. A skin MAY also name a
+   `body`: the id of an alternate block authored hidden in index.html, shown
+   in place of #hero-body-default. Only move-in has one (2026-09-14) — its
+   hero leads with a ZIP check instead of the button, and the booking flow
+   below wires that check to Build. A skin with no body keeps the authored
+   one, button and all.
 
    Selection is FIRST touch, never last. Someone who arrives on a deed link and
    later scans a poster QR is still a mover — the poster did not change why they
@@ -207,7 +212,8 @@ const SERVE_ATTRIBUTION = readAttribution();
    ============================================================ */
 const HERO_SKINS = {
     movein: {
-        headline: 'Just closed on a new home? It was cleaned for the last owner — not for you. Start fresh with Serve',
+        headline: 'Moving in or out?',
+        body:     'hero-body-movein',
     },
     pro: {
         headline: 'Come back Friday to a clean home. Get your weekends back with Serve',
@@ -222,6 +228,17 @@ function applyHeroSkin(segment) {
         if (!el) return;
         el.textContent = skin.headline;
         document.body.setAttribute('data-segment', segment);   // hook for styling / analytics
+
+        /* Both blocks must be found before either is touched. Half a swap — the
+           default hidden and nothing shown — would be a hero with no body. */
+        if (skin.body) {
+            const alt  = document.getElementById(skin.body);
+            const main = document.getElementById('hero-body-default');
+            if (alt && main) {
+                alt.hidden  = false;
+                main.hidden = true;
+            }
+        }
     } catch (_) {
         /* Never let a headline swap break the page. The authored hero stands. */
     }
@@ -972,6 +989,87 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
         emailEl.disabled = true;
         $('waitlist-submit').disabled = true;
     });
+
+    /* HERO ZIP CHECK — the move-in hero's call to action (2026-09-14)
+       ---------------------------------------------------------------
+       The hero does not decide coverage. A full ZIP is written into Build's own
+       field and run through evaluateZip(), then the hero reads the verdict back
+       from `state`. So the two can never disagree, and Build is already filled
+       in, with its own status and waitlist showing, by the time the visitor
+       arrives there.
+
+       A ZIP we serve gets the green check, then a short pause so the check is
+       actually seen, then the scroll. The field is blurred first so a phone
+       keyboard is not left open over the form. Editing the ZIP during the pause
+       cancels the jump. A ZIP we do not serve never moves the page; it offers
+       the waitlist link instead.
+
+       Only visible on the move-in skin, but wired on every load: an input
+       nobody can see receives no events. Guarded, so a page without the hero
+       markup loses nothing. */
+    const heroZipForm     = $('hero-zip-form');
+    const heroZipInput    = $('hero-zip');
+    const heroZipStatus   = $('hero-zip-status');
+    const heroZipWaitlist = $('hero-zip-waitlist');
+    const HERO_ZIP_PAUSE_MS = 700;
+
+    if (heroZipForm && heroZipInput && heroZipStatus && heroZipWaitlist) {
+        let heroJump = null;
+
+        const goToBuild = () => {
+            heroZipInput.blur();
+            if (typeof serveRetirePulse === 'function') serveRetirePulse();
+            setView(1);
+        };
+
+        const checkHeroZip = (immediate) => {
+            clearTimeout(heroJump);
+            const zip = heroZipInput.value;
+            heroZipForm.classList.remove('is-ok', 'is-out');
+            heroZipInput.classList.remove('error');
+            heroZipWaitlist.hidden = true;
+            heroZipStatus.textContent = '';
+            if (zip.length < 5) return;
+
+            zipInput.value = zip;
+            buildError.textContent = '';
+            evaluateZip();
+
+            if (state.tier === 'unknown') {
+                heroZipForm.classList.add('is-out');
+                heroZipStatus.textContent = "We're not in " + zip + ' yet.';
+                heroZipWaitlist.hidden = false;
+                return;
+            }
+
+            heroZipForm.classList.add('is-ok');
+            heroZipStatus.textContent = 'We serve ' + zip;
+            prefetchAvailability();
+            heroJump = setTimeout(goToBuild, immediate ? 0 : HERO_ZIP_PAUSE_MS);
+        };
+
+        heroZipInput.addEventListener('input', () => {
+            heroZipInput.value = heroZipInput.value.replace(/\D/g, '').slice(0, 5);
+            checkHeroZip(false);
+        });
+
+        /* Enter / the keyboard's Go button. */
+        heroZipForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            if (heroZipInput.value.length < 5) {
+                heroZipInput.classList.add('error');
+                heroZipStatus.textContent = 'Enter your 5-digit ZIP code.';
+                heroZipInput.focus();
+                return;
+            }
+            checkHeroZip(true);
+        });
+
+        heroZipWaitlist.addEventListener('click', (e) => {
+            e.preventDefault();
+            goToBuild();
+        });
+    }
 
     /* Step 1 submit */
     /* r44. ASK FOR TIMES AS SOON AS SOMEBODY STARTS, not when they finish step
