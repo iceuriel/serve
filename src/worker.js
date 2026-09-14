@@ -957,6 +957,32 @@ function priceFrom(d) {
   });
 }
 
+/**
+ * The three recurring per-visit prices for this home, or null.
+ *
+ * r45. UNSIGNED AND NOT PART OF THE SCOPE, on purpose. These are what the
+ * customer portal shows somebody who booked a move-in / move-out and is now
+ * choosing a plan, and what Apps Script asks for again when they pick one —
+ * so the number that lands on the booking is re-derived from this engine by
+ * the server, never carried over from a browser. Nothing charges against it
+ * on that path, so there is nothing for a signature to protect.
+ *
+ * The recurring track does not depend on service, condition or add-ons —
+ * see R3/R7 in pricing-engine.js — so it is the same number a first-clean
+ * customer with this home is shown on the booking form.
+ */
+function recurringFrom(q) {
+  const f = q && q.freqSteady;
+  if (!f) return null;
+  const out = {};
+  for (const k of ["weekly", "biweekly", "monthly"]) {
+    const n = Number(f[k]);
+    if (!isFinite(n) || n <= 0) return null;
+    out[k] = n;
+  }
+  return out;
+}
+
 async function hmac(secret, message) {
   const key = await crypto.subtle.importKey(
     "raw", new TextEncoder().encode(secret),
@@ -1037,9 +1063,11 @@ async function handleQuote(request, env) {
   if (!CAN_PRICE)  return json({ ok: false, error: "cannot_price" });
   if (!d || !d.zip) return json({ ok: false, error: "no_zip" });
 
-  let price;
+  let price, recurring;
   try {
-    price = priceFrom(d).displayPrice;
+    const q = priceFrom(d);
+    price = q.displayPrice;
+    recurring = recurringFrom(q);
   } catch (err) {
     console.error("quote failed: " + String(err));
     return json({ ok: false, error: "price_failed" });
@@ -1050,13 +1078,14 @@ async function handleQuote(request, env) {
   if (!secret) {
     /* Loud, because the site keeps working and nothing else would say so. */
     console.error("QUOTE_SECRET is not bound — quotes are unsigned");
-    return json({ ok: true, price, pricing_version: PRICING_VERSION, quote_sig: null });
+    return json({ ok: true, price, recurring, pricing_version: PRICING_VERSION, quote_sig: null });
   }
 
   const exp = Math.floor(Date.now() / 1000) + QUOTE_TTL_S;
   return json({
     ok: true,
     price,
+    recurring,
     pricing_version: PRICING_VERSION,
     quote_sig: await signQuote(secret, d, price, exp),
     /* Echoed back so the booking can CARRY it to the sheet. Re-deriving this

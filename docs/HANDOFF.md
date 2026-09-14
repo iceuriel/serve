@@ -6,10 +6,141 @@ assistant with no access to this repo. Self-contained on purpose.
 **Companion doc:** `/docs/SCHEMA.md` — authoritative for every column's meaning
 and who writes it. This file is the narrative; that file is the contract.
 
-**Latest session: 2026-09-13.** Jump to
+**Latest session: 2026-09-14.** Jump to
 [what changed on 2026-09-08 / 09](#session-2026-09-08--09) for the current
 state. The sections below it describe earlier builds and remain accurate
 except where a later section supersedes them.
+
+---
+
+## Current work — 2026-09-14, Claude Code: r45, a plan after a move
+
+**STATUS: see "Deploy" below — it records what was pushed and what still needs
+the founder's paste.** `webhook.gs` is at r45; the Worker and `portal.js` ship by
+push.
+
+### The ask
+
+The founder, testing move-in / move-out bookings, found there was no way for
+those customers to set up recurring cleaning anywhere. Asked for: in the portal
+of a move customer, show the recurring plans with prices from the real
+calculator, let them pick one and a time from availability (or earlier / later
+in the day), put the booked visit in Upcoming, and keep the box saved and static
+until they change the plan or the time.
+
+### What shipped
+
+- **The plan box** (`portal.js`, `movePlanBox`), under Upcoming beside r38's
+  offer card. *Choose*: the home it is for, three tiles (Every week / Every 2
+  weeks / Every month) with a per-visit price each, then times from `/api/slots`
+  filtered to AFTER the move clean, "None of these work?" → earlier / later
+  buttons, the same-company checkbox when the move had a company, a sentence
+  saying back exactly what will be booked, and "Start my plan". *Saved*: solid
+  card — cadence, price, address, "Next visit: …", "Change plan or time" (or
+  "Book your next visit" when nothing is coming). *Change*: the same chooser
+  with the current plan selected and "Keep my visit on …" as the default time.
+- **Server** (`webhook.gs` r45): `movePlan` on the portal model;
+  `plan_start` and `plan_change` portal writes. Full contract in SCHEMA,
+  "A plan after a move".
+- **Worker**: `/api/quote` also returns `recurring` — `computeQuote().freqSteady`.
+
+### Where the price comes from — the founder asked for this specifically
+
+The recurring prices are the pricing engine's recurring track for that home
+(`freqSteady`): the same numbers a first-clean customer with the same home is
+shown on the booking form, since that track ignores service, condition and
+add-ons. **Apps Script has no copy of the engine**, so it asks the Worker's
+`/api/quote` itself, with the beds / baths / levels / ZIP stored on the move
+booking — nothing from the browser. The browser shows prices from the same
+endpoint and sends back `shown_price` only so that a price change in between is
+refused (`price_changed`) rather than booked at a number nobody saw. A plan then
+HOLDS its price: a time-only change never re-prices; only a different cadence
+asks the engine again.
+
+No new business number was introduced. **Example from the Worker test, 2 bed / 1.5 bath /
+2 levels in 02116: weekly $180, biweekly $281, monthly $471 per visit** — monthly costs more per visit because more builds up
+between cleans. That is the existing engine, not a decision made here.
+
+### Decisions made here (engineering), and ones left for the founder
+
+Made:
+- Choosing BOOKS immediately (plan row `confirmed` + first JOBS row). No 7-day
+  held offer as in r38 — the customer is choosing in the moment.
+- The plan box moves the ANCHOR; r43's per-visit "Change time" still does not.
+- A PAID visit's price is never rewritten by a cadence change (`paid` → call us).
+  An unpaid one is; the ops email flags that a card hold may be for the old
+  amount. Nothing captures, voids or refunds.
+- Only plans originating from a move can be changed from this box; a first-clean
+  plan keeps the price it was quoted (r38's promise).
+- Move-out condition ("heavy") is not carried onto the upkeep visit.
+
+**For the founder — not decided:**
+- **Move-OUT customers are leaving the address on the booking.** The box names
+  the home ("For 9 Tremont St, 2") so nobody books upkeep blind, but a move-out
+  customer is still offered a plan at the home they are leaving. Options: show
+  the box to everyone who booked a move (current), or hide it until there is a
+  way to book the NEW address. The service is one combined "Move in / move out"
+  type, so the system cannot tell the two apart today.
+- Whether move customers should get a discount or the same recurring prices as
+  everyone (current: same engine prices).
+
+### Two defects caught before shipping
+
+1. **A disabled button freezes the live refresh.** `booking-live.js` treats any
+   `button:disabled` as "a save is in flight" and stops repainting. The first
+   draft disabled "Start my plan" until a time was picked, which would have
+   frozen every move customer's portal. It is hidden instead, and a test asserts
+   no disabled button exists in the untouched box.
+2. **After `price_changed` the confirm button stayed disabled**, so the customer
+   could never accept the new price. Found by the render test.
+
+### Verified
+
+- **29/29 test files pass.** `portal.test.js` section 25 (server, fresh harness,
+  ~105 assertions: ownership each way, engine inputs from the stored home, price
+  refusals, start/change/preference/next-visit paths, the repair path, whitelist
+  keys, no vendor id). `portal-render.test.js` section L (the real `portal.js`
+  driven by clicks). `worker-proxy.test.js` checks `recurring` against the
+  engine directly.
+- **Mutations: 24/24 caught, each on its named assertion**, every file restored
+  byte-identical. The first run missed four, all test weaknesses rather than
+  code bugs, and all fixed: (a) change-ownership was only proven by the booking
+  check behind it — r42's shape again — now a mis-keyed plan row on the caller's
+  own move booking; (b) the same-company mutation had no company to leak; (c) a
+  mutation placed after the write it meant to break; (d) the saved price in the
+  fixture equalled the engine price, so "keeps the booked price" proved nothing.
+- r42 and r43 behaviour unchanged by the three extractions — their sections pass
+  untouched.
+- `scripts/build-site.sh`: 74 files staged, nothing private.
+- Headless Chrome screenshots (stubbed data, local server) of choose-with-a-pick
+  at 1280px and 520px, and the saved card at 1280px.
+
+### NOT verified
+
+- **No real Apps Script → Worker call has run.** The harness stubs `UrlFetchApp`.
+  Cloudflare could conceivably challenge Google's egress; if so every start
+  answers `price_unavailable` and the box says it could not confirm the price.
+  Check with a real move booking right after the paste.
+- No real portal link has opened the box; no email has been read.
+- Phone width below 512px (headless Chrome limit).
+
+### Deploy — THE ORDER IS PUSH FIRST, THEN PASTE. The reverse of the usual rule, on purpose.
+
+- The site half is **inert until r45 is pasted**: the box draws only from
+  `movePlan`, which only r45 sends. Pushing first puts nothing on any page.
+- The script half **needs the Worker live**: r45 prices through
+  `/api/quote`'s new `recurring` field. Pasting first would let a move
+  customer see the box's prices fail.
+
+1. Push (Worker + site). Confirm `POST /api/quote` in production returns
+   `recurring`.
+2. Founder pastes `apps-script/webhook.gs` into Leads MASTER and deploys a new
+   version; `/exec` must answer `2026-09-14 r45`.
+3. Open a portal link for a move booking: the box, prices, pick, start; the
+   visit appears in Upcoming, the box turns into the saved plan, the ops email
+   arrives. Then "Change plan or time".
+
+`availability.gs` untouched. No sheet change.
 
 ---
 

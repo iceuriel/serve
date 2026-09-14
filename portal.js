@@ -162,7 +162,8 @@
        (a booking made, moved or cancelled) forgets it: see postWrite.
        ======================================================== */
     var SLOTS_FRESH_MS = 60000;
-    var CAPACITY_KINDS = { plan_confirm: true, reschedule: true, cancel: true };
+    var CAPACITY_KINDS = { plan_confirm: true, reschedule: true, cancel: true,
+                           plan_start: true, plan_change: true };
     var slotsWarm = null;   // { at: ms, promise }
 
     function loadSlots() {
@@ -184,7 +185,8 @@
         var movable = (d.bookings || []).some(function (b) {
             return b && !b.completed && !b.cancelled;
         });
-        if ((d.plan && d.plan.frequency) || movable) loadSlots();
+        var movePlan = d.movePlan && (d.movePlan.state === 'choose' || d.movePlan.state === 'saved');
+        if ((d.plan && d.plan.frequency) || movable || movePlan) loadSlots();
     }
 
     /* ========================================================
@@ -381,6 +383,9 @@
            portal rendered up to here and stopped. No plan card, and no Past
            section either. */
         add(bodyEl, planCard(model.plan));
+        /* r45. The plan box for somebody who booked a move — beside r38's
+           offer card, because it answers the same question for them. */
+        add(bodyEl, movePlanBox(model.movePlan));
         if (past.length) {
             bodyEl.appendChild(el('h2', 'portal__h', 'Past'));
             past.forEach(function (b) { bodyEl.appendChild(bookingRow(b)); });
@@ -559,6 +564,401 @@
         }
         if (code === 'already_confirmed') return 'That plan is already booked.';
         if (code === 'bad_slot')          return 'That time is no longer available. Please pick another.';
+        return 'That did not go through. Please try again.';
+    }
+
+    /* ========================================================
+       A PLAN AFTER A MOVE  —  r45
+       ========================================================
+       Somebody who booked a move-in / move-out clean is shown the three
+       cadences, priced for their home, and books one with a time. After that
+       the box is the plan they chose — static — until they press Change.
+
+       THE PRICES COME FROM /api/quote, the Worker's copy of the pricing
+       engine, asked about the home the server put in the model. They are not
+       computed here and not trusted by the server: it asks the engine again
+       and refuses if the answer differs from what this page showed.
+
+       The earlier / later choice is the booking form's own fallback, for
+       somebody who does not like any of the open times.
+       ======================================================== */
+    var QUOTE = '/api/quote';
+    var PLAN_NAMES = { weekly: 'Every week', biweekly: 'Every 2 weeks', monthly: 'Every month' };
+    var PLAN_ORDER = ['weekly', 'biweekly', 'monthly'];
+    var PREF_NAMES = {
+        earlier: ['Earlier in the day', 'Typically 8:00 AM – 12:00 PM'],
+        later:   ['Later in the day', 'Typically 12:00 PM – 5:00 PM'],
+    };
+
+    /* Page state that must survive a live repaint: whether the saved plan is
+       being changed, and the prices already fetched for this home. */
+    var movePlanEditing = false;
+    var movePrices = null;          // { key, promise }
+
+    function loadMovePrices(home) {
+        var key = JSON.stringify(home);
+        if (movePrices && movePrices.key === key) return movePrices.promise;
+        var entry = { key: key, promise: fetch(QUOTE, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ zip: home.zip, bedrooms: home.bedrooms,
+                bathrooms: home.bathrooms, levels: home.levels,
+                service: 'first_clean', condition: 'standard', frequency_selected: 'once' }),
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            var rec = d && d.ok === true && d.recurring;
+            var ok = rec && PLAN_ORDER.every(function (f) { return Number(rec[f]) > 0; });
+            return ok ? rec : null;
+        })
+        .catch(function () { return null; }) };
+        movePrices = entry;
+        /* A failure is not kept: the retry button deserves its own attempt. */
+        entry.promise.then(function (p) { if (!p && movePrices === entry) movePrices = null; });
+        return entry.promise;
+    }
+
+    /** The plan box, or null for anybody who did not book a move. */
+    function movePlanBox(mp) {
+        if (!mp || (mp.state !== 'choose' && mp.state !== 'saved') || !mp.home) return null;
+        var wrap = el('section', 'mplan');
+        drawMovePlan(wrap, mp);
+        return wrap;
+    }
+
+    function drawMovePlan(wrap, mp) {
+        wrap.textContent = '';
+        var editing = mp.state === 'choose' || movePlanEditing;
+        wrap.className = 'mplan' + (mp.state === 'saved' && !editing ? ' mplan--saved' : '') +
+                         (mp.state === 'saved' && editing ? ' is-dirty' : '');
+        if (editing) movePlanChooser(wrap, mp); else movePlanSaved(wrap, mp);
+    }
+
+    /** The visit the plan points at, if it is still coming. */
+    function movePlanVisit(mp) {
+        var list = (model && model.bookings) || [];
+        for (var i = 0; i < list.length; i++) {
+            var b = list[i];
+            if (b.bookingId === mp.visitId && !b.completed && !b.cancelled) return b;
+        }
+        return null;
+    }
+
+    /* ---- the plan they chose, as it stands ---- */
+    function movePlanSaved(wrap, mp) {
+        wrap.appendChild(el('div', 'mplan__tag', 'Your recurring plan'));
+        wrap.appendChild(el('div', 'mplan__title', PLAN_NAMES[mp.frequency] || mp.frequency));
+        var price = money(mp.price);
+        if (price) wrap.appendChild(el('div', 'mplan__price', price + ' per visit'));
+        if (mp.propertyLabel) wrap.appendChild(el('div', 'mplan__home', 'At ' + mp.propertyLabel));
+
+        var visit = movePlanVisit(mp);
+        wrap.appendChild(el('div', 'mplan__next', visit
+            ? 'Next visit: ' + (whenLine(visit) || 'time to be confirmed')
+            : 'No visit on the calendar right now.'));
+        if (mp.sameAsked) {
+            wrap.appendChild(el('div', 'mplan__note',
+                'You asked for the same cleaning company as your move clean.'));
+        }
+
+        var edit = el('button', 'mplan__edit', visit ? 'Change plan or time' : 'Book your next visit');
+        edit.type = 'button';
+        edit.addEventListener('click', function () {
+            movePlanEditing = true;
+            drawMovePlan(wrap, mp);
+        });
+        wrap.appendChild(edit);
+    }
+
+    /* ---- choosing a plan and a time ---- */
+    function movePlanChooser(wrap, mp) {
+        var saved = mp.state === 'saved';
+        var visit = saved ? movePlanVisit(mp) : null;
+        var pick = { frequency: saved ? mp.frequency : '', price: saved ? mp.price : null,
+                     date: '', time: '', pref: '', keep: !!visit };
+        var prices = null;
+
+        wrap.appendChild(el('div', 'mplan__tag', saved ? 'Change your plan' : 'After your move'));
+        wrap.appendChild(el('div', 'mplan__title', 'Keep your home clean with a recurring plan'));
+        if (mp.propertyLabel) wrap.appendChild(el('div', 'mplan__home', 'For ' + mp.propertyLabel));
+        wrap.appendChild(el('p', 'mplan__body',
+            'Choose how often. Prices are per visit for this home, and nothing is ' +
+            'booked until you pick a time and confirm.'));
+
+        var opts = el('div', 'mplan__plans');
+        wrap.appendChild(opts);
+
+        var timeBox = el('div', 'mplan__time');
+        timeBox.hidden = !pick.frequency;
+        wrap.appendChild(timeBox);
+
+        var sameBox = null;
+        if (!saved && mp.samePartner) {
+            var sameWrap = el('div', 'plan__samewrap');
+            var lbl = el('label', 'plan__same');
+            sameBox = document.createElement('input');
+            sameBox.type = 'checkbox';
+            lbl.appendChild(sameBox);
+            lbl.appendChild(el('span', null,
+                'Ask for the same cleaning company as your move clean'));
+            sameWrap.appendChild(lbl);
+            sameWrap.appendChild(el('div', 'plan__samenote',
+                'We pass this on when we assign the visit. It is a request, not a guarantee.'));
+            wrap.appendChild(sameWrap);
+        }
+
+        var chosen = el('div', 'mplan__chosen');
+        wrap.appendChild(chosen);
+
+        var row = el('div', 'mplan__row');
+        var go = el('button', 'mplan__go', saved ? 'Save changes' : 'Start my plan');
+        go.type = 'button';
+        row.appendChild(go);
+        if (saved) {
+            var keep = el('button', 'mplan__cancel', 'Keep my plan as it is');
+            keep.type = 'button';
+            keep.addEventListener('click', function () {
+                movePlanEditing = false;
+                drawMovePlan(wrap, mp);
+            });
+            row.appendChild(keep);
+        }
+        var status = el('span', 'tk-save');
+        row.appendChild(status);
+        wrap.appendChild(row);
+
+        /* Anything chosen protects the box from the live refresh. */
+        function touched() {
+            if (String(wrap.className).indexOf('is-dirty') === -1) wrap.className += ' is-dirty';
+        }
+
+        function hasTime() { return pick.keep || pick.pref || (pick.date && pick.time); }
+
+        function sayChosen() {
+            var parts = [];
+            if (pick.frequency) {
+                parts.push((PLAN_NAMES[pick.frequency] || pick.frequency) +
+                           (money(pick.price) ? ' at ' + money(pick.price) + ' per visit' : ''));
+            }
+            if (pick.date && pick.time) {
+                parts.push((saved ? 'visit on ' : 'first visit on ') +
+                           (prettyDate(pick.date) || pick.date) + ' at ' + pick.time);
+            } else if (pick.pref) {
+                parts.push((saved ? 'visit ' : 'first visit ') +
+                           PREF_NAMES[pick.pref][0].toLowerCase() + ' — we will call to set the day');
+            } else if (pick.keep && visit) {
+                parts.push('visit stays ' + (whenLine(visit) || 'as booked'));
+            }
+            chosen.textContent = parts.join(' · ');
+            var ready = !!pick.frequency && pick.price > 0 && !!hasTime();
+            if (saved && pick.keep && pick.frequency === mp.frequency) ready = false;
+            /* HIDDEN, NOT DISABLED, until there is something to confirm. The
+               live refresh reads any disabled button as "a save is in flight"
+               and stops repainting — a disabled button sitting in every move
+               customer's portal would freeze their page. */
+            go.hidden = !ready;
+        }
+
+        function drawOptions() {
+            opts.textContent = '';
+            PLAN_ORDER.forEach(function (f) {
+                var b = el('button', 'mplan__opt' + (pick.frequency === f ? ' is-selected' : ''));
+                b.type = 'button';
+                b.setAttribute('aria-pressed', pick.frequency === f ? 'true' : 'false');
+                b.setAttribute('data-frequency', f);
+                b.appendChild(el('span', 'mplan__optname', PLAN_NAMES[f]));
+                /* The saved plan keeps the price it was booked at. Only a
+                   different cadence shows the engine's price for it. */
+                var shown = (saved && f === mp.frequency) ? mp.price : prices[f];
+                b.appendChild(el('span', 'mplan__optprice', money(shown) + ' per visit'));
+                b.addEventListener('click', function () {
+                    pick.frequency = f;
+                    pick.price = shown;
+                    touched();
+                    drawOptions();
+                    timeBox.hidden = false;
+                    status.textContent = '';
+                    status.className = 'tk-save';
+                    sayChosen();
+                });
+                opts.appendChild(b);
+            });
+        }
+
+        function showPrices() {
+            opts.textContent = 'Loading prices…';
+            loadMovePrices(mp.home).then(function (p) {
+                opts.textContent = '';
+                if (!p) {
+                    opts.appendChild(el('p', 'tk-note',
+                        'We could not load prices just now.'));
+                    var retry = el('button', 'mplan__retry', 'Try again');
+                    retry.type = 'button';
+                    retry.addEventListener('click', showPrices);
+                    opts.appendChild(retry);
+                    return;
+                }
+                prices = p;
+                drawOptions();
+                sayChosen();
+            });
+        }
+
+        /* ---- the time: keep it, a slot, or earlier / later ---- */
+        var slotWrap = el('div', 'mplan__slots');
+        var prefWrap = el('div', 'mplan__prefs');
+        prefWrap.hidden = true;
+
+        function clearChips(root) {
+            (root.querySelectorAll('.slot-chip') || []).forEach(function (c) {
+                c.className = 'slot-chip';
+                c.setAttribute('aria-pressed', 'false');
+            });
+        }
+        function drawPrefs() {
+            prefWrap.textContent = '';
+            ['earlier', 'later'].forEach(function (k) {
+                var b = el('button', 'mplan__pref' + (pick.pref === k ? ' is-selected' : ''));
+                b.type = 'button';
+                b.setAttribute('aria-pressed', pick.pref === k ? 'true' : 'false');
+                b.setAttribute('data-pref', k);
+                b.appendChild(el('span', 'mplan__optname', PREF_NAMES[k][0]));
+                b.appendChild(el('span', 'mplan__optprice', PREF_NAMES[k][1]));
+                b.addEventListener('click', function () {
+                    pick.pref = k; pick.date = ''; pick.time = ''; pick.keep = false;
+                    clearChips(slotWrap);
+                    touched();
+                    drawPrefs();
+                    drawKeep();
+                    sayChosen();
+                });
+                prefWrap.appendChild(b);
+            });
+        }
+
+        var keepBtn = null;
+        function drawKeep() {
+            if (!keepBtn) return;
+            keepBtn.className = 'mplan__keep' + (pick.keep ? ' is-selected' : '');
+            keepBtn.setAttribute('aria-pressed', pick.keep ? 'true' : 'false');
+        }
+        if (visit) {
+            keepBtn = el('button', 'mplan__keep', 'Keep my visit on ' + (whenLine(visit) || 'its current time'));
+            keepBtn.type = 'button';
+            keepBtn.addEventListener('click', function () {
+                pick.keep = true; pick.pref = ''; pick.date = ''; pick.time = '';
+                clearChips(slotWrap);
+                drawPrefs();
+                drawKeep();
+                sayChosen();
+            });
+            timeBox.appendChild(keepBtn);
+            drawKeep();
+        }
+
+        timeBox.appendChild(el('div', 'mplan__label',
+            saved ? 'Or pick a new time' : 'Pick a time for your first visit'));
+        timeBox.appendChild(slotWrap);
+        var other = el('button', 'mplan__other', 'None of these work? Choose earlier or later in the day');
+        other.type = 'button';
+        other.addEventListener('click', function () {
+            prefWrap.hidden = false;
+            other.hidden = true;
+        });
+        timeBox.appendChild(other);
+        timeBox.appendChild(prefWrap);
+        drawPrefs();
+
+        if (typeof ServeSlots === 'undefined') {
+            prefWrap.hidden = false;
+            other.hidden = true;
+        } else {
+            slotWrap.textContent = 'Loading times…';
+            loadSlots().then(function (slots) {
+                slotWrap.textContent = '';
+                /* The upkeep starts AFTER the move clean — the server refuses
+                   anything else, so nothing else is offered. */
+                var after = String(mp.after || '');
+                var usable = (slots || []).filter(function (s) { return !after || s.date > after; });
+                if (!usable.length) {
+                    slotWrap.appendChild(el('p', 'tk-note',
+                        'We have no open times on screen right now. Choose earlier or ' +
+                        'later in the day and we will call to set the day.'));
+                    prefWrap.hidden = false;
+                    other.hidden = true;
+                    return;
+                }
+                slotWrap.appendChild(ServeSlots.picker(usable, function (date, time) {
+                    pick.date = date; pick.time = time; pick.pref = ''; pick.keep = false;
+                    touched();
+                    drawPrefs();
+                    drawKeep();
+                    sayChosen();
+                }));
+            });
+        }
+
+        go.addEventListener('click', function () {
+            if (go.hidden || go.disabled) return;
+            go.disabled = true;
+            status.textContent = saved ? 'Saving…' : 'Booking…';
+            status.className = 'tk-save';
+
+            var payload = saved
+                ? { kind: 'plan_change', plan_id: mp.planId }
+                : { kind: 'plan_start', job_id: mp.jobId,
+                    same_provider: !!(sameBox && sameBox.checked) };
+            payload.frequency = pick.frequency;
+            payload.shown_price = pick.price;
+            if (pick.date && pick.time) { payload.slot_date = pick.date; payload.slot_time = pick.time; }
+            else if (pick.pref)         { payload.time_preference = pick.pref; }
+
+            postWrite(payload)
+            .then(function (d) {
+                if (d && d.ok) {
+                    status.textContent = saved ? 'Saved' : 'Booked';
+                    status.className = 'tk-save is-ok';
+                    movePlanEditing = false;
+                    return reload();
+                }
+                /* The engine's price moved between looking and choosing. Show
+                   the new numbers and let them confirm again — never book a
+                   price they did not see. */
+                if (d && d.error === 'price_changed' && d.prices) {
+                    movePrices = { key: JSON.stringify(mp.home), promise: Promise.resolve(d.prices) };
+                    prices = d.prices;
+                    /* Re-armed, or the customer could never confirm the new
+                       price — and a disabled button freezes the live refresh. */
+                    go.disabled = false;
+                    if (!(saved && pick.frequency === mp.frequency)) pick.price = d.prices[pick.frequency];
+                    drawOptions();
+                    sayChosen();
+                    status.textContent = 'Prices were just updated. Please check the price and confirm again.';
+                    status.className = 'tk-save is-bad';
+                    return;
+                }
+                go.disabled = false;
+                status.textContent = movePlanError(d && d.error);
+                status.className = 'tk-save is-bad';
+            })
+            .catch(function () {
+                go.disabled = false;
+                status.textContent = 'That did not go through. Please try again.';
+                status.className = 'tk-save is-bad';
+            });
+        });
+
+        go.hidden = true;
+        showPrices();
+    }
+
+    function movePlanError(code) {
+        if (code === 'too_early')         return 'Please pick a day after your move clean.';
+        if (code === 'bad_slot')          return 'That time is no longer available. Please pick another.';
+        if (code === 'already_confirmed') return 'You already have a plan for this home. Refresh to see it.';
+        if (code === 'price_unavailable') return 'We could not confirm the price just now. Please try again.';
+        if (code === 'paid')              return 'That visit is already paid, so please call us to change your plan.';
+        if (code === 'too_late')          return 'Your next visit is too soon to change online. Please call us.';
         return 'That did not go through. Please try again.';
     }
 

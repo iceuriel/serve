@@ -598,6 +598,57 @@ what it meant would lock customers out of their own bookings.
 A move can never land sooner than the feed allows regardless: `/api/slots`
 publishes nothing inside `MIN_LEAD_HOURS` (18), inherited from availability.gs.
 
+### A plan after a move — `plan_start` and `plan_change` (r45)
+
+**No new column and no new tab.** A move plan is a `RECURRING_PLANS` row whose
+`origin_job_id` is a move-in / move-out booking (`CLEAN_MOVEOUT`). r38's
+`createRecurringPlan` still never *offers* a move a plan at booking time; the
+portal asks instead, and choosing books.
+
+**The portal model gains `movePlan`** — a whitelist, null for everybody who has
+not booked a move. The booking it belongs to is the newest move booking that
+already has a plan, or failing that the newest one not cancelled.
+
+| key | meaning |
+|---|---|
+| `state` | `choose` (no plan yet) or `saved` (a confirmed plan) |
+| `jobId` | the move booking |
+| `propertyLabel` | address and unit of that booking — the plan is for THIS home |
+| `after` | the move booking's date; the first plan visit must be later. Blank for a preference booking |
+| `home` | `{ zip, bedrooms, bathrooms, levels }` — exactly what the engine prices the recurring track from, built once in `homeSpecFor()` |
+| `samePartner` | boolean: the move booking has a vendor, so "same company" can be asked |
+| `planId`, `frequency`, `price`, `visitId`, `sameAsked` | `saved` only. `price` is the plan row's `quoted_price`; `visitId` its `confirmed_job_id`; `sameAsked` a boolean — the vendor id never leaves the server |
+
+**THE PRICE IS THE PRICING ENGINE'S, NOT THE BROWSER'S.** Apps Script has no copy
+of `pricing-engine.js`. It calls `POST https://servecleaning.com/api/quote`
+(`PRICING_QUOTE_URL`) with the home from the move booking and reads
+`recurring.{weekly,biweekly,monthly}` — `computeQuote().freqSteady`, which
+does not depend on service, condition or add-ons. The portal displays prices
+from the same endpoint. The browser sends back `shown_price` only so that a
+price that moved in between is refused (`price_changed`, with the new prices)
+rather than booked. A missing or non-positive engine answer refuses the write
+(`price_unavailable`). Nothing logs the address or ZIP.
+
+| write | what it writes |
+|---|---|
+| `plan_start` { job_id, frequency, shown_price, slot_date + slot_time **or** time_preference, same_provider } | the first visit's `JOBS` row through `bookPlanVisit` (r42's path: `CLEAN_STANDARD`, the engine price in `quoted_price` and `final_price`, condition blank, slot consumed and vendor stamped for a slot), THEN one `RECURRING_PLANS` row: `status=confirmed`, blank `expires_at`, the anchor (blank for a preference), `preferred_vendor_id` from the move booking if asked, `confirmed_job_id` |
+| `plan_change` { plan_id, frequency, shown_price?, time? } | if the plan's visit is still coming: that same row in place — `frequency`/`quoted_price`/`final_price` on a cadence change, the time through `moveVisit` (r43's path, which now also accepts a preference). If the visit was cleaned or cancelled: a NEW visit, `submission_id` `PLNC-<plan_id>-NN`. Then the plan row's `frequency`, `quoted_price`, anchor and `confirmed_job_id` as applicable |
+
+Rules:
+
+- **A time-only change never re-prices.** Only a different cadence asks the engine again.
+- **The plan box moves the anchor; r43's "Change time" on a visit still does not.** Changing the plan's time is the customer redefining the cadence on purpose.
+- **A paid visit is not re-priced** (`paid`). An unpaid one is, and the ops email says any card hold was for the old amount. Nothing captures, voids or refunds.
+- **Only a plan whose origin is a move can be changed here** — a first-clean plan holds the price it was QUOTED (r38) and is refused.
+- Ownership: `plan_start` needs the move booking among this contact's bookings; `plan_change` needs the plan row's `lead_id` AND the move booking. Each is tested alone.
+- The time must be after the move booking's date (`too_early`). The notice window (`cancel_notice_hours`) applies to changing a visit that is coming.
+- Earlier / later in the day writes a preference visit with no date and takes no slot; the ops email subject carries `NO TIME CHOSEN`.
+- A retry after a failure between the JOBS write and the plan write dedupes on `submission_id` and writes the missing plan row.
+
+**Nothing generates later visits yet** — for move plans or r42's plans. The box
+books one visit at a time; once it is cleaned or cancelled the box offers
+"Book your next visit".
+
 ### PROPERTIES — one row per address
 
 Live header row (17 cols), confirmed 2026-07-28:
@@ -1157,6 +1208,7 @@ held `direct ×1` and blank ×12, with no channel values anywhere.
 
 | Date | Change |
 |---|---|
+| 2026-09-14 | **A plan after a move — webhook r45, the Worker and the site.** No column or tab change. The portal model gains `movePlan`; two portal writes `plan_start` and `plan_change`; `/api/quote` also returns `recurring` (the engine's three per-visit prices). A move-in / move-out customer chooses a cadence priced by the engine for their home, books the first visit at an open time or earlier/later, and the box stays as their plan until they change it. `bookPlanVisit`, `visitAlreadyAt` and `moveVisit` were split out of r42/r43 unchanged. New section "A plan after a move" above. See `HANDOFF.md` §r45. |
 | 2026-09-13 | **One read per tab, per request — webhook r44, plus the site.** No column, tab or response change. The portal, tickets and vendor portal were slow because every helper re-read the tabs it needed; a request now reads each tab once (`readTable`, shared only inside `doGet`), opens Ops once, and builds bookings from the JOBS rows already in hand (`bookingFromRow`). Portal load 211 → 39 Sheets calls; vendor portal 79 → 19; a new booking 103 → 77. Old and new were run through the same 82-request sequence in two timezones — reads, saves, reschedule, cancel, plan confirmation and a booking — and every response, tab and log line came out identical. Site: /h, /j and /v paint a skeleton immediately and start their request from `<head>`; the portal fetches open times before the customer clicks; the booking form asks for times at the first touch of step 1 and keeps a second try if that fails. New contract in "How the webhook reads the sheets" above; `read-budget.test.js` and `early-load.test.js` enforce it. See `HANDOFF.md` §r44. |
 | 2026-09-13 | **Reschedule and cancel — webhook r43.** Two portal writes act on a booking the customer already has, and `releaseAvailabilitySlot()` closes the "nothing releases a slot" open item that had stood since r5 — every cancellation before today leaked its time out of the feed permanently. No new column: `job_status` gains the value `cancelled` (written by the script, second value it writes), and the row is **kept, never deleted**, so counts of booked work keep including work that was given back. `JOBS.vendor_id` stays ops-owned — `setJobCells()` throws on any ops column rather than skipping it. **The anchor is untouched by both writes**, which is the property the release exists to protect: a one-off move shifts one visit, never the cadence. New optional Ops `SETTINGS` key `cancel_notice_hours`, defaulting to `0` — the mechanism is built and enforces nothing until the founder sets a number, because a notice window is a customer promise with a refund question attached. Two real defects were caught by the new tests rather than in production: a release that gave back the slot a move had just booked, and a guard comparing `getBooking`'s display time (`"1:00 PM ET"`) against a raw slot time (`"1:00 PM"`), which meant it never once fired. See `HANDOFF.md` §r43. |
 | 2026-09-02 | **Server-side price verification — no schema change, one new payload key.** The pricing engine moved out of `script.js` into `pricing-engine.js`, and the Worker now re-derives every booking's price instead of trusting `quote_price` from the browser. `pricing_version` joins the payload and rides in `quote_meta`; it is what lets the server tell an edited payload (same version, different price → refused) from a deploy that landed mid-session (different version → the quoted price is honoured). 86,400 configurations priced before and after the extraction and compared by hash — identical. **This caused a live outage:** the two shared files are classic `<script>` files exporting through `if (typeof module …)`, which never runs under a bundler that treats `.js` as ESM, so the Worker's import was `undefined`, every geo-mapped ZIP priced as unmapped, and bookings from 49 ZIPs were rejected for about an hour. Fixed by generating a real ES module (`src/engine.generated.mjs`) rather than importing the sources. Rejection is now gated on `CAN_PRICE`, so a Worker that cannot reproduce the browser's arithmetic relays instead of refusing. See `HANDOFF.md` §2026-09-02 before touching the Worker's imports. |

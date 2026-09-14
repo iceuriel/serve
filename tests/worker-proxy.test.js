@@ -441,6 +441,22 @@ console.log('\n=== 7. the failure UI exists and is reachable ===');
     issued.quote_sig);
   t('and it stamps the engine that priced it', issued.pricing_version === VERSION);
 
+  /* r45. The portal prices a move-out customer's recurring plans through this
+     endpoint, and Apps Script asks it again when they choose one. The numbers
+     must be the engine's recurring track for this home — nothing else. */
+  const engineQ = engineExports.computeQuote(Object.assign({}, INPUTS, {
+    addonFridge: false, addonOven: false, frequency: 'monthly',
+    geo: engineExports.serveGeo('02116', engineExports.lookupGeo) }));
+  const rec = issued.recurring || {};
+  t('/api/quote also returns the three recurring prices, from the engine',
+    rec.weekly === engineQ.freqSteady.weekly && rec.biweekly === engineQ.freqSteady.biweekly &&
+    rec.monthly === engineQ.freqSteady.monthly, { got: rec, engine: engineQ.freqSteady });
+  const asMoveOut = await (await askQuote({ service: 'move_out', condition: 'standard' })).json();
+  t('and they are the same whatever the service was — the recurring track ignores it',
+    JSON.stringify(asMoveOut.recurring) === JSON.stringify(issued.recurring), asMoveOut.recurring);
+  const unsignedRec = await (await askQuote({}, ENV)).json();
+  t('and they come back unsigned too', JSON.stringify(unsignedRec.recurring) === JSON.stringify(issued.recurring));
+
   /* A booking carrying that signature, exactly as the site would send it. */
   const signed = o => JSON.stringify(Object.assign({
     event_type: 'reservation', pricing_version: VERSION, submission_id: 'sig-1',

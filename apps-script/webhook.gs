@@ -1,7 +1,23 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-13  ·  master  ·  r44 — one read per tab, per request
+ * VERSION STAMP:  2026-09-14  ·  master  ·  r45 — a plan after a move
+ *
+ * r45 = SOMEBODY WHO BOOKED A MOVE WAS NEVER OFFERED A PLAN. createRecurringPlan
+ *      refuses a move booking by design, and nothing else asked. The portal now
+ *      shows a move customer the three cadences, each priced for their home by
+ *      the pricing engine, lets them pick one and a time (or earlier / later in
+ *      the day), and books the first visit. The box then stays as the plan they
+ *      chose until they change it. See "A PLAN AFTER A MOVE".
+ *
+ *      THE PRICE IS THE ENGINE'S. Apps Script has no copy of the engine, so it
+ *      asks the Worker's /api/quote for the home's recurring track — the same
+ *      answer the portal displayed — and refuses (price_changed) if the two
+ *      differ, rather than booking a number the customer never saw.
+ *
+ *      bookPlanVisit (from confirmRecurringPlan) and visitAlreadyAt / moveVisit
+ *      (from rescheduleBooking) were split out UNCHANGED so the plan box books
+ *      and moves visits through the same code r42 and r43 do.
  *
  * r44 = THE PORTAL WAS SLOW BECAUSE IT READ THE SAME SHEETS OVER AND OVER.
  *      A customer with five bookings cost 211 SpreadsheetApp calls to open —
@@ -1385,7 +1401,7 @@ function routeGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-13 r44" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-14 r45" });
 }
 
 
@@ -3233,9 +3249,16 @@ function setPlanCells(sheet, found, fields) {
  * confirmed for the same calendar day as that first clean would mint a job_id
  * identical to it. Two JOBS rows sharing an id means getBooking answers with
  * the wrong one forever, on every surface. The "-01" keeps the tails apart.
+ *
+ * r45. `seq` numbers the visits one plan books. A move plan whose visit has
+ * been cleaned or called off books its NEXT one from the plan box, and that
+ * visit needs its own id: "-02" ends in different characters from "-01", so
+ * the two job_ids stay apart for the same reason the first one did. Omitted,
+ * it is 1, which is exactly what r42 has always written.
  */
-function planSubmissionId(planId) {
-  return "PLNC-" + String(planId).trim() + "-01";
+function planSubmissionId(planId, seq) {
+  var n = Math.max(1, Math.floor(Number(seq) || 1));
+  return "PLNC-" + String(planId).trim() + "-" + (n < 10 ? "0" : "") + n;
 }
 
 /**
@@ -3307,69 +3330,21 @@ function confirmRecurringPlan(ss, contact, data) {
               String(data.same_provider).trim().toLowerCase() === "true";
   var preferredVendor = asked ? String(origin.vendorId || "").trim() : "";
 
-  var payload = {
-    name:  origin.customerName, email: origin.customerEmail, phone: origin.customerPhone,
-    address: origin.address, unit: origin.unit, zip: origin.zip,
-    bedrooms: origin.beds, bathrooms: origin.baths, levels: origin.levels,
-    condition: origin.condition,
-    /* A recurring clean, not another first clean. serviceCodeOf reads this
-       label plus the cadence and answers CLEAN_STANDARD, which is what the
-       scope block, the vendor ranking and both tickets key off. */
-    service_type:       SERVICE_CODES.CLEAN_STANDARD,
-    frequency_selected: frequency,
+  var booked = bookPlanVisit(ss, contact, origin, {
+    frequency: frequency,
     /* THE PRICE THEY WERE QUOTED, carried from the plan row rather than
        recomputed against today's table. That is the whole promise of the held
        window: the number on screen when they chose is the number they pay. */
-    quote_price:        found.row.quoted_price,
-    first_visit_total:  found.row.quoted_price,
-    steady_state_price: found.row.quoted_price,
-    pets_flag:          origin.petsFlag ? "TRUE" : "FALSE",
-    slot_date: sched.date, slot_time: sched.time,
-    submission_id: planSubmissionId(planId),
-    /* The share in force NOW, stamped onto this booking, exactly as doPost
-       does it — a rate change tomorrow must not reprice a job a partner has
-       already accepted. */
-    payout_rate: currentPayoutRate(),
-    /* ATTRIBUTION IS DELIBERATELY BLANK. This booking came from a customer
-       opening their own portal, not from a campaign, and inventing a src tag
-       here would put a channel in the attribution data that nobody spent
-       anything on. The plan row's confirmed_job_id is where it came from. */
-  };
-
-  var jobs = requireTab(ss, JOBS_TAB);
-
-  /* A DOUBLE-TAPPED BUTTON MAKES ONE BOOKING. The id is derived from the plan,
-     so a second confirmation carries the same one and stops here — the same
-     guard doPost uses for a retried form. It also covers the window where the
-     JOBS row is written and the status write below has not landed yet, which
-     is the one gap the status check above cannot close. */
-  if (alreadyWritten(jobs, payload.submission_id)) {
-    return json({ ok: true, duplicate: true, job_id: makeJobId(payload, sched),
-                  when: sched.summary });
-  }
-
-  var record = buildJobRecord(payload, sched, origin.customerId, jobs, {
-    property_id: origin.propertyId || "",
-    contact_id:  contact.contactId || "",
+    price: found.row.quoted_price,
+    sched: sched,
+    submissionId: planSubmissionId(planId),
   });
-  writeRow(jobs, record);
-  var jobRow = jobs.getLastRow();
 
-  /* Everything below happens AFTER the booking is safely recorded, and none of
-     it may fail the booking. Same band, same rule, as the website's path. */
-  var slotResult = { ok: true, action: "skipped" };
-  try {
-    slotResult = bookAvailabilitySlot(sched, record.job_id,
-                   serviceCodeOf(payload.service_type, frequency));
-  } catch (slotErr) {
-    slotResult = { ok: false, action: "failed", error: String(slotErr) };
-    console.error("plan confirm slot write-back failed (booking stands): " + slotErr);
+  /* A DOUBLE-TAPPED BUTTON MAKES ONE BOOKING — see bookPlanVisit. */
+  if (booked.duplicate) {
+    return json({ ok: true, duplicate: true, job_id: booked.jobId, when: sched.summary });
   }
-  try {
-    stampJobVendor(jobs, jobRow, slotResult.vendorId);
-  } catch (stampErr) {
-    console.error("plan confirm vendor stamp failed (booking stands): " + stampErr);
-  }
+  var record = booked.record, payload = booked.payload, slotResult = booked.slotResult;
 
   /* THE ANCHOR. Every later visit is counted from this date and time, not from
      whatever the most recent visit happened to be moved to. See SCHEMA. */
@@ -3395,6 +3370,652 @@ function confirmRecurringPlan(ss, contact, data) {
 
   return json({ ok: true, duplicate: false, job_id: record.job_id,
                 when: sched.summary, slot_action: slotResult.action });
+}
+
+/**
+ * BOOK ONE VISIT OF A PLAN — the JOBS row, the slot, the vendor stamp.
+ *
+ * r45: split out of confirmRecurringPlan so a move plan books its visits
+ * through exactly the same calls. Nothing about r42's behaviour moved with it.
+ *
+ * IT CREATES A JOB THE ONE WAY JOBS ARE CREATED. The payload is synthesised
+ * and handed to buildJobRecord / writeRow / bookAvailabilitySlot /
+ * stampJobVendor — the same calls, in the same order, that doPost makes for a
+ * booking off the website.
+ *
+ * `opts`: frequency, price, sched (a normalizeSchedule result — a slot or a
+ * preference), submissionId, and optionally sourceLabel for the email.
+ *
+ * Returns { duplicate, jobId, record, payload, sched, slotResult }.
+ */
+function bookPlanVisit(ss, contact, origin, opts) {
+  var sched = opts.sched;
+  var payload = {
+    name:  origin.customerName, email: origin.customerEmail, phone: origin.customerPhone,
+    address: origin.address, unit: origin.unit, zip: origin.zip,
+    bedrooms: origin.beds, bathrooms: origin.baths, levels: origin.levels,
+    /* A recurring visit never takes a condition factor (R3/R7 in the engine),
+       and a move-out's "heavy" describes the empty home it cleaned, not the
+       lived-in one the plan will. Carried only from a first clean, where r42
+       has always carried it. */
+    condition: origin.serviceCode === "CLEAN_MOVEOUT" ? "" : origin.condition,
+    /* A recurring clean, not another first clean. serviceCodeOf reads this
+       label plus the cadence and answers CLEAN_STANDARD, which is what the
+       scope block, the vendor ranking and both tickets key off. */
+    service_type:       SERVICE_CODES.CLEAN_STANDARD,
+    frequency_selected: opts.frequency,
+    quote_price:        opts.price,
+    first_visit_total:  opts.price,
+    steady_state_price: opts.price,
+    pets_flag:          origin.petsFlag ? "TRUE" : "FALSE",
+    submission_id: opts.submissionId,
+    /* The share in force NOW, stamped onto this booking, exactly as doPost
+       does it — a rate change tomorrow must not reprice a job a partner has
+       already accepted. */
+    payout_rate: currentPayoutRate(),
+    /* ATTRIBUTION IS DELIBERATELY BLANK. This booking came from a customer
+       opening their own portal, not from a campaign, and inventing a src tag
+       here would put a channel in the attribution data that nobody spent
+       anything on. The plan row's confirmed_job_id is where it came from. */
+  };
+  if (sched.shape === "slot") {
+    payload.slot_date = sched.date;
+    payload.slot_time = sched.time;
+  } else {
+    payload.time_preference = opts.preference || "";
+  }
+
+  var jobs = requireTab(ss, JOBS_TAB);
+
+  /* A DOUBLE-TAPPED BUTTON MAKES ONE BOOKING. The id is derived from the plan,
+     so a second confirmation carries the same one and stops here — the same
+     guard doPost uses for a retried form. It also covers the window where the
+     JOBS row is written and the plan write after it has not landed yet, which
+     is the one gap a status check on the plan cannot close. */
+  if (alreadyWritten(jobs, payload.submission_id)) {
+    return { duplicate: true, payload: payload, sched: sched,
+             jobId: jobIdForSubmission(jobs, payload.submission_id) ||
+                    makeJobId(payload, sched) };
+  }
+
+  var record = buildJobRecord(payload, sched, origin.customerId, jobs, {
+    property_id: origin.propertyId || "",
+    contact_id:  contact.contactId || "",
+  });
+  writeRow(jobs, record);
+  var jobRow = jobs.getLastRow();
+
+  /* Everything below happens AFTER the booking is safely recorded, and none of
+     it may fail the booking. Same band, same rule, as the website's path. */
+  var slotResult = { ok: true, action: "skipped" };
+  try {
+    slotResult = bookAvailabilitySlot(sched, record.job_id,
+                   serviceCodeOf(payload.service_type, opts.frequency));
+  } catch (slotErr) {
+    slotResult = { ok: false, action: "failed", error: String(slotErr) };
+    console.error("plan visit slot write-back failed (booking stands): " + slotErr);
+  }
+  try {
+    stampJobVendor(jobs, jobRow, slotResult.vendorId);
+  } catch (stampErr) {
+    console.error("plan visit vendor stamp failed (booking stands): " + stampErr);
+  }
+
+  return { duplicate: false, jobId: record.job_id, record: record, payload: payload,
+           sched: sched, slotResult: slotResult };
+}
+
+/**
+ * The job_id a submission already wrote, or "". Only the duplicate path asks:
+ * a preference visit's id carries the day it was BOOKED, so rebuilding it on a
+ * later day would name a job that does not exist.
+ */
+function jobIdForSubmission(jobs, submissionId) {
+  var t = sheetValues(jobs);
+  var s = t.headers.indexOf("submission_id"), j = t.headers.indexOf("job_id");
+  if (s === -1 || j === -1) return "";
+  var needle = String(submissionId).trim();
+  for (var i = t.rows.length - 1; i >= 0; i--) {
+    if (String(t.rows[i][s]).trim() === needle) return String(t.rows[i][j] || "").trim();
+  }
+  return "";
+}
+
+
+/* ============================================================
+   A PLAN AFTER A MOVE  —  r45
+   ============================================================
+
+   Somebody who booked a move-in / move-out clean was never offered a
+   recurring plan: createRecurringPlan refuses them, because at booking time
+   nothing about a move says they want one. So the portal ASKS instead — the
+   three cadences, each priced for their home, a time from the same feed, or
+   earlier/later in the day if none of the times suit.
+
+   CHOOSING BOOKS. Unlike r38's offer there is no held window to confirm
+   later: the customer picks a plan and a time in one sitting, and that writes
+   the RECURRING_PLANS row (status `confirmed`, straight away) and the first
+   visit's JOBS row, through bookPlanVisit — the same calls r42 makes.
+
+   THE PRICE COMES FROM THE ENGINE, NEVER FROM THE BROWSER. Apps Script has no
+   copy of pricing-engine.js, and a second copy would be a second place for
+   prices to drift. So the server asks the Worker's /api/quote — the one copy
+   of the engine the site runs — for this home's recurring track, from the
+   home as stored on the move booking. The portal shows numbers from that same
+   endpoint; the price the customer was shown is sent back only so a pricing
+   change between looking and choosing is REFUSED (`price_changed`) rather
+   than booked at a number they never saw.
+
+   ONCE CHOSEN, THE PLAN HOLDS ITS PRICE. A time-only change never re-prices.
+   Only choosing a different cadence asks the engine again.
+
+   THE PLAN BOX MOVES THE ANCHOR; THE BOOKING PANEL DOES NOT. r43's "Change
+   time" on a visit is a one-off and leaves the anchor alone. Changing the
+   plan's time HERE is the customer redefining the cadence on purpose, which is
+   exactly what the anchor records.
+
+   IT IS FOR THE HOME ON THE MOVE BOOKING. A move-OUT customer is leaving that
+   address; the portal names it on the card so nobody books upkeep for a home
+   they no longer live in without seeing which home it is.
+
+   No new column, no new tab: a move plan is a RECURRING_PLANS row whose
+   origin_job_id is a move booking.
+   ============================================================ */
+
+var MOVE_PLAN_FREQUENCIES = ["weekly", "biweekly", "monthly"];
+
+/* The Worker route that runs the pricing engine. The same address the booking
+   form signs its quotes at; see handleQuote in src/worker.js. */
+var PRICING_QUOTE_URL = "https://servecleaning.com/api/quote";
+
+function isMoveBooking(b) {
+  return !!b && b.serviceCode === "CLEAN_MOVEOUT";
+}
+
+/**
+ * The home as the engine prices it, or null when it cannot be priced.
+ *
+ * THE ONE PLACE THIS IS BUILT, for the browser and the server alike, so the
+ * numbers the portal shows and the number the server books are asked for with
+ * identical inputs. The recurring track reads only these four — see R7.
+ */
+function homeSpecFor(b) {
+  if (!b) return null;
+  var zip = String(b.zip || "").trim();
+  var beds = Number(b.beds), baths = Number(b.baths);
+  if (!/^\d{5}$/.test(zip)) return null;
+  if (b.beds === null || !isFinite(beds) || beds < 0) return null;
+  if (b.baths === null || !isFinite(baths) || baths <= 0) return null;
+  return { zip: zip, bedrooms: beds, bathrooms: baths, levels: Number(b.levels) || 1 };
+}
+
+/**
+ * This home's three recurring prices, from the engine, or null.
+ *
+ * Null on every failure — unreachable, non-200, unparseable, a missing or
+ * non-positive price. The callers refuse to book on null: a plan without a
+ * price from the engine is not a plan this system will write.
+ *
+ * LOGS NO ADDRESS AND NO ZIP. A status code is all a failure needs.
+ */
+function movePlanPrices(booking) {
+  var home = homeSpecFor(booking);
+  if (!home) return null;
+  try {
+    var res = UrlFetchApp.fetch(PRICING_QUOTE_URL, {
+      method: "post",
+      contentType: "application/json",
+      payload: JSON.stringify({
+        zip: home.zip, bedrooms: home.bedrooms, bathrooms: home.bathrooms,
+        levels: home.levels, service: "first_clean", condition: "standard",
+        frequency_selected: "once",
+      }),
+      muteHttpExceptions: true,
+    });
+    if (res.getResponseCode() !== 200) {
+      console.error("recurring prices unavailable: HTTP " + res.getResponseCode());
+      return null;
+    }
+    var d = JSON.parse(res.getContentText());
+    if (!d || d.ok !== true || !d.recurring) {
+      console.error("recurring prices unavailable: " + (d && d.error ? d.error : "no recurring"));
+      return null;
+    }
+    var out = {};
+    for (var i = 0; i < MOVE_PLAN_FREQUENCIES.length; i++) {
+      var f = MOVE_PLAN_FREQUENCIES[i];
+      var n = Number(d.recurring[f]);
+      if (!isFinite(n) || n <= 0) return null;
+      out[f] = n;
+    }
+    return out;
+  } catch (err) {
+    console.error("recurring prices unavailable: " + err);
+    return null;
+  }
+}
+
+/** A plan row from an already-read table, as an object, or null. */
+function planRowIn(table, planId) {
+  if (!table || !table.rows.length) return null;
+  var col = table.headers.indexOf("plan_id");
+  if (col === -1) return null;
+  var needle = String(planId).trim();
+  for (var r = 0; r < table.rows.length; r++) {
+    if (String(table.rows[r][col]).trim() !== needle) continue;
+    var row = {};
+    table.headers.forEach(function (name, i) { row[name] = table.rows[r][i]; });
+    return row;
+  }
+  return null;
+}
+
+/**
+ * The plan box the portal draws for a move customer, or null.
+ *
+ * THE BOOKING IT BELONGS TO is the newest move booking that already has a
+ * plan, or failing that is still going ahead — so somebody who moves again
+ * is asked about the new home, and a cancelled move is not offered a plan.
+ *
+ * A WHITELIST, built field by field. The plan row's vendor id never leaves
+ * the server: `sameAsked` is a boolean, as r42's `samePartner` is.
+ */
+function movePlanForPortal(ss, bookings) {
+  try {
+    var table = readTable(ss, RECURRING_PLANS_TAB);
+    if (!table) return null;   // nowhere to record a plan, so nothing to offer
+
+    var basis = null, planRow = null;
+    for (var i = 0; i < (bookings || []).length; i++) {
+      var b = bookings[i];
+      if (!isMoveBooking(b)) continue;
+      var row = planRowIn(table, planIdFor(b.bookingId));
+      if (row) { basis = b; planRow = row; break; }
+      if (!bookingIsCancelled(b)) { basis = b; break; }
+    }
+    if (!basis) return null;
+
+    var home = homeSpecFor(basis);
+    if (!home) return null;
+
+    var date = String(basis.scheduledDate || "").trim();
+    var out = {
+      state:         "choose",
+      jobId:         basis.bookingId,
+      propertyLabel: [basis.address, basis.unit].filter(Boolean).join(", "),
+      /* The first plan visit is after the move clean. Blank when the move
+         booking has no date of its own (an earlier/later request). */
+      after:         /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : "",
+      home:          { zip: home.zip, bedrooms: home.bedrooms,
+                       bathrooms: home.bathrooms, levels: home.levels },
+      samePartner:   !!String(basis.vendorId || "").trim(),
+    };
+    if (!planRow) return out;
+
+    /* A row in any other state was put there by a person. Show nothing rather
+       than guess what they meant. */
+    if (planStatus(planRow) !== "confirmed") return null;
+
+    out.state     = "saved";
+    out.planId    = String(planRow.plan_id || "");
+    out.frequency = String(planRow.frequency || "").toLowerCase();
+    out.price     = planRow.quoted_price === "" || planRow.quoted_price === undefined
+                      ? null : Number(planRow.quoted_price);
+    out.visitId   = String(planRow.confirmed_job_id || "");
+    out.sameAsked = !!String(planRow.preferred_vendor_id || "").trim();
+    return out;
+  } catch (err) {
+    console.error("move plan unavailable: " + err);
+    return null;
+  }
+}
+
+/**
+ * What the customer asked for, validated, or { error }.
+ *
+ * A TIME IS A SLOT FROM THE FEED OR A PREFERENCE, exactly the two the booking
+ * form offers. `allowKeep` lets a change leave the time alone.
+ */
+function readMovePlanChoice(data, basis, allowKeep) {
+  var frequency = String(data.frequency || "").trim().toLowerCase();
+  if (MOVE_PLAN_FREQUENCIES.indexOf(frequency) === -1) return { error: "bad_plan" };
+
+  var slotDate = String(data.slot_date || "").trim();
+  var slotTime = String(data.slot_time || "").trim();
+  var pref     = String(data.time_preference || "").trim().toLowerCase();
+  var sched = null;
+
+  if (slotDate || slotTime) {
+    /* Validated, not passed along — r42's rule. */
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(slotDate) || !PLAN_TIME_SHAPE.test(slotTime)) {
+      return { error: "bad_slot" };
+    }
+    sched = normalizeSchedule({ slot_date: slotDate, slot_time: slotTime });
+    if (sched.shape !== "slot") return { error: "bad_slot" };
+    /* The upkeep starts after the move clean, never before it or on the day. */
+    var after = String(basis.scheduledDate || "").trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(after) && slotDate <= after) return { error: "too_early" };
+  } else if (pref === "earlier" || pref === "later") {
+    sched = normalizeSchedule({ time_preference: pref });
+  } else if (!allowKeep) {
+    return { error: "bad_slot" };
+  }
+  return { frequency: frequency, sched: sched, preference: sched && sched.shape === "preference" ? pref : "" };
+}
+
+/** Is the price the customer was shown the one the engine gives now? */
+function shownPriceMatches(data, price) {
+  var shown = Number(data.shown_price);
+  return isFinite(shown) && shown === Number(price);
+}
+
+/**
+ * START A PLAN from the portal of somebody who booked a move.
+ *
+ * Writes the first visit, THEN the plan row. The visit is the commitment; a
+ * plan row pointing at a job that failed to write would be a promise with
+ * nothing behind it. A retry after a failure between the two dedupes on the
+ * submission id and writes the missing plan row — see the duplicate branch.
+ */
+function startMovePlan(ss, contact, bookings, data) {
+  var jobId = String(data.job_id || "").trim();
+  var basis = null;
+  for (var i = 0; i < bookings.length; i++) {
+    if (bookings[i].bookingId === jobId) { basis = bookings[i]; break; }
+  }
+  /* Not theirs, not a move, or called off — the same answer as "no such job". */
+  if (!basis || !isMoveBooking(basis) || bookingIsCancelled(basis)) {
+    return json({ ok: false, error: "not_found" });
+  }
+
+  var sheet = ss.getSheetByName(RECURRING_PLANS_TAB);
+  if (!sheet) return json({ ok: false, error: "not_found" });
+
+  var planId = planIdFor(basis.bookingId);
+  var existing = findPlanRow(sheet, planId);
+  if (existing) {
+    return json({ ok: false, error: "already_confirmed",
+                  job_id: String(existing.row.confirmed_job_id || "") });
+  }
+
+  var choice = readMovePlanChoice(data, basis, false);
+  if (choice.error) return json({ ok: false, error: choice.error });
+
+  var prices = movePlanPrices(basis);
+  if (!prices) return json({ ok: false, error: "price_unavailable" });
+  var price = prices[choice.frequency];
+  if (!shownPriceMatches(data, price)) {
+    return json({ ok: false, error: "price_changed", prices: prices });
+  }
+
+  var asked = data.same_provider === true ||
+              String(data.same_provider).trim().toLowerCase() === "true";
+  var preferredVendor = asked ? String(basis.vendorId || "").trim() : "";
+
+  var booked = bookPlanVisit(ss, contact, basis, {
+    frequency: choice.frequency, price: price, sched: choice.sched,
+    preference: choice.preference, submissionId: planSubmissionId(planId, 1),
+  });
+
+  /* Only the plan row is written after the visit; it is wrapped for the same
+     reason every write after the JOBS row is. */
+  try {
+    writeRow(sheet, {
+      plan_id:             planId,
+      contact_id:          contact.contactId || "",
+      lead_id:             basis.customerId || "",
+      origin_job_id:       basis.bookingId,
+      property_id:         basis.propertyId || "",
+      frequency:           choice.frequency,
+      quoted_price:        price,
+      created_at:          receivedAt(),
+      /* No window: nothing is being held for later. It was chosen and booked. */
+      expires_at:          "",
+      status:              "confirmed",
+      anchor_date:         choice.sched.shape === "slot" ? choice.sched.date : "",
+      anchor_time:         choice.sched.shape === "slot" ? choice.sched.time : "",
+      preferred_vendor_id: preferredVendor,
+      confirmed_job_id:    booked.jobId,
+    }, {});
+  } catch (planErr) {
+    console.error("move plan row not written (visit stands): " + planErr);
+  }
+
+  if (!booked.duplicate) {
+    try {
+      sendMovePlanEmail({ what: "started", basis: basis, contactId: contact.contactId,
+                          planId: planId, frequency: choice.frequency, price: price,
+                          sched: choice.sched, jobId: booked.jobId,
+                          slotResult: booked.slotResult, preferredVendor: preferredVendor });
+    } catch (mailErr) {
+      console.error("move plan email failed (visit stands): " + mailErr);
+    }
+  }
+
+  return json({ ok: true, duplicate: !!booked.duplicate, plan_id: planId,
+                job_id: booked.jobId, when: choice.sched.summary });
+}
+
+/**
+ * CHANGE A MOVE PLAN — the cadence, the time, or both.
+ *
+ * If the plan's visit is still coming, it is changed IN PLACE: the same row,
+ * the same job_id. If it has been cleaned or called off, the plan books its
+ * next visit instead, so the box can always put something back in Upcoming.
+ *
+ * MONEY IS NOT RE-DECIDED HERE. A paid visit's price is not rewritten by a
+ * cadence change — that is refused (`paid`) and left to a person. An unpaid
+ * one takes the new price, and the ops email says a card hold, if any, was
+ * taken for the old amount.
+ */
+function changeMovePlan(ss, contact, bookings, data) {
+  var sheet = ss.getSheetByName(RECURRING_PLANS_TAB);
+  var planId = String(data.plan_id || "").trim();
+  if (!sheet || !planId) return json({ ok: false, error: "not_found" });
+
+  var found = findPlanRow(sheet, planId);
+  if (!found) return json({ ok: false, error: "not_found" });
+
+  /* OWNERSHIP on lead_id, then on the move booking — r42's two checks, in
+     r42's order, so neither is proven only by the one behind it. */
+  var want = String(contact.leadId || "").trim().toLowerCase();
+  if (!want || String(found.row.lead_id || "").trim().toLowerCase() !== want) {
+    return json({ ok: false, error: "not_found" });
+  }
+  if (planStatus(found.row) !== "confirmed") return json({ ok: false, error: "not_found" });
+
+  var basis = null, visit = null;
+  var originId = String(found.row.origin_job_id || "").trim();
+  var visitId  = String(found.row.confirmed_job_id || "").trim();
+  for (var i = 0; i < bookings.length; i++) {
+    if (bookings[i].bookingId === originId) basis = bookings[i];
+    if (visitId && bookings[i].bookingId === visitId) visit = bookings[i];
+  }
+  /* A first-clean plan holds the price it was QUOTED. Re-pricing it from here
+     would break r38's promise, so only a plan that came from a move changes
+     here. */
+  if (!basis || !isMoveBooking(basis)) return json({ ok: false, error: "not_found" });
+
+  var choice = readMovePlanChoice(data, basis, true);
+  if (choice.error) return json({ ok: false, error: choice.error });
+
+  var oldFrequency = String(found.row.frequency || "").trim().toLowerCase();
+  var freqChanged  = choice.frequency !== oldFrequency;
+  var price = found.row.quoted_price;
+  if (freqChanged) {
+    var prices = movePlanPrices(basis);
+    if (!prices) return json({ ok: false, error: "price_unavailable" });
+    price = prices[choice.frequency];
+    if (!shownPriceMatches(data, price)) {
+      return json({ ok: false, error: "price_changed", prices: prices });
+    }
+  }
+
+  var live = !!visit && !visit.completedDate && !bookingIsCancelled(visit);
+  var jobs = requireTab(ss, JOBS_TAB);
+  var slotResult = { action: "n/a" }, release = { action: "n/a" };
+  var newJobId = "", fromWhen = "", moved = false;
+
+  if (live) {
+    var jobRow = findJobRow(jobs, visit.bookingId);
+    if (!jobRow) return json({ ok: false, error: "not_found" });
+
+    var timeChanged = !!choice.sched && !visitAlreadyAt(ss, jobs, jobRow, choice.sched);
+    if (!freqChanged && !timeChanged) {
+      return json({ ok: true, unchanged: true, plan_id: planId, job_id: visit.bookingId });
+    }
+
+    /* The same notice window a move or a cancellation answers to. */
+    var notice = cancelNoticeHours();
+    var left = hoursUntilBooking(visit);
+    if (notice > 0 && left !== null && left < notice) {
+      return json({ ok: false, error: "too_late", hours: notice });
+    }
+    if (freqChanged && visit.payment.paid) return json({ ok: false, error: "paid" });
+
+    if (freqChanged) {
+      setJobCells(jobs, jobRow.rowNumber, jobRow.headers, {
+        frequency: choice.frequency, quoted_price: price, final_price: price,
+      });
+    }
+    if (timeChanged) {
+      fromWhen = scheduleLine(visit);
+      var m = moveVisit(jobs, jobRow, visit, choice.sched);
+      slotResult = m.slotResult; release = m.release; moved = true;
+    }
+  } else {
+    /* Nothing coming: this books the plan's next visit, which needs a time. */
+    if (!choice.sched) return json({ ok: false, error: "bad_slot" });
+    var booked = bookPlanVisit(ss, contact, basis, {
+      frequency: choice.frequency, price: price, sched: choice.sched,
+      preference: choice.preference,
+      submissionId: planSubmissionId(planId, nextPlanVisitSeq(jobs, planId)),
+    });
+    newJobId = booked.jobId;
+    slotResult = booked.slotResult || slotResult;
+  }
+
+  var planFields = {};
+  if (freqChanged) { planFields.frequency = choice.frequency; planFields.quoted_price = price; }
+  /* THE PLAN BOX IS WHERE THE CADENCE IS REDEFINED — the anchor follows it.
+     A preference has no clock time to anchor to, so it clears. */
+  if (choice.sched) {
+    planFields.anchor_date = choice.sched.shape === "slot" ? choice.sched.date : "";
+    planFields.anchor_time = choice.sched.shape === "slot" ? choice.sched.time : "";
+  }
+  if (newJobId) planFields.confirmed_job_id = newJobId;
+  try {
+    setPlanCells(sheet, found, planFields);
+  } catch (planErr) {
+    console.error("move plan row not updated (visit stands): " + planErr);
+  }
+
+  try {
+    sendMovePlanEmail({ what: newJobId ? "next visit" : "changed", basis: basis,
+                        contactId: contact.contactId, planId: planId,
+                        frequency: choice.frequency, oldFrequency: oldFrequency,
+                        price: price, sched: choice.sched,
+                        jobId: newJobId || visit.bookingId, fromWhen: fromWhen, moved: moved,
+                        repriced: freqChanged && live, slotResult: slotResult, release: release,
+                        preferredVendor: String(found.row.preferred_vendor_id || "").trim() });
+  } catch (mailErr) {
+    console.error("move plan change email failed (change stands): " + mailErr);
+  }
+
+  return json({ ok: true, plan_id: planId, job_id: newJobId || visit.bookingId,
+                when: choice.sched ? choice.sched.summary : "" });
+}
+
+/** How many visits this plan has booked so far, plus one. */
+function nextPlanVisitSeq(jobs, planId) {
+  var t = sheetValues(jobs);
+  var s = t.headers.indexOf("submission_id");
+  if (s === -1) return 1;
+  var prefix = "PLNC-" + String(planId).trim() + "-";
+  var n = 0;
+  for (var i = 0; i < t.rows.length; i++) {
+    if (String(t.rows[i][s]).trim().indexOf(prefix) === 0) n++;
+  }
+  return n + 1;
+}
+
+/**
+ * Tell a human a move customer started a plan or changed one.
+ *
+ * Its own email because what needs doing differs from r42's: an earlier/later
+ * request has NO TIME and somebody must call, and a re-priced visit may sit
+ * under a card hold taken for the old amount.
+ */
+function sendMovePlanEmail(ctx) {
+  var slot = ctx.slotResult || { action: "n/a" };
+  var release = ctx.release || { action: "n/a" };
+  var b = ctx.basis;
+  var noTime = !!ctx.sched && ctx.sched.shape !== "slot";
+
+  var flags = [];
+  if (slot.action === "conflict") flags.push("SLOT CONFLICT");
+  if (slot.action === "failed")   flags.push("SLOT NOT MARKED");
+  if (release.action === "failed" || release.action === "not_found") flags.push("SLOT NOT FREED");
+  if (noTime)                     flags.push("NO TIME CHOSEN");
+  if (ctx.repriced)               flags.push("PRICE CHANGED ON A BOOKED VISIT");
+  if (ctx.preferredVendor)        flags.push("SAME COMPANY ASKED FOR");
+
+  var warn = "";
+  if (slot.action === "conflict") {
+    warn += "*** SLOT CONFLICT — that time was already taken. The visit IS recorded. ***\n" +
+            "*** " + (slot.reason || "") + " ***\n\n";
+  }
+  if (slot.action === "failed") {
+    warn += "*** AVAILABILITY WRITE-BACK FAILED — the slot still reads open. ***\n" +
+            "*** Mark it booked by hand or it can be sold again. ***\n\n";
+  }
+  if (release.action === "failed" || release.action === "not_found") {
+    warn += "*** THE OLD SLOT WAS NOT GIVEN BACK — free it by hand. ***\n\n";
+  }
+  if (noTime) {
+    warn += "*** NO TIME CHOSEN — they asked for " + ctx.sched.summary + ". ***\n" +
+            "*** Call them to set the day and time. ***\n\n";
+  }
+  if (ctx.repriced) {
+    warn += "*** THE UPCOMING VISIT WAS RE-PRICED to " + money(ctx.price) + " (" +
+            ctx.oldFrequency + " -> " + ctx.frequency + "). ***\n" +
+            "*** If a card was authorized for the old amount, that hold is for the ***\n" +
+            "*** old price. Nothing was captured, voided or refunded. ***\n\n";
+  }
+
+  var verb = ctx.what === "started" ? "Started"
+           : ctx.what === "next visit" ? "Next Visit Booked" : "Changed";
+  MailApp.sendEmail(
+    notifyEmail(),
+    "Serve Plan " + verb + " — " + (b.customerName || "Unknown") + " · " + ctx.frequency +
+      (flags.length ? " · " + flags.join(" · ") : ""),
+    warn +
+    (ctx.what === "started"
+      ? "A move-in / move-out customer chose a recurring plan in their portal.\n" +
+        "THIS IS A REAL BOOKING — the first plan visit is on JOBS.\n\n"
+      : ctx.what === "next visit"
+        ? "A move-plan customer booked their next visit from the plan box.\n\n"
+        : "A move-plan customer changed their plan in their portal.\n\n") +
+    "— WHAT —\n" +
+    "Plan:      " + ctx.planId + " (" + ctx.frequency +
+      (ctx.oldFrequency && ctx.oldFrequency !== ctx.frequency ? ", was " + ctx.oldFrequency : "") + ")\n" +
+    "After:     " + b.bookingId + " (move in / move out)\n" +
+    "job_id:    " + ctx.jobId + "\n" +
+    "Price:     " + money(ctx.price) + " per visit, from the pricing engine\n" +
+    "Address:   " + (b.address || "") + (isSet(b.unit) ? ", " + b.unit : "") + "\n" +
+    "ZIP:       " + (b.zip || "") + "\n" +
+    (ctx.sched
+      ? (ctx.moved ? "Was:       " + ctx.fromWhen + "\n" : "") +
+        "When:      " + ctx.sched.summary + "\n" +
+        "Slot:      " + slot.action +
+          (slot.action === "booked" && isSet(slot.vendorId) ? " — vendor " + slot.vendorId : "") + "\n"
+      : "When:      (time unchanged)\n") +
+    "\n— WHAT THEY ASKED FOR —\n" +
+    (ctx.preferredVendor
+      ? "THE SAME COMPANY AS THE MOVE CLEAN: " + ctx.preferredVendor + "\n" +
+        "A preference, not a guarantee. Assign it yourself.\n"
+      : "(no company preference)\n") +
+    "\n" + ticketBlock(ctx.jobId, ctx.contactId, slot.vendorId, slot.action));
 }
 
 /**
@@ -3665,6 +4286,43 @@ function rescheduleBooking(ss, contact, booking, data) {
   var found = findJobRow(jobs, booking.bookingId);
   if (!found) return json({ ok: false, error: "not_found" });
 
+  if (visitAlreadyAt(ss, jobs, found, sched)) {
+    return json({ ok: true, unchanged: true, job_id: booking.bookingId,
+                  when: sched.summary });
+  }
+
+  var notice = cancelNoticeHours();
+  var left = hoursUntilBooking(booking);
+  if (notice > 0 && left !== null && left < notice) {
+    return json({ ok: false, error: "too_late", hours: notice });
+  }
+
+  var fromWhen = scheduleLine(booking);
+  var moved = moveVisit(jobs, found, booking, sched);
+  var slotResult = moved.slotResult, release = moved.release;
+
+  /* NOTE WHAT IS ABSENT: nothing here writes RECURRING_PLANS. See the section
+     header — the anchor is the cadence, and one moved visit is not a new
+     cadence. */
+  try {
+    sendVisitChangedEmail({
+      what: "moved", ss: ss, booking: booking, contactId: contact.contactId,
+      fromWhen: fromWhen, toWhen: sched.summary,
+      release: release, slotResult: slotResult,
+    });
+  } catch (mailErr) {
+    console.error("reschedule email failed (the move stands): " + mailErr);
+  }
+
+  return json({ ok: true, job_id: booking.bookingId, when: sched.summary,
+                slot_action: slotResult.action, released: release.action });
+}
+
+/**
+ * Is this visit already at that time? r45: split out of rescheduleBooking so
+ * the plan box asks the same question the same way.
+ */
+function visitAlreadyAt(ss, jobs, found, sched) {
   /* ALREADY THERE — and this is a guard, not a nicety. A double-tapped button
      would otherwise release the slot this booking holds and then try to book
      the very same row again; whether that succeeds depends on ordering, and
@@ -3686,26 +4344,36 @@ function rescheduleBooking(ss, contact, booking, data) {
     var c = found.headers.indexOf(name);
     return c === -1 ? "" : jobs.getRange(found.rowNumber, c + 1).getValue();
   };
-  if (dateCellText(cellOf("scheduled_date"), jobTz) === sched.date &&
-      slotTimeLabel(cellOf("start_time"), jobTz) === sched.time) {
-    return json({ ok: true, unchanged: true, job_id: booking.bookingId,
-                  when: sched.summary });
+  /* r45. A preference has no clock time: it is "already there" when the visit
+     is already a preference carrying the same wording. */
+  if (sched.shape !== "slot") {
+    return String(cellOf("scheduling_type")).trim() === sched.shape &&
+           String(cellOf("start_time")).trim() === sched.summary;
   }
+  return dateCellText(cellOf("scheduled_date"), jobTz) === sched.date &&
+         slotTimeLabel(cellOf("start_time"), jobTz) === sched.time;
+}
 
-  var notice = cancelNoticeHours();
-  var left = hoursUntilBooking(booking);
-  if (notice > 0 && left !== null && left < notice) {
-    return json({ ok: false, error: "too_late", hours: notice });
-  }
-
-  var fromWhen = scheduleLine(booking);
+/**
+ * MOVE A VISIT'S ROW AND ITS CAPACITY to a new time. r45: split out of
+ * rescheduleBooking unchanged, so the plan box moves a visit exactly as
+ * "Change time" does. Returns { slotResult, release }.
+ *
+ * r45 also accepts a PREFERENCE ("earlier" / "later"): the date and clock
+ * time clear, the wording goes where the booking form puts it, no slot is
+ * taken, and the old one goes back on sale. Only the plan box sends one.
+ */
+function moveVisit(jobs, found, booking, sched) {
+  var isSlot = sched.shape === "slot";
 
   /* THE COMMITMENT. Everything below is capacity bookkeeping, and none of it
      may fail the change the customer just made — the same band, and the same
      rule, as the website's booking path. */
   setJobCells(jobs, found.rowNumber, found.headers, {
-    scheduled_date:  sched.date,
-    start_time:      sched.time,
+    scheduled_date:  isSlot ? sched.date : "",
+    /* start_time holds the preference wording on a preference booking, as
+       buildJobRecord writes it. */
+    start_time:      isSlot ? sched.time : sched.summary,
     notes:           sched.summary,
     scheduling_type: sched.shape,
   });
@@ -3746,21 +4414,7 @@ function rescheduleBooking(ss, contact, booking, data) {
     console.error("reschedule vendor stamp failed (the move stands): " + stampErr);
   }
 
-  /* NOTE WHAT IS ABSENT: nothing here writes RECURRING_PLANS. See the section
-     header — the anchor is the cadence, and one moved visit is not a new
-     cadence. */
-  try {
-    sendVisitChangedEmail({
-      what: "moved", ss: ss, booking: booking, contactId: contact.contactId,
-      fromWhen: fromWhen, toWhen: sched.summary,
-      release: release, slotResult: slotResult,
-    });
-  } catch (mailErr) {
-    console.error("reschedule email failed (the move stands): " + mailErr);
-  }
-
-  return json({ ok: true, job_id: booking.bookingId, when: sched.summary,
-                slot_action: slotResult.action, released: release.action });
+  return { slotResult: slotResult, release: release };
 }
 
 /**
@@ -3947,6 +4601,9 @@ function buildPortalModel(ss, contact) {
        to offer asking for again. It needs the booking list, which is why it is
        a second step rather than another read inside clientRecurringPlan. */
     plan:      planForPortal(clientRecurringPlan(ss, contact.leadId), bookings),
+    /* r45. The plan box for somebody who booked a move — the choice, or the
+       plan they chose. null for everybody else. */
+    movePlan:  movePlanForPortal(ss, bookings),
     bookings:  bookings.map(function (b) {
       var done = !!b.completedDate;
       /* r43. Called off, and still on the account as a record of what was
@@ -4130,6 +4787,12 @@ function handlePortalWrite(ss, data) {
        WRITE THAT CREATES A BOOKING — it proves ownership twice and then goes
        through the same job-creation path the website does. */
     if (kind === "plan_confirm") return confirmRecurringPlan(ss, contact, data);
+
+    /* r45. A move customer choosing a plan, or changing the one they chose.
+       Both prove ownership against this contact's own bookings before any
+       price is asked for or any row written. */
+    if (kind === "plan_start")  return startMovePlan(ss, contact, bookings, data);
+    if (kind === "plan_change") return changeMovePlan(ss, contact, bookings, data);
 
     return json({ ok: false, error: "unknown_kind" });
 

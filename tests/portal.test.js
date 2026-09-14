@@ -1887,5 +1887,344 @@ t('and a time that is not a clock time at all is not invented into one',
   S.wallClockMs('2026-11-08', 'Morning preferred') === S.wallClockMs('2026-11-08', ''),
   S.wallClockMs('2026-11-08', 'Morning preferred'));
 
+/* ================================================================
+   r45 — A PLAN AFTER A MOVE.
+
+   Somebody who booked a move-in / move-out was never offered a recurring
+   plan. The portal now shows them the three cadences priced by the ENGINE,
+   books the one they pick at a time they pick, and keeps the box as that plan
+   until they change it.
+
+   What this section exists to prove, in order of how badly it would hurt:
+     1. The price that lands on JOBS is the engine's, asked for with the home
+        on the move booking — never a number or a home size from the browser.
+     2. Ownership: nobody books or changes a plan on somebody else's move.
+     3. A first-clean plan's QUOTED price cannot be re-priced from here.
+     4. A change moves the existing visit in place; a finished or cancelled
+        visit gets a NEW one, with an id that does not collide.
+
+   A FRESH HARNESS, so the plans and slots of sections 21-24 cannot make an
+   assertion pass for the wrong reason.
+   ================================================================ */
+head('25. r45 — a plan after a move');
+{
+  const M = build();
+  const MB = M.box;
+  const MGET  = (cid) => JSON.parse(MB.doGet({ parameter:
+    { portal: cid, t: MB.portalToken(cid) } }).getContent());
+  const MPOST = (o, cid) => JSON.parse(MB.doPost({ postData: { contents: JSON.stringify(
+    Object.assign({ event_type: 'portal_write', contact_id: cid || 'CON-MOVE',
+                    t: MB.portalToken(cid || 'CON-MOVE') }, o)) } }).getContent());
+
+  const lead = (leadId, contactId) => {
+    const row = new Array(LEADS_HEADERS.length).fill('');
+    row[LEADS_HEADERS.indexOf('lead_id')] = leadId;
+    row[LEADS_HEADERS.indexOf('name')] = 'Mo Ver';
+    row[LEADS_HEADERS.indexOf('contact_id')] = contactId;
+    M.tabs.LEADS.appendRow(row);
+  };
+  const job = (jobId, leadId, over) => {
+    const row = new Array(JOBS_HEADERS.length).fill('');
+    const set = (k, v) => { row[JOBS_HEADERS.indexOf(k)] = v; };
+    set('job_id', jobId); set('lead_id', leadId); set('property_id', 'PROP-MOVE');
+    set('service_type', 'Move In / Move Out'); set('frequency', 'once');
+    set('condition', 'heavy');
+    set('beds', 3); set('baths', 2); set('quoted_price', 640);
+    set('scheduled_date', '2026-10-10'); set('start_time', '9:00 AM');
+    set('address', '9 Tremont St'); set('unit', '2'); set('zip', '02116');
+    set('quote_meta', '{"levels":2}');
+    set('name', 'Mo Ver'); set('email', leadId); set('phone', '617-555-0199');
+    set('vendor_id', 'VEN-MOVE');
+    Object.keys(over || {}).forEach(k => set(k, over[k]));
+    M.tabs.JOBS.appendRow(row);
+  };
+  const rows    = (tab) => (M.tabs[tab]._rows || []).slice(1);
+  const jobC    = (jobId, col) => (rows('JOBS').filter(r =>
+    String(r[JOBS_HEADERS.indexOf('job_id')]).trim() === jobId)[0] || [])[JOBS_HEADERS.indexOf(col)];
+  const setJobC = (jobId, col, v) => rows('JOBS').forEach(r => {
+    if (String(r[JOBS_HEADERS.indexOf('job_id')]).trim() === jobId) r[JOBS_HEADERS.indexOf(col)] = v; });
+  const planC   = (planId, col) => (rows('RECURRING_PLANS').filter(r =>
+    String(r[0]).trim() === planId)[0] || [])[PLAN_H.indexOf(col)];
+  const AV = ['date','start_time','vendor_id','status','job_id'];
+  const slot  = (date, time, vendor) => M.tabs.AVAILABILITY.appendRow([date, time, vendor || '', 'open', '']);
+  const slotC = (date, time, col) => (rows('AVAILABILITY').filter(r =>
+    r[0] === date && r[1] === time)[0] || [])[AV.indexOf(col)];
+
+  /* THE ENGINE, STUBBED AT THE WIRE. The Worker answers; these tests watch
+     what Apps Script ASKS it and whether it believes the answer. */
+  const PRICES = { weekly: 180, biweekly: 210, monthly: 260 };
+  const quoteCalls = [];
+  let quoteReply = () => ({ code: 200, text: JSON.stringify({ ok: true, price: 999, recurring: PRICES }) });
+  MB.UrlFetchApp = { fetch: (url, opts) => {
+    if (url === 'https://servecleaning.com/api/quote') {
+      quoteCalls.push(JSON.parse(opts.payload));
+      const r = quoteReply();
+      return { getResponseCode: () => r.code, getContentText: () => r.text };
+    }
+    return { getResponseCode: () => 201, getContentText: () => '{}' };
+  } };
+
+  lead('mover@example.com', 'CON-MOVE');
+  lead('first@example.com', 'CON-FIRST');
+  lead('gone@example.com',  'CON-GONE');
+  const MOVE = 'SRV-20261010-MOVE01';
+  job(MOVE, 'mover@example.com');
+  job('SRV-20260930-FIRST1', 'first@example.com',
+      { service_type: 'First Clean', property_id: 'PROP-FIRST', vendor_id: '' });
+  job('SRV-20261012-GONE01', 'gone@example.com',
+      { job_status: 'cancelled', property_id: 'PROP-GONE' });
+
+  /* ---- the box, before anything is chosen ---- */
+  const V0 = MGET('CON-MOVE');
+  const mp = V0.movePlan || {};
+  t('a move customer is shown the plan box', mp.state === 'choose', V0.movePlan);
+  t('for their move booking', mp.jobId === MOVE, mp.jobId);
+  t('naming the home it is for', mp.propertyLabel === '9 Tremont St, 2', mp.propertyLabel);
+  t('with the home as the engine prices it, levels from quote_meta',
+    JSON.stringify(mp.home) === JSON.stringify({ zip: '02116', bedrooms: 3, bathrooms: 2, levels: 2 }),
+    mp.home);
+  t('and the move date the first plan visit has to follow', mp.after === '2026-10-10', mp.after);
+  t('a previous company exists, so it may be asked for', mp.samePartner === true);
+  t('the box is a whitelist — exactly these keys',
+    JSON.stringify(Object.keys(mp).sort()) ===
+    JSON.stringify(['after','home','jobId','propertyLabel','samePartner','state']), Object.keys(mp));
+  t('no vendor id reaches the browser in it', !JSON.stringify(mp).includes('VEN-'));
+  t('reading the portal asked the engine nothing — prices are the browser\'s fetch',
+    quoteCalls.length === 0, quoteCalls.length);
+  t('a first-clean customer gets no move box', MGET('CON-FIRST').movePlan === null);
+  t('nor does a move that was called off', MGET('CON-GONE').movePlan === null);
+
+  const start = (over, cid) => MPOST(Object.assign({ kind: 'plan_start', job_id: MOVE,
+    frequency: 'biweekly', shown_price: 210, slot_date: '2026-10-24', slot_time: '1:00 PM',
+    same_provider: true }, over || {}), cid);
+  const jobsAtStart = rows('JOBS').length;
+
+  /* ---- refusals, each writing nothing ---- */
+  t('another customer cannot start a plan on this move',
+    start({}, 'CON-FIRST').error === 'not_found');
+  t('a first clean cannot start a move plan',
+    start({ job_id: 'SRV-20260930-FIRST1' }, 'CON-FIRST').error === 'not_found');
+  t('a cancelled move cannot either',
+    start({ job_id: 'SRV-20261012-GONE01' }, 'CON-GONE').error === 'not_found');
+  t('an invented cadence is refused', start({ frequency: 'daily' }).error === 'bad_plan');
+  t('no time at all is refused', start({ slot_date: '', slot_time: '' }).error === 'bad_slot');
+  t('an unreadable time is refused', start({ slot_time: 'noonish' }).error === 'bad_slot');
+  t('a time on the move day itself is refused',
+    start({ slot_date: '2026-10-10', slot_time: '3:00 PM' }).error === 'too_early');
+  t('as is one before it', start({ slot_date: '2026-10-01' }).error === 'too_early');
+
+  quoteReply = () => ({ code: 502, text: '{"ok":false}' });
+  t('no engine answer, no plan', start().error === 'price_unavailable');
+  quoteReply = () => ({ code: 200, text: JSON.stringify({ ok: true, recurring: { weekly: 180, biweekly: 0, monthly: 260 } }) });
+  t('a non-positive price is not a price', start().error === 'price_unavailable');
+  quoteReply = () => ({ code: 200, text: JSON.stringify({ ok: true, price: 999, recurring: PRICES }) });
+
+  const stale = start({ shown_price: 199 });
+  t('a price the customer was not shown is REFUSED, not booked', stale.error === 'price_changed', stale);
+  t('and the refusal carries the engine\'s prices to show instead',
+    JSON.stringify(stale.prices) === JSON.stringify(PRICES), stale.prices);
+  t('none of those refusals wrote a job', rows('JOBS').length === jobsAtStart,
+    rows('JOBS').length - jobsAtStart);
+  t('or a plan', rows('RECURRING_PLANS').length === 0, rows('RECURRING_PLANS').length);
+
+  /* ---- starting one ---- */
+  slot('2026-10-24', '1:00 PM', 'VEN-SLOT');
+  quoteCalls.length = 0;
+  const S1 = start({ bedrooms: 1, bathrooms: 1, zip: '02186', levels: 1 });
+  t('it starts', S1.ok === true, S1);
+  const VISIT = String(S1.job_id || '');
+  const PLAN  = String(S1.plan_id || '');
+  t('the plan id is derived from the move booking', PLAN === 'PLN-20261010-MOVE01', PLAN);
+
+  /* THE PRICE IS THE ENGINE'S, FOR THE HOME ON FILE. The payload above tried
+     to describe a studio in a cheaper ZIP; none of it may reach the engine. */
+  const asked = quoteCalls[0] || {};
+  t('the engine was asked exactly once', quoteCalls.length === 1, quoteCalls.length);
+  t('about the home on the move booking, not the one in the payload',
+    asked.zip === '02116' && asked.bedrooms === 3 && asked.bathrooms === 2 && asked.levels === 2, asked);
+  t('in the shape /api/quote prices from',
+    asked.service === 'first_clean' && asked.condition === 'standard' &&
+    asked.frequency_selected === 'once', asked);
+  t('no address travels to the engine', !JSON.stringify(asked).includes('Tremont'));
+
+  t('exactly one JOBS row was written', rows('JOBS').length === jobsAtStart + 1);
+  t('a recurring clean', jobC(VISIT, 'service_type') === 'Recurring clean', jobC(VISIT, 'service_type'));
+  t('on the cadence chosen', jobC(VISIT, 'frequency') === 'biweekly');
+  t('AT THE ENGINE\'S PRICE', Number(jobC(VISIT, 'quoted_price')) === 210 &&
+    Number(jobC(VISIT, 'final_price')) === 210, [jobC(VISIT, 'quoted_price'), jobC(VISIT, 'final_price')]);
+  t('with no move-out condition carried onto upkeep', jobC(VISIT, 'condition') === '',
+    jobC(VISIT, 'condition'));
+  t('on the day and time picked', jobC(VISIT, 'scheduled_date') === '2026-10-24' &&
+    jobC(VISIT, 'start_time') === '1:00 PM');
+  t('at the same home', jobC(VISIT, 'address') === '9 Tremont St' &&
+    jobC(VISIT, 'property_id') === 'PROP-MOVE');
+  t('for the same customer', jobC(VISIT, 'lead_id') === 'mover@example.com');
+  t('its id is not the move booking\'s', VISIT !== MOVE && /^SRV-20261024-/.test(VISIT), VISIT);
+  t('the slot is taken', slotC('2026-10-24', '1:00 PM', 'status') === 'booked' &&
+    slotC('2026-10-24', '1:00 PM', 'job_id') === VISIT);
+  t('and its partner stamped on the visit', jobC(VISIT, 'vendor_id') === 'VEN-SLOT');
+
+  t('the plan row reads confirmed', planC(PLAN, 'status') === 'confirmed');
+  t('holding the engine\'s price', Number(planC(PLAN, 'quoted_price')) === 210);
+  t('from the move booking', planC(PLAN, 'origin_job_id') === MOVE);
+  t('matched on the lead, like every plan', planC(PLAN, 'lead_id') === 'mover@example.com');
+  t('anchored at the time chosen', planC(PLAN, 'anchor_date') === '2026-10-24' &&
+    planC(PLAN, 'anchor_time') === '1:00 PM');
+  t('pointing at the visit', planC(PLAN, 'confirmed_job_id') === VISIT);
+  t('with no window — nothing is being held', planC(PLAN, 'expires_at') === '');
+  t('the same company, resolved from the move booking',
+    planC(PLAN, 'preferred_vendor_id') === 'VEN-MOVE', planC(PLAN, 'preferred_vendor_id'));
+
+  /* ---- the box is now the plan they chose ---- */
+  const V1 = MGET('CON-MOVE');
+  const sp = V1.movePlan || {};
+  t('the box now shows the saved plan', sp.state === 'saved', V1.movePlan);
+  t('its cadence, price and visit', sp.frequency === 'biweekly' && sp.price === 210 &&
+    sp.visitId === VISIT, sp);
+  t('and that the same company was asked for, as a yes', sp.sameAsked === true);
+  t('the saved box is a whitelist too',
+    JSON.stringify(Object.keys(sp).sort()) === JSON.stringify(['after','frequency','home','jobId',
+      'planId','price','propertyLabel','sameAsked','samePartner','state','visitId']), Object.keys(sp));
+  t('still with no vendor id', !JSON.stringify(sp).includes('VEN-'));
+  t('the visit is in their bookings, upcoming',
+    (V1.bookings || []).some(b => b.bookingId === VISIT && !b.completed && !b.cancelled));
+  t('and r38\'s offer card stays out of it', V1.plan === null, V1.plan);
+
+  t('starting again is refused, pointing at the plan they have',
+    start().error === 'already_confirmed');
+  t('and wrote nothing', rows('JOBS').length === jobsAtStart + 1);
+
+  /* THE REPAIR PATH. A failure between the visit and the plan row leaves a
+     visit with no plan. Retrying dedupes the visit and writes the missing row. */
+  const planRowsNow = M.tabs.RECURRING_PLANS._rows;
+  const savedPlanRow = planRowsNow.pop();
+  const S2 = start();
+  t('a retry after a lost plan row is a duplicate, not a second visit',
+    S2.ok === true && S2.duplicate === true && S2.job_id === VISIT, S2);
+  t('no second JOBS row', rows('JOBS').length === jobsAtStart + 1);
+  t('and the plan row is back', planC(PLAN, 'confirmed_job_id') === VISIT);
+  planRowsNow.pop(); planRowsNow.push(savedPlanRow);
+
+  /* ---- changing it ---- */
+  const change = (over, cid) => MPOST(Object.assign({ kind: 'plan_change', plan_id: PLAN,
+    frequency: 'biweekly' }, over || {}), cid);
+
+  t('another customer cannot change it', change({ slot_date: '2026-10-31', slot_time: '9:00 AM' },
+    'CON-FIRST').error === 'not_found');
+
+  /* THE PLAN ROW'S OWN OWNERSHIP CHECK, proven alone. Above, the caller does
+     not own the move booking either, so the second check answers first and
+     the first is never tested — r42's missed mutation, in a new place. This
+     row points at the caller's OWN move booking but carries somebody else's
+     lead_id: what a mis-keyed row looks like. */
+  M.tabs.RECURRING_PLANS.appendRow(PLAN_H.map(k => ({ plan_id: 'PLN-MISKEYED',
+    lead_id: 'someone@example.com', origin_job_id: MOVE, frequency: 'weekly', quoted_price: 180,
+    status: 'confirmed' })[k] || ''));
+  t('a plan row carrying another lead cannot be changed, even on their own move',
+    change({ plan_id: 'PLN-MISKEYED', frequency: 'weekly', time_preference: 'earlier' }).error === 'not_found');
+  t('and it was not touched', planC('PLN-MISKEYED', 'anchor_date') === '' &&
+    rows('JOBS').length === jobsAtStart + 1);
+
+  /* A FIRST-CLEAN PLAN HOLDS WHAT IT WAS QUOTED. Its row belongs to the right
+     customer and is confirmed; the only thing wrong is where it came from. */
+  M.tabs.RECURRING_PLANS.appendRow(PLAN_H.map(k => ({ plan_id: 'PLN-FIRSTQ', lead_id: 'first@example.com',
+    origin_job_id: 'SRV-20260930-FIRST1', frequency: 'weekly', quoted_price: 111,
+    status: 'confirmed' })[k] || ''));
+  t('a first-clean plan cannot be re-priced from the move box',
+    change({ plan_id: 'PLN-FIRSTQ', frequency: 'monthly', shown_price: 260 }, 'CON-FIRST').error === 'not_found');
+
+  slot('2026-10-31', '9:00 AM', 'VEN-SLOT2');
+  quoteCalls.length = 0;
+  const C1 = change({ slot_date: '2026-10-31', slot_time: '9:00 AM' });
+  t('a time-only change goes through', C1.ok === true, C1);
+  t('it moves THE SAME visit', C1.job_id === VISIT && jobC(VISIT, 'scheduled_date') === '2026-10-31' &&
+    jobC(VISIT, 'start_time') === '9:00 AM', [C1.job_id, jobC(VISIT, 'scheduled_date')]);
+  t('without re-pricing — the engine was not asked', quoteCalls.length === 0);
+  t('and the price holds', Number(jobC(VISIT, 'quoted_price')) === 210);
+  t('the new slot is taken', slotC('2026-10-31', '9:00 AM', 'job_id') === VISIT);
+  t('the old one goes back on sale', slotC('2026-10-24', '1:00 PM', 'status') === 'open');
+  t('THE PLAN BOX MOVES THE ANCHOR', planC(PLAN, 'anchor_date') === '2026-10-31' &&
+    planC(PLAN, 'anchor_time') === '9:00 AM');
+  t('asking for the same time again changes nothing',
+    change({ slot_date: '2026-10-31', slot_time: '9:00 AM' }).unchanged === true);
+
+  t('a cadence change at a price not shown is refused',
+    change({ frequency: 'monthly', shown_price: 250 }).error === 'price_changed');
+  t('and left the visit alone', jobC(VISIT, 'frequency') === 'biweekly');
+
+  setJobC(VISIT, 'payment_status', 'paid');
+  t('a PAID visit is not re-priced by a cadence change',
+    change({ frequency: 'monthly', shown_price: 260 }).error === 'paid');
+  t('and nothing moved', jobC(VISIT, 'frequency') === 'biweekly' && planC(PLAN, 'frequency') === 'biweekly');
+  setJobC(VISIT, 'payment_status', '');
+
+  const C2 = change({ frequency: 'monthly', shown_price: 260 });
+  t('a cadence change at the engine\'s price goes through', C2.ok === true, C2);
+  t('the visit takes the new cadence and price in place',
+    jobC(VISIT, 'frequency') === 'monthly' && Number(jobC(VISIT, 'quoted_price')) === 260 &&
+    Number(jobC(VISIT, 'final_price')) === 260);
+  t('and so does the plan', planC(PLAN, 'frequency') === 'monthly' && Number(planC(PLAN, 'quoted_price')) === 260);
+  t('the time was not touched', jobC(VISIT, 'scheduled_date') === '2026-10-31');
+
+  const C3 = change({ frequency: 'monthly', time_preference: 'later' });
+  t('a change to "later in the day" goes through', C3.ok === true, C3);
+  t('the visit becomes a preference', jobC(VISIT, 'scheduling_type') === 'preference' &&
+    jobC(VISIT, 'scheduled_date') === '' && /Later in the day/.test(jobC(VISIT, 'start_time')),
+    [jobC(VISIT, 'scheduling_type'), jobC(VISIT, 'scheduled_date'), jobC(VISIT, 'start_time')]);
+  t('and its slot goes back on sale', slotC('2026-10-31', '9:00 AM', 'status') === 'open');
+  t('the anchor clears — a preference has no clock time', planC(PLAN, 'anchor_date') === '');
+  t('asking for "later" again changes nothing',
+    change({ frequency: 'monthly', time_preference: 'later' }).unchanged === true);
+
+  /* ---- the visit is called off: the box books the next one ---- */
+  t('the visit can still be cancelled the r43 way',
+    MPOST({ kind: 'cancel', job_id: VISIT }).ok === true);
+  t('with nothing coming, a change needs a time',
+    change({ frequency: 'monthly' }).error === 'bad_slot');
+  slot('2026-11-07', '11:00 AM', 'VEN-SLOT3');
+  const jobsBeforeNext = rows('JOBS').length;
+  const C4 = change({ frequency: 'monthly', slot_date: '2026-11-07', slot_time: '11:00 AM' });
+  const NEXT = String(C4.job_id || '');
+  t('it books the plan\'s next visit', C4.ok === true && NEXT && NEXT !== VISIT, C4);
+  t('as a new row', rows('JOBS').length === jobsBeforeNext + 1);
+  t('with its own submission id', jobC(NEXT, 'submission_id') === 'PLNC-' + PLAN + '-02',
+    jobC(NEXT, 'submission_id'));
+  t('at the plan\'s held price', Number(jobC(NEXT, 'quoted_price')) === 260);
+  t('the plan points at it now', planC(PLAN, 'confirmed_job_id') === NEXT);
+  t('the cancelled visit stays cancelled', jobC(VISIT, 'job_status') === 'cancelled');
+  t('the box shows the new visit', (MGET('CON-MOVE').movePlan || {}).visitId === NEXT);
+  t('and a repeat is unchanged, not a third visit',
+    change({ frequency: 'monthly', slot_date: '2026-11-07', slot_time: '11:00 AM' }).unchanged === true &&
+    rows('JOBS').length === jobsBeforeNext + 1);
+
+  /* ---- starting on "earlier in the day", with no previous company ---- */
+  lead('pref@example.com', 'CON-PREF');
+  job('SRV-20261015-PREF01', 'pref@example.com', { vendor_id: '', property_id: 'PROP-PREF' });
+  const PV = MGET('CON-PREF').movePlan || {};
+  t('with no previous company, none is offered', PV.samePartner === false);
+  const availBefore = JSON.stringify(rows('AVAILABILITY'));
+  const S3 = MPOST({ kind: 'plan_start', job_id: 'SRV-20261015-PREF01', frequency: 'weekly',
+    shown_price: 180, time_preference: 'earlier', same_provider: true }, 'CON-PREF');
+  t('a plan can start on "earlier in the day"', S3.ok === true, S3);
+  t('as a preference visit', jobC(S3.job_id, 'scheduling_type') === 'preference' &&
+    /Earlier in the day/.test(jobC(S3.job_id, 'start_time')));
+  t('which takes no slot', JSON.stringify(rows('AVAILABILITY')) === availBefore);
+  t('with no anchor yet', planC('PLN-20261015-PREF01', 'anchor_date') === '');
+  t('and a same-company request with no company records nothing',
+    planC('PLN-20261015-PREF01', 'preferred_vendor_id') === '');
+
+  /* An UNTICKED same-company box records nothing, even where a company exists. */
+  lead('noask@example.com', 'CON-NOASK');
+  job('SRV-20261016-NOASK1', 'noask@example.com', { property_id: 'PROP-NOASK' });
+  const S4 = MPOST({ kind: 'plan_start', job_id: 'SRV-20261016-NOASK1', frequency: 'weekly',
+    shown_price: 180, time_preference: 'later', same_provider: false }, 'CON-NOASK');
+  t('an unticked same-company box asks for no company, even when there is one',
+    S4.ok === true && planC('PLN-20261016-NOASK1', 'preferred_vendor_id') === '', S4);
+
+  t('r38 still never OFFERS a move a plan at booking',
+    MB.createRecurringPlan(M.ss, { frequency_selected: 'weekly', service_type: 'move_out' },
+      { job_id: 'SRV-X', lead_id: 'x' }, {}) === 'not a first clean');
+}
+
 console.log('\n' + (bad ? bad + ' FAILURES' : 'ALL ASSERTIONS PASSED'));
 process.exit(bad ? 1 : 0);

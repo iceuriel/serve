@@ -119,6 +119,8 @@ async function boot(model, opts) {
   /* r44: every GET of the feed, so warming it can be counted rather than
      assumed. */
   const slotGets = [];
+  /* r45: every ask of the pricing engine, and what it was asked. */
+  const quotes = [];
   /* What the NEXT read of the account returns. After a confirmation the offer
      has become a booking, so a page that repaints must stop offering it. */
   let served = model;
@@ -144,6 +146,15 @@ async function boot(model, opts) {
     setTimeout: setTimeout,
     clearTimeout: clearTimeout,
     fetch: (url, init) => {
+      /* r45. The Worker's pricing engine, which the move plan box asks for
+         this home's recurring prices. Not a portal write. */
+      if (String(url).indexOf('/api/quote') === 0) {
+        quotes.push(JSON.parse(init.body));
+        const q = opts.quote === undefined
+          ? { ok: true, price: 999, recurring: { weekly: 180, biweekly: 210, monthly: 260 } }
+          : opts.quote;
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(q) });
+      }
       if (init && init.method === 'POST') {
         posts.push(JSON.parse(init.body));
         served = opts.after || Object.assign({}, model, { plan: null });
@@ -183,7 +194,7 @@ async function boot(model, opts) {
   };
   await settle();
   return { body: els['p-body'] || node('div'), state: els['p-state'] || node('div'),
-           warns, posts, settle, slotGets };
+           warns, posts, settle, slotGets, quotes };
 }
 
 /* --- reading the rendered tree. Every lookup degrades rather than throws:
@@ -531,6 +542,159 @@ const PRETTY = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][D.getDay()] +
   await KM.settle();
   t('after a move, the next look at the schedule asks again', KM.slotGets.length, before + 1);
   t('and none of section K threw', [].concat(K.warns, K0.warns, KE.warns, KC.warns, KM.warns), []);
+
+  head('L. r45 — a plan after a move');
+
+  /* The move booking, a move date between the two bookable days of FEED, and
+     the plan box the server sends for it. */
+  const AFTER = isoOf(dayAt(5));
+  const MOVE_BOOKING = { bookingId: 'SRV-M', serviceLabel: 'Move in / move out',
+    serviceCode: 'CLEAN_MOVEOUT', date: AFTER, time: '9:00 AM', price: 640, paid: false,
+    completed: '', rooms: [], partner: null };
+  const HOME = { zip: '02116', bedrooms: 3, bathrooms: 2, levels: 2 };
+  const CHOOSE = { state: 'choose', jobId: 'SRV-M', propertyLabel: '9 Tremont St, 2',
+    after: AFTER, home: HOME, samePartner: false };
+  const moveModel = (mp, extra) => model({ plan: null, movePlan: mp,
+    bookings: [MOVE_BOOKING].concat((extra || {}).bookings || []) });
+  const opt = (root, f) => all(root).filter(n => n.attrs && n.attrs['data-frequency'] === f)[0];
+  const tap = (n) => ((n && n._on && n._on.click) || []).forEach(fn => fn({}));
+  const VISIT = { bookingId: 'SRV-V', serviceLabel: 'Recurring clean', serviceCode: 'CLEAN_STANDARD',
+    date: isoOf(LATER), time: '11:00 AM', price: 210, paid: false, completed: '', rooms: [], partner: null };
+  const SAVED = Object.assign({}, CHOOSE, { state: 'saved', planId: 'PLN-M', frequency: 'biweekly',
+    price: 199, visitId: 'SRV-V', sameAsked: false });
+
+  const L1 = await boot(moveModel(CHOOSE), {
+    after: moveModel(Object.assign({}, SAVED, { price: 210 }), { bookings: [VISIT] }) });
+  t('a move customer sees the plan box', byClass(L1.body, 'mplan').length, 1);
+  t('naming the home it is for', textOf(L1.body, 'mplan__home'), 'For 9 Tremont St, 2');
+  t('the engine is asked once, about that home, on the recurring track',
+    L1.quotes, [{ zip: '02116', bedrooms: 3, bathrooms: 2, levels: 2,
+      service: 'first_clean', condition: 'standard', frequency_selected: 'once' }]);
+  t('the three plans, in order, at the engine\'s prices',
+    byClass(L1.body, 'mplan__opt').map(n => textOf(n, 'mplan__optname') + ' ' + textOf(n, 'mplan__optprice')),
+    ['Every week $180.00 per visit', 'Every 2 weeks $210.00 per visit', 'Every month $260.00 per visit']);
+  t('nothing can be confirmed yet', (byClass(L1.body, 'mplan__go')[0] || {}).hidden, true);
+  t('and no button on the page is disabled — the live refresh would freeze',
+    all(L1.body).filter(n => n.tagName === 'button' && n.disabled).length, 0);
+  t('an untouched box does not hold off the live refresh',
+    /is-dirty/.test((byClass(L1.body, 'mplan')[0] || {}).className || ''), false);
+  t('opening it sends nothing', L1.posts, []);
+
+  tap(opt(L1.body, 'biweekly'));
+  await L1.settle();
+  t('picking a plan marks it', ((opt(L1.body, 'biweekly') || { attrs: {} }).attrs)['aria-pressed'], 'true');
+  t('and holds off the live refresh',
+    /is-dirty/.test((byClass(L1.body, 'mplan')[0] || {}).className || ''), true);
+  t('times offered are only those AFTER the move clean',
+    byClass(L1.body, 'slot-chip').map(n => n.attrs['data-date'] + ' ' + n._text),
+    [isoOf(LATER) + ' 11:00 AM']);
+  t('still nothing to confirm without a time', (byClass(L1.body, 'mplan__go')[0] || {}).hidden, true);
+
+  click(L1.body, 'slot-chip');
+  await L1.settle();
+  t('it says back the plan, the price and the first visit', textOf(L1.body, 'mplan__chosen'),
+    'Every 2 weeks at $210.00 per visit · first visit on ' + prettyOf(LATER) + ' at 11:00 AM');
+  t('now it can be confirmed', (byClass(L1.body, 'mplan__go')[0] || {}).hidden, false);
+  t('choosing sent nothing', L1.posts, []);
+
+  click(L1.body, 'mplan__go');
+  await L1.settle();
+  t('starting sends one request: the move, the plan, the price SHOWN, the time',
+    L1.posts, [{ event_type: 'portal_write', contact_id: 'CON-1', t: 'tok', kind: 'plan_start',
+      job_id: 'SRV-M', same_provider: false, frequency: 'biweekly', shown_price: 210,
+      slot_date: isoOf(LATER), slot_time: '11:00 AM' }]);
+  t('the box becomes the saved plan', textOf(L1.body, 'mplan__tag'), 'Your recurring plan');
+  t('with its cadence', textOf(L1.body, 'mplan__title'), 'Every 2 weeks');
+  t('its price', textOf(L1.body, 'mplan__price'), '$210.00 per visit');
+  t('and the visit it booked', textOf(L1.body, 'mplan__next'),
+    'Next visit: ' + prettyOf(LATER) + ' · 11:00 AM');
+  t('the saved box is static — no plan tiles, no times',
+    [byClass(L1.body, 'mplan__opt').length, byClass(L1.body, 'mplan__slots').length], [0, 0]);
+  t('the visit is listed under Upcoming', headings(L1.body)[0], 'Upcoming');
+
+  /* ---- earlier / later, when none of the times suit ---- */
+  const L2 = await boot(moveModel(Object.assign({}, CHOOSE, { samePartner: true })));
+  tap(opt(L2.body, 'monthly'));
+  await L2.settle();
+  t('the earlier/later choice waits behind "none of these work"',
+    (byClass(L2.body, 'mplan__prefs')[0] || {}).hidden, true);
+  click(L2.body, 'mplan__other');
+  const laterBtn = all(L2.body).filter(n => n.attrs && n.attrs['data-pref'] === 'later')[0];
+  tap(laterBtn);
+  await L2.settle();
+  t('choosing "later" says what happens next', textOf(L2.body, 'mplan__chosen'),
+    'Every month at $260.00 per visit · first visit later in the day — we will call to set the day');
+  const box2 = all(L2.body).filter(n => n.tagName === 'input')[0];
+  if (box2) box2.checked = true;
+  click(L2.body, 'mplan__go');
+  await L2.settle();
+  const p2 = L2.posts[0] || {};
+  t('it sends the preference and no slot',
+    [p2.kind, p2.frequency, p2.shown_price, p2.time_preference, 'slot_date' in p2],
+    ['plan_start', 'monthly', 260, 'later', false]);
+  t('a same-company request is a yes, never a company',
+    [p2.same_provider, JSON.stringify(p2).includes('VEN')], [true, false]);
+
+  /* ---- changing a saved plan ---- */
+  const L3 = await boot(moveModel(SAVED, { bookings: [VISIT] }));
+  t('a saved plan offers a change', textOf(L3.body, 'mplan__edit'), 'Change plan or time');
+  t('and asks the engine nothing until then', L3.quotes.length, 0);
+  click(L3.body, 'mplan__edit');
+  await L3.settle();
+  t('changing shows the plans, the current one chosen',
+    ((opt(L3.body, 'biweekly') || { attrs: {} }).attrs)['aria-pressed'], 'true');
+  t('the current plan keeps the price it was booked at, not today\'s',
+    textOf(opt(L3.body, 'biweekly') || {}, 'mplan__optprice'), '$199.00 per visit');
+  t('keeping the visit\'s time is the default',
+    ((byClass(L3.body, 'mplan__keep')[0] || { attrs: {} }).attrs)['aria-pressed'], 'true');
+  t('with nothing changed there is nothing to save', (byClass(L3.body, 'mplan__go')[0] || {}).hidden, true);
+  tap(opt(L3.body, 'monthly'));
+  await L3.settle();
+  t('a different cadence can be saved', (byClass(L3.body, 'mplan__go')[0] || {}).hidden, false);
+  click(L3.body, 'mplan__go');
+  await L3.settle();
+  t('it sends the plan, the new cadence and its shown price — and no time',
+    L3.posts, [{ event_type: 'portal_write', contact_id: 'CON-1', t: 'tok', kind: 'plan_change',
+      plan_id: 'PLN-M', frequency: 'monthly', shown_price: 260 }]);
+
+  const L4 = await boot(moveModel(SAVED, { bookings: [VISIT] }));
+  click(L4.body, 'mplan__edit');
+  await L4.settle();
+  click(L4.body, 'mplan__cancel');
+  await L4.settle();
+  t('"keep my plan" puts the saved box back, sending nothing',
+    [textOf(L4.body, 'mplan__tag'), L4.posts.length], ['Your recurring plan', 0]);
+
+  /* ---- the engine's price moved between looking and choosing ---- */
+  const L5 = await boot(moveModel(CHOOSE), { reply: { ok: false, error: 'price_changed',
+    prices: { weekly: 185, biweekly: 215, monthly: 265 } } });
+  tap(opt(L5.body, 'biweekly'));
+  await L5.settle();
+  click(L5.body, 'slot-chip');
+  click(L5.body, 'mplan__go');
+  await L5.settle();
+  t('a changed price is shown, not booked',
+    textOf(opt(L5.body, 'biweekly') || {}, 'mplan__optprice'), '$215.00 per visit');
+  t('and the customer is told to look again',
+    byClass(L5.body, 'tk-save').map(n => n._text).filter(Boolean),
+    ['Prices were just updated. Please check the price and confirm again.']);
+  click(L5.body, 'mplan__go');
+  await L5.settle();
+  t('confirming again sends the NEW price', (L5.posts[1] || {}).shown_price, 215);
+
+  /* ---- the engine cannot be reached ---- */
+  const L6 = await boot(moveModel(CHOOSE), { quote: { ok: false, error: 'cannot_price' } });
+  t('no prices, no plans to pick', byClass(L6.body, 'mplan__opt').length, 0);
+  t('and it says so, with a retry',
+    [textOf(byClass(L6.body, 'mplan')[0] || {}, 'tk-note'), textOf(L6.body, 'mplan__retry')],
+    ['We could not load prices just now.', 'Try again']);
+
+  const L7 = await boot(model({ plan: null }));
+  t('nobody else sees a plan box, or asks the engine anything',
+    [byClass(L7.body, 'mplan').length, L7.quotes.length], [0, 0]);
+
+  t('and none of section L threw',
+    [].concat(L1.warns, L2.warns, L3.warns, L4.warns, L5.warns, L6.warns, L7.warns), []);
 
   console.log('\n' + (bad ? bad + ' FAILURES' : 'all portal-render checks passed'));
   process.exit(bad ? 1 : 0);
