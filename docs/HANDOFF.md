@@ -61,6 +61,10 @@ errors; `/` shows first_clean.
 
 **Not verified.** A real phone.
 
+**Follow-up (`3fbb861`, live, style.css hash-matches production).** "Serve
+handles the rest…" (`.hero__lead`) now takes the tagline's size and colour
+(1.15rem, #cbd5e1); Chrome computes both lines as Inter 18.4px 400. 30/30.
+
 **Tooling note.** Codex runs a local preview on 127.0.0.1:8792. A local server
 that binds a taken port on another address can let the browser reach the other
 agent's server instead — bind `127.0.0.1` explicitly and fail on EADDRINUSE.
