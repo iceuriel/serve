@@ -509,11 +509,12 @@ a {
 }
 
 /* "Serve handles the rest…" — the lead-in to the sub beneath it, so it takes
-   the air above and sits close to what it introduces. */
+   the air above and sits close to what it introduces. Same face, size and
+   colour as .hero__tagline, at the founder's request (2026-09-14). */
 .hero__lead {
     font-family: var(--flow-sans);
-    font-size: 1.35rem;
-    color: #f9fafb;
+    font-size: 1.15rem;
+    color: #cbd5e1;
     margin: 2.25rem 0 0.35rem;
 }
 
