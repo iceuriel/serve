@@ -13,6 +13,19 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-14, Claude Code: "Serve handles the rest…" set like the headline
+
+**LOCAL EDITS ONLY — not committed or pushed.** Founder asked: the hero lead
+line in the headline's face and colour (Times New Roman, #f9fafb) at its own
+size (1.15rem, weight unchanged), and a little closer to "Instantly quote &
+book in under 1 minute". One element serves the untagged, move-in and pro
+heroes, so one rule covers all three.
+- `style.css` — `.hero__lead`: Times, #f9fafb, top margin 1.1rem → 0.6rem.
+- `tests/static-checks.test.js` — `.hero__lead` added to `SERIF_ALLOWED`.
+Checked: `node tests/run-all.js` all 31 pass; headless screenshots at 1400px,
+untagged and `?src=poster`, look right. Noticed, not changed: at 1400px the
+pro headline in Times at 3rem wraps as "Get your weekends back with / Serve".
+
 ## Current work — 2026-09-14, Claude Code: the authored hero gets the ZIP check too
 
 **PUSHED (`2fe2bce`) AND VERIFIED IN PRODUCTION (2026-09-14).** Production

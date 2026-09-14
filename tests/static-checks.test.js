@@ -545,6 +545,7 @@ const SERIF_ALLOWED = [
   '.ticket__brand',        // the ticket pages' header (the front page's sample ticket overrides it)
   '.serve-page-head h1',   // the /pricing and /services page titles
   '.hero__headline',       // the hero headline, every skin (2026-09-14, founder's call)
+  '.hero__lead',           // "Serve handles the rest…", set like the headline (2026-09-14)
 ];
 const serifRules = [...cssNoComments.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
   .filter(m => /font-family\s*:[^;]*(Times|Georgia|(?<!sans-)serif\b)/i.test(m[2]))

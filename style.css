@@ -520,14 +520,15 @@ a {
 }
 
 /* "Serve handles the rest…" — the lead-in to the sub beneath it, so it sits
-   close to what it introduces. Same face, size and colour as .hero__tagline,
-   at the founder's request (2026-09-14). The gap above it was 2.25rem until
-   the founder found it too wide under "Instantly quote & book…". */
+   close to what it introduces. Same size as .hero__tagline, but the face and
+   colour of .hero__headline (Times, #f9fafb), at the founder's request
+   (2026-09-14). The gap above it was 2.25rem, then 1.1rem, each time the
+   founder found it too wide under "Instantly quote & book…". */
 .hero__lead {
-    font-family: var(--flow-sans);
+    font-family: 'Times New Roman', Times, serif;
     font-size: 1.15rem;
-    color: #cbd5e1;
-    margin: 1.1rem 0 0.35rem;
+    color: #f9fafb;
+    margin: 0.6rem 0 0.35rem;
 }
 
 .hero__body--zip .hero__tagline {
