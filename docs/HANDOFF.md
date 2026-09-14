@@ -15,7 +15,11 @@ except where a later section supersedes them.
 
 ## Current work — 2026-09-14, Claude Code: "Serve handles the rest…" set like the headline
 
-**LOCAL EDITS ONLY — not committed or pushed.** Founder asked: the hero lead
+**PUSHED (`08a790a`) AND VERIFIED IN PRODUCTION (2026-09-14).** Production
+`style.css` matches the repo (ignoring CR). Computed style on
+servecleaning.com at 1280px, untagged and `?src=poster`: `.hero__lead` is
+Times New Roman, rgb(249, 250, 251), 18.4px, margin-top 9.6px (10px below the
+note). Not checked: a real phone. Founder asked: the hero lead
 line in the headline's face and colour (Times New Roman, #f9fafb) at its own
 size (1.15rem, weight unchanged), and a little closer to "Instantly quote &
 book in under 1 minute". One element serves the untagged, move-in and pro
