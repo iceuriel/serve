@@ -530,5 +530,31 @@ for (const ch of cssNoComments) {
 cssStrayAt ? fail('style.css closes a block that was never opened, near line ' + cssStrayAt)
            : ok('no stray closing brace');
 
+/* ---------------------------------------------------------------
+   One typeface on the front page (founder, 2026-09-14)
+   ---------------------------------------------------------------
+   The page was Inter everywhere except the hero headline, the booking flow and
+   "After you book", which were Times New Roman. It is Inter throughout now.
+   A serif survives only on the "Serve" wordmark, which matches the logo
+   artwork, and on two things the front page does not show. Adding a serif to
+   any other rule means adding it to this list, on purpose. */
+head('Front page is set in one typeface');
+const SERIF_ALLOWED = [
+  '.nav__logo',            // the wordmark, matching the logo SVG
+  '.footer__logo',         // the same wordmark in the footer
+  '.ticket__brand',        // the ticket pages' header (the front page's sample ticket overrides it)
+  '.serve-page-head h1',   // the /pricing and /services page titles
+];
+const serifRules = [...cssNoComments.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+  .filter(m => /font-family\s*:[^;]*(Times|Georgia|(?<!sans-)serif\b)/i.test(m[2]))
+  .map(m => m[1].trim());
+const straySerif = serifRules.filter(s => !SERIF_ALLOWED.includes(s));
+straySerif.length
+  ? fail('serif font set on ' + straySerif.join(', ') + ' — the front page is Inter throughout; add to SERIF_ALLOWED only on purpose')
+  : ok(serifRules.length + ' serif rules, all on the allowed list');
+/--flow-serif/.test(cssNoComments)
+  ? fail('--flow-serif is back — the booking flow is set in Inter, not Times New Roman')
+  : ok('no --flow-serif token');
+
 console.log('\n' + (fails ? 'FAILURES: ' + fails : 'ALL CHECKS PASSED'));
 process.exit(fails ? 1 : 0);

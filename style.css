@@ -346,13 +346,16 @@ a {
     text-align: center;
 }
 
+/* Sizes here and in the 640px / 1024px blocks are 0.875x what they were in
+   Times New Roman (until 2026-09-14). Inter runs about 14% wider, and at the
+   old sizes "One Less Thing to Manage" broke onto a third line at 1280px. At
+   0.875x the headline takes the room Times took and wraps where Times did. */
 .hero__headline {
-    font-size: 2rem;
+    font-size: 1.75rem;
     font-weight: 800;
     line-height: 1.2;
     margin-bottom: 1rem;
     color: #f9fafb;
-    font-family: 'Times New Roman', Times, serif;
 }
 
 /* The tagline now sits BELOW this, so the big gap moved down with it: these
@@ -370,7 +373,7 @@ a {
    read as part of the headline's breath rather than as a sign-off. Still
    quieter than .hero__sub — it is a phrase, not information. */
 .hero__tagline {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1.15rem;
     color: #cbd5e1;
     margin: 0 0 1.75rem;
@@ -508,7 +511,7 @@ a {
 /* "Serve handles the rest…" — the lead-in to the sub beneath it, so it takes
    the air above and sits close to what it introduces. */
 .hero__lead {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1.35rem;
     color: #f9fafb;
     margin: 2.25rem 0 0.35rem;
@@ -792,19 +795,22 @@ a {
 
 /* ============================================================
    BOOKING FLOW — Build → Price → Reserve
-   Editorial identity: Times New Roman across the flow.
+   One typeface: Inter, the same as the rest of the page. Until 2026-09-14
+   the flow was set in Times New Roman through a --flow-serif token; the
+   founder asked for the front page to read in one font, and that token is
+   gone. --flow-sans is only defined here, so outside the flow a rule that
+   uses it simply inherits the page's Inter.
    ============================================================ */
 .quote-section {
     padding: 4rem 1.25rem;
     background: var(--color-bg);
-    --flow-serif: 'Times New Roman', Times, Georgia, serif;
     --flow-sans:  'Inter', system-ui, sans-serif;
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
 }
 
-/* Buttons within the flow adopt the serif identity */
+/* Set explicitly: a <button> does not inherit the page font on its own. */
 .quote-section .btn {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1.05rem;
     letter-spacing: 0.01em;
 }
@@ -872,9 +878,10 @@ a {
     margin: 0 auto 1.75rem;
 }
 
+/* 0.875x its Times New Roman size, for the same reason as .hero__headline. */
 .flow-title {
-    font-family: var(--flow-serif);
-    font-size: 2rem;
+    font-family: var(--flow-sans);
+    font-size: 1.75rem;
     font-weight: 700;
     color: var(--color-dark);
     line-height: 1.12;
@@ -883,7 +890,7 @@ a {
 }
 
 .flow-sub {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1.1rem;
     color: var(--color-text-muted);
     line-height: 1.55;
@@ -962,7 +969,7 @@ a {
 }
 
 .postbook__title {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1.08rem;
     font-weight: 700;
     color: var(--color-dark);
@@ -1056,7 +1063,7 @@ a {
     border: none;
     color: var(--color-dark);
     cursor: pointer;
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     transition: background 0.15s;
 }
 .stepper__btn:hover:not(:disabled) { background: var(--color-bg-light); }
@@ -1066,7 +1073,7 @@ a {
 .stepper__value {
     min-width: 5rem;
     text-align: center;
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1.35rem;
     font-weight: 700;
     color: var(--color-dark);
@@ -1179,7 +1186,7 @@ a {
 
 .choice-card__title {
     display: block;
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1.1rem;
     font-weight: 700;
     color: var(--color-dark);
@@ -1188,7 +1195,7 @@ a {
 
 .choice-card__desc {
     display: block;
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 0.95rem;
     color: var(--color-text-muted);
     line-height: 1.5;
@@ -1200,7 +1207,7 @@ a {
 /* --- Inline capture (waitlist / overflow) --- */
 .inline-capture { margin-top: 1.25rem; }
 .inline-capture__copy {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1.05rem;
     color: var(--color-text);
     line-height: 1.6;
@@ -1238,7 +1245,6 @@ a {
 }
 
 .svmA-wrap h2 {
-    font-family: 'Times New Roman', Times, Georgia, serif;
     font-size: 1.9rem;
     font-weight: 700;
     line-height: 1.15;
@@ -1249,7 +1255,6 @@ a {
 }
 
 .svmA-lede {
-    font-family: 'Times New Roman', Times, Georgia, serif;
     font-size: 1.05rem;
     color: var(--color-text-muted);
     text-align: center;
@@ -1284,7 +1289,6 @@ a {
 }
 
 .svmA-wrap h3 {
-    font-family: 'Times New Roman', Times, Georgia, serif;
     font-size: 1.15rem;
     font-weight: 700;
     line-height: 1.25;
@@ -1293,14 +1297,12 @@ a {
 }
 
 .svmA-bubble p {
-    font-family: 'Times New Roman', Times, Georgia, serif;
     font-size: 1rem;
     color: var(--color-text);
     line-height: 1.6;
 }
 
 .svmA-foot {
-    font-family: 'Times New Roman', Times, Georgia, serif;
     font-size: 1rem;
     color: var(--color-text-muted);
     text-align: center;
@@ -1366,10 +1368,6 @@ a {
 .footer__contact p {
     font-size: 0.875rem;
     line-height: 1.6;
-}
-
-.footer__brand p {
-    font-family: 'Times New Roman', Times, serif;
 }
 
 .footer__contact a {
@@ -1454,7 +1452,7 @@ a {
 }
 
 .price-strike {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1.5rem;
     color: var(--color-text-muted);
     text-decoration: line-through;
@@ -1462,7 +1460,7 @@ a {
 }
 
 .price-main {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 3.25rem;
     font-weight: 700;
     color: var(--color-dark);
@@ -1471,7 +1469,7 @@ a {
 }
 
 .price-caption {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 0.95rem;
     color: var(--color-text-muted);
     font-style: italic;
@@ -1504,13 +1502,13 @@ a {
 .toggle-row:last-child { border-bottom: none; padding-bottom: 0; }
 
 .toggle-row__title {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1.05rem;
     font-weight: 700;
     color: var(--color-dark);
 }
 .toggle-row__price {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     color: var(--color-text-muted);
     margin-left: 0.5rem;
 }
@@ -1554,7 +1552,7 @@ a {
     outline-offset: 2px;
 }
 .freq-chip__name {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-weight: 700;
     font-size: 1rem;
     color: var(--color-dark);
@@ -1584,7 +1582,7 @@ a {
 .included-acc summary {
     cursor: pointer;
     padding: 1rem 1.15rem;
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1.05rem;
     font-weight: 700;
     color: var(--color-dark);
@@ -1599,7 +1597,7 @@ a {
 
 .included-acc__body {
     padding: 0 1.15rem 1.15rem;
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 0.95rem;
     color: var(--color-text);
     line-height: 1.6;
@@ -1626,7 +1624,7 @@ a {
     color: var(--color-accent);
     text-decoration: underline;
     cursor: pointer;
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1rem;
 }
 .ghost-capture__form {
@@ -1642,7 +1640,7 @@ a {
     color: #166534;
     font-weight: 600;
     margin-top: 0.25rem;
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
 }
 
 
@@ -1699,7 +1697,7 @@ a {
 }
 
 .scheduler-sub {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 0.95rem;
     color: var(--color-text-muted);
     line-height: 1.5;
@@ -1707,7 +1705,7 @@ a {
 }
 
 .scheduler-loading {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-style: italic;
     font-size: 0.95rem;
     color: var(--color-text-muted);
@@ -1723,7 +1721,7 @@ a {
 .scheduler-day:last-child { margin-bottom: 0; }
 
 .scheduler-day__head {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 0.95rem;
     font-weight: 400;
     color: var(--color-dark);
@@ -1737,7 +1735,7 @@ a {
 }
 
 .slot-chip {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 0.95rem;
     color: var(--color-dark);
     background: #fff;
@@ -1759,7 +1757,7 @@ a {
 }
 
 .scheduler-fallback-line {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 0.95rem;
     color: var(--color-text-muted);
     margin-top: 1.1rem;
@@ -1769,7 +1767,7 @@ a {
     background: none;
     border: none;
     padding: 0;
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 0.95rem;
     color: var(--color-accent);
     text-decoration: underline;
@@ -1779,7 +1777,7 @@ a {
 
 /* Link down to the "After you book" section */
 .reserve-aftercare {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 0.95rem;
     color: var(--color-text-muted);
     text-align: center;
@@ -1826,14 +1824,14 @@ a {
     margin: 0 auto 1rem;
 }
 .flow-confirm h2 {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1.7rem;
     font-weight: 700;
     color: #166534;
     margin-bottom: 0.5rem;
 }
 .flow-confirm p {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     color: #15803d;
     font-size: 1.05rem;
     line-height: 1.6;
@@ -1885,7 +1883,7 @@ a {
     border-radius: 50%;
     background: #d97706;
     color: #fff;
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1.6rem;
     font-weight: 700;
     display: flex;
@@ -1895,7 +1893,7 @@ a {
 }
 
 .flow-failed h2 {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1.7rem;
     font-weight: 700;
     color: #92400e;
@@ -1903,7 +1901,7 @@ a {
 }
 
 .flow-failed p {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     color: #78350f;
     font-size: 1.05rem;
     line-height: 1.6;
@@ -1940,7 +1938,7 @@ a {
     .choice-cards--condition { flex-direction: row; }
     .freq-options { grid-template-columns: repeat(4, 1fr); }
 
-    .flow-title { font-size: 2.5rem; }
+    .flow-title { font-size: 2.2rem; }
     .price-main { font-size: 3.75rem; }
 }
 
@@ -1971,7 +1969,7 @@ a {
     }
 
     .hero__headline {
-        font-size: 2.4rem;
+        font-size: 2.1rem;
     }
 
     .hero__image {
@@ -2085,7 +2083,7 @@ a {
     }
 
     .hero__headline {
-        font-size: 3rem;
+        font-size: 2.625rem;
     }
 
     .hero__skyline {
@@ -2363,7 +2361,7 @@ a {
     border-top: 2px solid var(--color-dark);
 }
 .tk-sec__h {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1.15rem;
     font-weight: 700;
     color: var(--color-dark);
@@ -2477,7 +2475,7 @@ a {
     padding: 0.9rem 1rem;
 }
 .tk-partner__name {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1.1rem;
     font-weight: 700;
     color: var(--color-dark);
@@ -2626,7 +2624,7 @@ a {
 .tk-seek__coin.is-3 { margin-left:  12px; animation-delay: 2.25s; }
 
 .tk-seek__title {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1.05rem;
     font-weight: 700;
     color: var(--color-dark);
@@ -3638,7 +3636,7 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
 }
 
 .pop-bubble__title {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1.1rem;
     font-weight: 700;
     margin: 0 0 0.4rem;
@@ -3721,7 +3719,7 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
 
 .swap__col--after { text-align: left; }
 .swap__line {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1.6rem;
     font-weight: 700;
     line-height: 1.25;
@@ -3752,7 +3750,7 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
     margin: 0 0 1.25rem;
 }
 .record__pull {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1.35rem;
     font-weight: 700;
     line-height: 1.35;
@@ -3786,7 +3784,7 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
     border-bottom: 1px solid var(--color-border);
 }
 .ticket__brand {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1.15rem;
     font-weight: 700;
     color: var(--color-dark);
@@ -3800,7 +3798,7 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
     font-variant-numeric: tabular-nums;
 }
 .ticket__service {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1.4rem;
     font-weight: 700;
     color: var(--color-dark);
@@ -3958,7 +3956,7 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
 .cat-card--live .cat-card__icon svg { stroke: var(--color-dark); }
 
 .cat-card__name {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1.15rem;
     font-weight: 700;
     color: var(--color-text-muted);
@@ -4015,7 +4013,7 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
     margin: 0 0 1rem;
 }
 .network__note {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1.2rem;
     font-weight: 700;
     color: var(--color-dark);
@@ -4032,7 +4030,7 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
     stroke: var(--color-dark);
 }
 .nw-hub-label {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 17px;
     font-weight: 700;
     fill: #fff;
@@ -4055,7 +4053,7 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
 }
 .closer__inner { max-width: 640px; margin: 0 auto; }
 .closer__title {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1.9rem;
     font-weight: 700;
     line-height: 1.25;
@@ -4131,7 +4129,7 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
 /* "Serve for Uriel" — the name sits beside the wordmark rather than under it,
    so the bar reads as one phrase. */
 .portal__for {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1.05rem;
     color: var(--color-text-muted);
     margin-left: 0.4rem;
@@ -4175,7 +4173,7 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
 }
 
 .portal__h {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1.15rem;
     font-weight: 700;
     color: var(--color-dark);
@@ -4205,7 +4203,7 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
 }
 .pb__sum::-webkit-details-marker { display: none; }
 .pb__title {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1.05rem;
     font-weight: 700;
     color: var(--color-dark);
@@ -4598,7 +4596,7 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
     color: var(--color-accent);
 }
 .plan__title {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1.05rem;
     font-weight: 700;
     color: var(--color-dark);
@@ -4719,7 +4717,7 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
     color: var(--color-accent);
 }
 .mplan__title {
-    font-family: var(--flow-serif);
+    font-family: var(--flow-sans);
     font-size: 1.05rem;
     font-weight: 700;
     color: var(--color-dark);
