@@ -156,13 +156,15 @@ t('storage blocked still derives the skin from the URL',
 
 /* ============================================================ */
 console.log('\n=== 2b. the ZIP-check hero body, as authored ===');
-/* Authored in this order, both inside the hero section. */
+/* Authored in this order, all inside the hero section. The ZIP check sits
+   BETWEEN the two blocks, shared by every hero. */
 const defaultAt   = HTML.indexOf('id="hero-body-default"');
 const zipBodyAt   = HTML.indexOf('id="hero-body-zip"');
 const heroEnd     = HTML.indexOf('</section>', zipBodyAt);
 const defaultBody = defaultAt !== -1 && zipBodyAt > defaultAt ? HTML.slice(defaultAt, zipBodyAt) : '';
 const moveinBody  = zipBodyAt !== -1 && heroEnd !== -1 ? HTML.slice(zipBodyAt, heroEnd) : '';
 t('both hero bodies exist, default first', defaultBody !== '' && moveinBody !== '', [defaultAt, zipBodyAt]);
+const heroHtml    = defaultAt !== -1 && heroEnd !== -1 ? HTML.slice(HTML.lastIndexOf('<section', defaultAt), heroEnd) : '';
 
 /* One body for both tagged audiences, so the copy under the two headlines
    cannot drift apart. */
@@ -173,21 +175,29 @@ t('move-in and pro name the SAME body', skinsHere.movein.body === 'hero-body-zip
 t('the ZIP-check body ships hidden (no JS -> the authored hero)',
   /<div[^>]*id="hero-body-zip"[^>]*\shidden[\s>]/.test(HTML));
 t('the default body does not', !/<div[^>]*id="hero-body-default"[^>]*\shidden[\s>]/.test(HTML));
-t('the default body keeps the Instant Booking button',
-  /class="btn btn--primary[^"]*">Instant Booking<\/a>/.test(defaultBody));
+t('the ZIP check is authored once, outside both blocks',
+  (HTML.match(/id="hero-zip-form"/g) || []).length === 1 &&
+  !/hero-zip-form/.test(moveinBody) && defaultBody.indexOf('id="hero-zip-form"') > defaultBody.indexOf('</div>'));
+t('the hero has no Instant Booking button — the ZIP check is every CTA',
+  !/Instant Booking/.test(heroHtml));
+t('the ZIP input has no name, so a no-JS submit never puts the ZIP in the URL',
+  /<input[^>]*id="hero-zip"/.test(HTML) && !/<input[^>]*id="hero-zip"[^>]*\sname=/.test(HTML));
 
 /* The hero asks Build's own question, in Build's own words. */
 const buildLabel = (HTML.match(/<label class="field-label" for="zip">([^<]+)<\/label>/) || [])[1];
 const heroLabel  = (HTML.match(/<label[^>]*for="hero-zip">([^<]+)<\/label>/) || [])[1];
 t('hero ZIP label is word for word the Build label', !!buildLabel && heroLabel === buildLabel, [heroLabel, buildLabel]);
 
-const order = ['for="hero-zip"', 'Instantly quote &amp; book in under 1 minute', 'Serve handles the rest',
-               'Serve manages, coordinates, and books your service', 'Made to Serve <strong>your</strong> needs']
-  .map(s => moveinBody.indexOf(s));
-t('ZIP-check body reads: ZIP check, under-a-minute, handles the rest, manages, tagline',
-  order.every(i => i !== -1) && order.every((i, n) => n === 0 || i > order[n - 1]), order);
-t('the ZIP-check body has no Instant Booking button — the ZIP check is its CTA',
-  !/Instant Booking/.test(moveinBody));
+/* Read in order through the hero: the authored hero is the first four, a
+   skin swaps the first for the last two. */
+const order = ['id="hero-body-default"', 'Serve manages, coordinates, and books your service', 'for="hero-zip"',
+               'Instantly quote &amp; book in under 1 minute', 'Serve handles the rest', 'id="hero-body-zip"',
+               'Serve manages, coordinates, and books your service', 'Made to Serve <strong>your</strong> needs'];
+let cursor = 0;
+const at = order.map(s => { const i = heroHtml.indexOf(s, cursor); if (i !== -1) cursor = i + s.length; return i; });
+t('hero reads: [manages] ZIP check, under-a-minute, handles the rest, [manages, tagline]',
+  at.every(i => i !== -1), at);
+t('the authored hero has no tagline', !/hero__tagline/.test(defaultBody.slice(0, defaultBody.indexOf('</div>'))));
 
 /* ============================================================ */
 console.log('\n=== 2c. the hero ZIP check answers through Build ===');

@@ -13,6 +13,36 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-14, Claude Code: the authored hero gets the ZIP check too
+
+**LOCAL EDITS ONLY — not committed or pushed.** Founder asked, for the
+untagged hero: headline in Times New Roman with a comma ("A Clean Home, / One
+Less Thing to Manage"); the ZIP check in place of the Instant Booking button;
+"Made to Serve your needs" removed; "Serve handles the rest…" under "Instantly
+quote & book in under 1 minute", styled as on the skins.
+- `index.html` — the ZIP form, the under-a-minute note and "Serve handles the
+  rest…" are now authored ONCE, shared by every hero. `#hero-body-default` now
+  holds only the sub (above the ZIP check); `#hero-body-zip` holds the sub and
+  tagline (below "Serve handles the rest…"). HERO_SKINS' swap is unchanged, so
+  move-in and pro render exactly as before. The ZIP input lost its `name` and
+  the form gained `action="#quote"`: now that the form is visible without JS,
+  a no-JS submit jumps to Build instead of putting the ZIP in the URL.
+- `style.css` — `.hero__headline` is Times at 2 / 2.4 / 3rem for every hero
+  (the segment-only rule from earlier today is gone); `.hero-zip + .hero__note`
+  replaces the zip-body-scoped note margin; the default sub gets 1.25rem below.
+- `script.js` — comments only. The hero has no pulsing button any more; only
+  the nav CTA pulses.
+- Tests: `SERIF_ALLOWED` now lists `.hero__headline`; pulse count 2 → 1;
+  headline string has the comma; segment-and-skins 2b rewritten for the shared
+  form (authored once, outside both blocks; no Instant Booking in the hero; no
+  input name; reading order; no tagline on the authored hero). Each new
+  assertion was broken on purpose and failed, then passed when restored.
+Checked: `node tests/run-all.js` all 31 pass; headless screenshots of the
+untagged, `?src=deed` and `?src=poster` heroes at 1400px, and untagged at
+540px, look right. Not checked: typing a ZIP in a real browser on the untagged
+hero (the wiring is unchanged and unit-tested), a real phone. Next: founder
+review, then commit and push (no Apps Script change).
+
 ## Current work — 2026-09-14, Claude Code: skin headlines in Times, ZIP placeholder
 
 **PUSHED (`d3238e7`) AND VERIFIED IN PRODUCTION (2026-09-14).** Production

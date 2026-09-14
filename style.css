@@ -346,32 +346,17 @@ a {
     text-align: center;
 }
 
-/* Sizes here and in the 640px / 1024px blocks are 0.875x what they were in
-   Times New Roman (until 2026-09-14). Inter runs about 14% wider, and at the
-   old sizes "One Less Thing to Manage" broke onto a third line at 1280px. At
-   0.875x the headline takes the room Times took and wraps where Times did. */
+/* Times New Roman again (2026-09-14, founder's call), matching the logo
+   wordmark. It was Inter for a day at 0.875x these sizes, because Inter runs
+   about 14% wider; the sizes here and in the 640px / 1024px blocks are the
+   Times ones. */
 .hero__headline {
-    font-size: 1.75rem;
+    font-family: 'Times New Roman', Times, serif;
+    font-size: 2rem;
     font-weight: 800;
     line-height: 1.2;
     margin-bottom: 1rem;
     color: #f9fafb;
-}
-
-/* The move-in and pro skin headlines are set in Times New Roman (2026-09-14),
-   matching the logo wordmark; the default headline stays Inter. Times runs
-   narrower, so these take back the 1/0.875 the Inter sizes gave up. */
-body[data-segment="movein"] .hero__headline, body[data-segment="pro"] .hero__headline {
-    font-family: 'Times New Roman', Times, serif;
-    font-size: 2rem;
-}
-@media (min-width: 640px) {
-    body[data-segment="movein"] .hero__headline,
-    body[data-segment="pro"] .hero__headline { font-size: 2.4rem; }
-}
-@media (min-width: 1024px) {
-    body[data-segment="movein"] .hero__headline,
-    body[data-segment="pro"] .hero__headline { font-size: 3rem; }
 }
 
 /* The tagline now sits BELOW this, so the big gap moved down with it: these
@@ -524,8 +509,14 @@ body[data-segment="movein"] .hero__headline, body[data-segment="pro"] .hero__hea
     .hero-zip__check { transition: none; }
 }
 
-.hero__body--zip .hero__note {
+.hero-zip + .hero__note {
     margin-top: 0.35rem;
+}
+
+/* On the authored hero the sub sits above the ZIP check; give the check the
+   air the old tagline gave the button. */
+.hero__body--default .hero__sub {
+    margin-bottom: 1.25rem;
 }
 
 /* "Serve handles the rest…" — the lead-in to the sub beneath it, so it sits
@@ -1991,7 +1982,7 @@ body[data-segment="movein"] .hero__headline, body[data-segment="pro"] .hero__hea
     }
 
     .hero__headline {
-        font-size: 2.1rem;
+        font-size: 2.4rem;
     }
 
     .hero__image {
@@ -2105,7 +2096,7 @@ body[data-segment="movein"] .hero__headline, body[data-segment="pro"] .hero__hea
     }
 
     .hero__headline {
-        font-size: 2.625rem;
+        font-size: 3rem;
     }
 
     .hero__skyline {

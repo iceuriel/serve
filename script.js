@@ -193,11 +193,12 @@ const SERVE_ATTRIBUTION = readAttribution();
    Same page, same offer. The headline changes, because that is the line
    deciding whether someone reads the second one. A skin MAY also name a
    `body`: the id of an alternate block authored hidden in index.html, shown
-   in place of #hero-body-default. Move-in and pro both name #hero-body-zip
-   (2026-09-14): a hero that leads with a ZIP check instead of the button,
-   which the booking flow below wires to Build. They share one body so the
-   copy under the two headlines cannot drift apart. A skin with no body keeps
-   the authored one, button and all.
+   in place of #hero-body-default. Every hero leads with the same ZIP check
+   (2026-09-14), authored once; the blocks only decide where the sub sits.
+   The default block holds the sub ABOVE the ZIP check; #hero-body-zip, named
+   by both move-in and pro, holds the sub and the tagline BELOW "Serve handles
+   the rest…". They share one block so the copy under the two headlines cannot
+   drift apart. A skin with no body keeps the authored one.
 
    Selection is FIRST touch, never last. Someone who arrives on a deed link and
    later scans a poster QR is still a mover — the poster did not change why they
@@ -1006,9 +1007,8 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
        cancels the jump. A ZIP we do not serve never moves the page; it offers
        the waitlist link instead.
 
-       Only visible on the move-in skin, but wired on every load: an input
-       nobody can see receives no events. Guarded, so a page without the hero
-       markup loses nothing. */
+       On every hero since 2026-09-14 — untagged, move-in and pro alike.
+       Guarded, so a page without the hero markup loses nothing. */
     const heroZipForm     = $('hero-zip-form');
     const heroZipInput    = $('hero-zip');
     const heroZipStatus   = $('hero-zip-status');

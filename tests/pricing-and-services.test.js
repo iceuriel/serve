@@ -333,14 +333,15 @@ t('every mark is one of the three legal codes',
 
 /* ---------- 5. the pulse ---------- */
 console.log('\n=== 5. the CTA pulse ===');
-t('hero CTA pulses', /class="btn btn--primary serve-pulse"/.test(INDEX));
+/* The hero has had no button since 2026-09-14 — the ZIP check is its CTA. */
+t('the hero has no Instant Booking button to pulse', !/class="btn btn--primary serve-pulse"/.test(INDEX));
 t('header CTA pulses', /class="nav__cta serve-pulse"/.test(INDEX));
 /* Mid-flow buttons must NOT — a pulse on "See my price" reads as an error. */
 ['build-submit', 'to-reserve', 'reserve-submit'].forEach(id => {
   const tag = INDEX.slice(INDEX.indexOf('id="' + id + '"') - 200, INDEX.indexOf('id="' + id + '"'));
   t(id + ' does not pulse', !/serve-pulse/.test(tag));
 });
-t('exactly two elements pulse on the homepage', (INDEX.match(/serve-pulse/g) || []).length === 2);
+t('exactly one element pulses on the homepage', (INDEX.match(/serve-pulse/g) || []).length === 1);
 t('the halo is a box-shadow, never a transform — scaling softens the label',
   /@keyframes serve-breathe-hero[\s\S]{0,400}box-shadow/.test(CSS) &&
   !/@keyframes serve-breathe-[a-z]+[\s\S]{0,400}transform:\s*scale/.test(CSS));
@@ -413,7 +414,7 @@ console.log('\n=== 7a. the hero says what Serve is ===');
 /* Two lines, deliberately broken rather than left to wrap: the break is the
    lockup, and where it lands must not depend on the viewport. */
 t('the headline is the two-line lockup',
-  INDEX.includes('<h1 class="hero__headline">A Clean Home<br>One Less Thing to Manage</h1>'));
+  INDEX.includes('<h1 class="hero__headline">A Clean Home,<br>One Less Thing to Manage</h1>'));
 /* Read the headline's own text and check it, rather than pattern-matching
    around it — the previous attempt lost its backslashes to the shell, and an
    unescaped dot matches every character, so it failed on correct markup. */
