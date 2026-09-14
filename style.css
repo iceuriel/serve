@@ -372,11 +372,12 @@ a {
 /* The signature line. It sat under the CTA until 2026-09-07 and now sits
    between the headline and the subhead, so the margins flipped: it needs to
    read as part of the headline's breath rather than as a sign-off. Still
-   quieter than .hero__sub — it is a phrase, not information. */
+   quieter than .hero__sub — it is a phrase, not information. Set like
+   .hero__lead since 2026-09-14: the headline's Times and white, its own size. */
 .hero__tagline {
-    font-family: var(--flow-sans);
+    font-family: 'Times New Roman', Times, serif;
     font-size: 1.15rem;
-    color: #cbd5e1;
+    color: #f9fafb;
     margin: 0 0 1.75rem;
 }
 

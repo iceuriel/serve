@@ -13,6 +13,18 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-14, Claude Code: "Made to Serve your needs" set like the lead
+
+**LOCAL EDITS ONLY — not committed or pushed.** Founder asked the tagline to
+match "Serve handles the rest…": Times New Roman and #f9fafb, size unchanged.
+It now appears only in `#hero-body-zip` (move-in and pro); the untagged hero
+has had no tagline since `2fe2bce`.
+- `style.css` — `.hero__tagline`: Times, #f9fafb (1.15rem, margins and the
+  bold white "your" unchanged).
+- `tests/static-checks.test.js` — `.hero__tagline` added to `SERIF_ALLOWED`.
+Checked: `node tests/run-all.js` all 31 pass; headless screenshot at 1400px
+with `?src=poster` looks right.
+
 ## Current work — 2026-09-14, Claude Code: "Serve handles the rest…" set like the headline
 
 **PUSHED (`08a790a`) AND VERIFIED IN PRODUCTION (2026-09-14).** Production
