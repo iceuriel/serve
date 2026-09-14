@@ -63,8 +63,19 @@
        to drop the token. */
     var LOAD = API + '?id=' + encodeURIComponent(id) + '&t=' + encodeURIComponent(token);
 
-    fetch(LOAD)
-        .then(function (r) { return r.json(); })
+    /* r44. THE FIRST ANSWER MAY ALREADY BE ON ITS WAY. h.html starts this
+       request from its <head>, before the stylesheet and the scripts have
+       downloaded. Adopted only for exactly the address this file would have
+       asked for; anything else — no early start, a different address — asks
+       here, exactly as before. Taken once, so a later load asks fresh. */
+    function firstLoad(url) {
+        var early = window.ServeFirstLoad;
+        window.ServeFirstLoad = null;
+        if (early && early.url === url && early.answer) return early.answer;
+        return fetch(url).then(function (r) { return r.json(); });
+    }
+
+    firstLoad(LOAD)
         .then(function (d) {
             /* view === portal, not merely ok. An older deployment has no
                portal route, so doGet falls through to the HEALTH CHECK, which
@@ -78,6 +89,7 @@
             }
             model = d;
             start();
+            warmSlots(d);
             if (typeof ServeLive !== 'undefined') ServeLive.watch({
                 url: LOAD,
                 view: 'portal', root: bodyEl, initial: d,
@@ -134,6 +146,48 @@
     }
 
     /* ========================================================
+       THE SCHEDULE, ASKED FOR BEFORE THE CLICK  —  r44
+       ========================================================
+       "Choose a time" and "Move this visit" used to start the availability
+       request on click, and the customer watched "Loading times…" for as long
+       as the feed took. Now, when the page has something that could use it —
+       an open plan, or a visit that can still be moved — it asks once in the
+       background as soon as the page has painted.
+
+       NEVER OLDER THAN A MINUTE, which is how long the feed's own response
+       may already sit in the browser's cache. A click inside that window
+       uses the answer in hand; a later click asks again. An EMPTY answer is
+       not kept — it is as likely to be a slow server as a full calendar, and
+       the click deserves its own attempt. Anything that changes what is open
+       (a booking made, moved or cancelled) forgets it: see postWrite.
+       ======================================================== */
+    var SLOTS_FRESH_MS = 60000;
+    var CAPACITY_KINDS = { plan_confirm: true, reschedule: true, cancel: true };
+    var slotsWarm = null;   // { at: ms, promise }
+
+    function loadSlots() {
+        if (slotsWarm && Date.now() - slotsWarm.at < SLOTS_FRESH_MS) return slotsWarm.promise;
+        var entry = { at: Date.now(), promise: ServeSlots.load(SLOTS) };
+        slotsWarm = entry;
+        entry.promise.then(function (slots) {
+            if (!slots.length && slotsWarm === entry) slotsWarm = null;
+        });
+        return entry.promise;
+    }
+
+    /* The same two tests the page uses to draw those controls: planCard
+       needs a frequency, and every visit neither finished nor called off gets
+       scheduleControls. Asking on anything looser would warm a feed nothing
+       on screen can use. */
+    function warmSlots(d) {
+        if (typeof ServeSlots === 'undefined' || !d) return;
+        var movable = (d.bookings || []).some(function (b) {
+            return b && !b.completed && !b.cancelled;
+        });
+        if ((d.plan && d.plan.frequency) || movable) loadSlots();
+    }
+
+    /* ========================================================
        SAVING
        ========================================================
        One endpoint for both kinds of write. The server proves the target
@@ -156,7 +210,13 @@
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
             body: JSON.stringify(body),
         })
-        .then(function (r) { return r.json(); });
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            /* What is open has just changed, whatever the answer says — a
+               refused move can still mean somebody else took the time. */
+            if (CAPACITY_KINDS[payload.kind]) slotsWarm = null;
+            return d;
+        });
     }
 
     /* Ask the server what this account looks like now, and repaint.
@@ -431,7 +491,7 @@
             pickWrap.hidden = false;
             pickWrap.textContent = 'Loading times…';
 
-            ServeSlots.load(SLOTS).then(function (slots) {
+            loadSlots().then(function (slots) {
                 pickWrap.textContent = '';
                 cta.hidden = true;
                 /* An empty feed is an ordinary outcome, not an error screen:
@@ -596,7 +656,7 @@
             pickWrap.hidden = false;
             pickWrap.textContent = 'Loading times…';
 
-            ServeSlots.load(SLOTS).then(function (slots) {
+            loadSlots().then(function (slots) {
                 pickWrap.textContent = '';
                 /* Unreachable, slow, or genuinely nothing open all arrive here
                    as the same empty list, and mean the same thing to a

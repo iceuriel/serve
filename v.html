@@ -27,6 +27,30 @@
     <meta name="robots" content="noindex, nofollow, noarchive">
     <meta name="referrer" content="no-referrer">
     <title>Serve Partners</title>
+    <!-- START THE REQUEST NOW, NOT AFTER EVERYTHING ELSE HAS LOADED.  r44
+         Page scripts sit at the end of <body>, so the request for this page's
+         data used to begin only once the stylesheet and every script had
+         downloaded — on a phone opening a link from a text, the slowest stretch
+         of the whole load, spent doing nothing. This starts it immediately, in
+         parallel with them. The page script adopts the answer only if it would
+         have asked for exactly the same address, and asks again itself if not,
+         so a mismatch costs the head start and never the page.
+         It must stay ABOVE the stylesheet link: a script after a stylesheet
+         waits for that stylesheet. It reads nothing the page script does not
+         already read, and stores nothing. -->
+    <script>
+    (function () {
+        try {
+            var q = new URLSearchParams(location.search);
+            var id = q.get('id') || '', t = q.get('t') || '';
+            if (!id || !t) return;
+            var url = '/api/vendor?id=' + encodeURIComponent(id) + '&t=' + encodeURIComponent(t);
+            var answer = fetch(url).then(function (r) { return r.json(); });
+            answer.catch(function () {});   /* reported by the page script, not here */
+            window.ServeFirstLoad = { url: url, answer: answer };
+        } catch (_) { /* no early start; the page script asks as it always did */ }
+    })();
+    </script>
     <link rel="icon" type="image/x-icon" href="images/favicon.ico">
     <link rel="icon" type="image/svg+xml" href="images/favicon.svg">
     <link rel="apple-touch-icon" href="images/apple-touch-icon.png">
@@ -40,7 +64,33 @@
             <span class="portal__for" id="v-for"></span>
         </header>
 
-        <p class="ticket__state" id="v-state">Loading&hellip;</p>
+        <!-- THE SHAPE OF THE PAGE, BEFORE ITS DATA.  r44
+             Painted with the first frame instead of a bare "Loading…". Nothing
+             in it can outlive the load: fail() writes its message over the
+             whole element and start() hides it. -->
+        <div class="ticket__state" id="v-state" role="status">
+            <span class="sr-only">Loading your jobs&hellip;</span>
+            <div class="skel" aria-hidden="true">
+                <div class="skel__tabs">
+                    <span class="skel__bar skel__bar--tab"></span>
+                    <span class="skel__bar skel__bar--tab"></span>
+                </div>
+                <span class="skel__bar skel__bar--heading"></span>
+                <div class="skel__card">
+                    <span class="skel__bar skel__bar--line"></span>
+                    <span class="skel__bar skel__bar--short"></span>
+                </div>
+                <div class="skel__card">
+                    <span class="skel__bar skel__bar--line"></span>
+                    <span class="skel__bar skel__bar--short"></span>
+                </div>
+                <div class="skel__card">
+                    <span class="skel__bar skel__bar--line"></span>
+                    <span class="skel__bar skel__bar--short"></span>
+                </div>
+                <p class="skel__slow">Still loading&hellip; this can take a few seconds.</p>
+            </div>
+        </div>
 
         <nav class="portal__nav" id="v-nav" hidden aria-label="Sections"></nav>
 

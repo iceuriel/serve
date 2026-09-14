@@ -55,10 +55,21 @@
 
     roleEl.textContent = view === 'partner' ? 'Job ticket' : 'Your clean';
 
-    fetch(API + '?id=' + encodeURIComponent(id) +
-                '&t=' + encodeURIComponent(token) +
-                '&view=' + view)
-        .then(function (r) { return r.json(); })
+    /* r44. THE FIRST ANSWER MAY ALREADY BE ON ITS WAY. j.html starts this
+       request from its <head>, before the stylesheet and the scripts have
+       downloaded. Adopted only for exactly the address this file would have
+       asked for; anything else — no early start, a different address — asks
+       here, exactly as before. Taken once, so a later load asks fresh. */
+    function firstLoad(url) {
+        var early = window.ServeFirstLoad;
+        window.ServeFirstLoad = null;
+        if (early && early.url === url && early.answer) return early.answer;
+        return fetch(url).then(function (r) { return r.json(); });
+    }
+
+    firstLoad(API + '?id=' + encodeURIComponent(id) +
+                    '&t=' + encodeURIComponent(token) +
+                    '&view=' + view)
         .then(function (d) {
             if (!d || d.ok !== true) {
                 /* Deliberately the same message for a bad token and a missing

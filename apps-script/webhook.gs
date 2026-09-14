@@ -1,7 +1,21 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-13  ·  master  ·  r43 — a booked visit can be moved or called off
+ * VERSION STAMP:  2026-09-13  ·  master  ·  r44 — one read per tab, per request
+ *
+ * r44 = THE PORTAL WAS SLOW BECAUSE IT READ THE SAME SHEETS OVER AND OVER.
+ *      A customer with five bookings cost 211 SpreadsheetApp calls to open —
+ *      JOBS read seventeen times, the whole photo tab once per booking — and
+ *      every one of those is a round trip to Google. Nothing on the page could
+ *      show until the last of them came back.
+ *
+ *      NOW: a request reads each tab at most once (readTable, shared across the
+ *      request by doGet only), opens the Ops workbook once, asks each
+ *      workbook its timezone once, and builds every booking from the JOBS row
+ *      already in hand (bookingFromRow). WHAT ANY RESPONSE CONTAINS IS
+ *      UNCHANGED — this release changes how often the sheet is asked, never
+ *      what is sent. See "ONE READ PER TAB, PER REQUEST" for why POSTs never
+ *      share a snapshot.
  *
  * r40 = A PLAN IS FOUND BY lead_id, NOT BY contact_id. The r39 backfill wrote
  *      ten plans and not one of them appeared in a portal. They were correct
@@ -1067,7 +1081,14 @@ const EVENTS_HEADERS = [
    3. ENTRY POINTS
    ============================================================ */
 
+/* r44. Every POST runs in a request scope WITHOUT shared snapshots: it may
+   write and then read the same tab, and must see its own write. See
+   "ONE READ PER TAB, PER REQUEST". */
 function doPost(e) {
+  return withRequestScope(false, function () { return routePost(e); });
+}
+
+function routePost(e) {
   const lock = LockService.getScriptLock();
   var writeLockHeld = false;
   try { lock.waitLock(20000); writeLockHeld = true; } catch (lockErr) { /* ordinary lead intake keeps its existing fallback */ }
@@ -1349,7 +1370,13 @@ function handleEvent(ss, data, eventType) {
 }
 
 /** Health check — open the /exec URL in a browser. */
+/* r44. A GET writes nothing, so every tab it reads is read once and shared
+   for the rest of the request. See "ONE READ PER TAB, PER REQUEST". */
 function doGet(e) {
+  return withRequestScope(true, function () { return routeGet(e); });
+}
+
+function routeGet(e) {
   /* One job ticket, rendered by /j on the site. Everything else is the health
      check that has always been here. */
   var p = (e && e.parameter) || {};
@@ -1358,7 +1385,7 @@ function doGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-13 r43" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-13 r44" });
 }
 
 
@@ -1638,27 +1665,32 @@ function validScopeKeys(beds, baths) {
  * caller that will forget to.
  */
 function getBooking(ss, jobId) {
-  var jobs = requireTab(ss, JOBS_TAB);
-  var h = sheetHeaders(jobs);
-  var idCol = h.indexOf("job_id");
+  var jobs = requireTable(ss, JOBS_TAB);
+  var idCol = jobs.headers.indexOf("job_id");
   if (idCol === -1) return null;
 
-  var last = jobs.getLastRow();
-  if (last < 2) return null;
-
-  var ids = jobs.getRange(2, idCol + 1, last - 1, 1).getValues();
-  var row = -1;
-  for (var i = 0; i < ids.length; i++) {
-    if (String(ids[i][0]).trim() === String(jobId).trim()) { row = i + 2; break; }
+  var want = String(jobId).trim();
+  for (var i = 0; i < jobs.rows.length; i++) {
+    if (String(jobs.rows[i][idCol]).trim() === want) {
+      return bookingFromRow(jobs.headers, jobs.rows[i], sheetTimeZone(ss));
+    }
   }
-  if (row === -1) return null;
+  return null;
+}
 
-  var values = jobs.getRange(row, 1, 1, h.length).getValues()[0];
+/**
+ * One JOBS row as a booking. r44: split out of getBooking so that a caller
+ * already holding the rows — every booking of one contact, every job of one
+ * vendor — builds each booking from the row in hand, instead of searching JOBS
+ * again once per booking.
+ *
+ * `h` is the JOBS header row and `tz` MUST be the Leads workbook's own
+ * timezone, sheetTimeZone(ss). r32: Sheets built these Dates from the
+ * SPREADSHEET timezone, so that is the only one that reads them back as they
+ * were typed.
+ */
+function bookingFromRow(h, values, tz) {
   var f = function (name) { var c = h.indexOf(name); return c === -1 ? "" : values[c]; };
-
-  /* r32: Sheets built these Dates from the SPREADSHEET timezone, so that is
-     the only one that reads them back as they were typed. */
-  var tz = sheetTimeZone(ss);
 
   var beds  = Number(f("beds"));
   var baths = Number(f("baths"));
@@ -1756,14 +1788,13 @@ function getBookingAccess(ss, propertyId) {
                 priorityRooms: "", skipAreas: "", productNotes: "", timingNotes: "" };
   if (!propertyId) return empty;
   try {
-    var mt = ss.getSheetByName(PROPERTY_MEMORY_TAB);
+    var mt = readTable(ss, PROPERTY_MEMORY_TAB);
     if (!mt) return empty;
-    var mh = sheetHeaders(mt);
+    var mh = mt.headers;
     var mi = mh.indexOf("property_id");
-    var ml = mt.getLastRow();
-    if (mi === -1 || ml < 2) return empty;
+    if (mi === -1 || !mt.rows.length) return empty;
 
-    var rows = mt.getRange(2, 1, ml - 1, mh.length).getValues();
+    var rows = mt.rows;
     for (var k = 0; k < rows.length; k++) {
       if (String(rows[k][mi]).trim() !== String(propertyId).trim()) continue;
       var m = {};
@@ -1796,15 +1827,14 @@ function getBookingAccess(ss, propertyId) {
 function getBookingInstructions(ss, jobId) {
   var out = [];
   try {
-    var t = ss.getSheetByName(INSTRUCTIONS_TAB);
+    var t = readTable(ss, INSTRUCTIONS_TAB);
     if (!t) return out;
-    var h = sheetHeaders(t);
-    var last = t.getLastRow();
-    if (last < 2) return out;
+    var h = t.headers;
+    if (!t.rows.length) return out;
     var idx = function (n) { return h.indexOf(n); };
     if (idx("job_id") === -1) return out;
 
-    var rows = t.getRange(2, 1, last - 1, h.length).getValues();
+    var rows = t.rows;
     for (var i = 0; i < rows.length; i++) {
       if (String(rows[i][idx("job_id")]).trim() !== String(jobId).trim()) continue;
       var text = String(rows[i][idx("instruction")] || "").trim();
@@ -2117,12 +2147,19 @@ function isDateValue(v) {
  * before r32, instead of formatting through a timezone that may be wrong.
  */
 function sheetTimeZone(ss) {
+  /* r44. Once per workbook per request — getBooking used to ask on every
+     booking. A failure is remembered too, so one response never formats
+     half its dates through one zone and half through another. */
+  var zones = REQUEST_SCOPE && ss ? REQUEST_SCOPE.zones : null;
+  if (zones && zones.has(ss)) return zones.get(ss);
+  var tz = "";
   try {
-    var tz = ss && ss.getSpreadsheetTimeZone ? ss.getSpreadsheetTimeZone() : "";
-    return tz || "";
+    tz = (ss && ss.getSpreadsheetTimeZone ? ss.getSpreadsheetTimeZone() : "") || "";
   } catch (_) {
-    return "";
+    tz = "";
   }
+  if (zones) zones.set(ss, tz);
+  return tz;
 }
 
 /** A date cell as `YYYY-MM-DD`, whether it arrived as text or as a Date. */
@@ -2417,18 +2454,16 @@ function buildVendorTicketModel(ss, booking) {
 function getContact(ss, contactId) {
   var want = String(contactId || "").trim();
   if (!want) return null;
-  var sheet = ss.getSheetByName(LEADS_TAB);
-  if (!sheet) return null;
-  var h = sheetHeaders(sheet);
+  var leads = readTable(ss, LEADS_TAB);
+  if (!leads) return null;
+  var h = leads.headers;
   var ci = h.indexOf("contact_id");
   var li = h.indexOf("lead_id");
   /* Without the column there is no portal. It is documented as a one-line
      addition to LEADS rather than guessed at from an email. */
   if (ci === -1 || li === -1) return null;
 
-  var last = sheet.getLastRow();
-  if (last < 2) return null;
-  var rows = sheet.getRange(2, 1, last - 1, h.length).getValues();
+  var rows = leads.rows;
   for (var i = 0; i < rows.length; i++) {
     if (String(rows[i][ci]).trim() !== want) continue;
     var name = String(rows[i][h.indexOf("name")] || "").trim();
@@ -2453,23 +2488,23 @@ function getContact(ss, contactId) {
 function getContactBookings(ss, leadId) {
   var want = String(leadId || "").trim().toLowerCase();
   if (!want) return [];
-  var jobs = requireTab(ss, JOBS_TAB);
-  var h = sheetHeaders(jobs);
+  var jobs = requireTable(ss, JOBS_TAB);
+  var h = jobs.headers;
   var li = h.indexOf("lead_id");
   var idc = h.indexOf("job_id");
   if (li === -1 || idc === -1) return [];
 
-  var last = jobs.getLastRow();
-  if (last < 2) return [];
-  var rows = jobs.getRange(2, 1, last - 1, h.length).getValues();
-
+  /* r44. Each booking is built from ITS OWN row, already in hand. This used to
+     call getBooking(id), which searched JOBS again per booking — and returned
+     the FIRST row carrying that id, which on a sheet with a duplicated job_id
+     could be somebody else's. */
+  var rows = jobs.rows;
+  var tz = sheetTimeZone(ss);
   var out = [];
   for (var i = 0; i < rows.length; i++) {
     if (String(rows[i][li]).trim().toLowerCase() !== want) continue;
-    var id = String(rows[i][idc]).trim();
-    if (!id) continue;
-    var b = getBooking(ss, id);
-    if (b) out.push(b);
+    if (!String(rows[i][idc]).trim()) continue;
+    out.push(bookingFromRow(h, rows[i], tz));
   }
   /* Newest first. An undated booking is a preference with no slot yet, which
      is the most current thing there is, so it sorts to the top. */
@@ -2524,13 +2559,12 @@ function getPropertyAccess(ss, propertyId) {
   var want = String(propertyId || "").trim();
   if (!want) return empty;
   try {
-    var sheet = ss.getSheetByName(PROPERTY_ACCESS_TAB);
-    if (!sheet) return empty;
-    var h = sheetHeaders(sheet);
+    var table = readTable(ss, PROPERTY_ACCESS_TAB);
+    if (!table) return empty;
+    var h = table.headers;
     var pi = h.indexOf("property_id");
-    var last = sheet.getLastRow();
-    if (pi === -1 || last < 2) return empty;
-    var rows = sheet.getRange(2, 1, last - 1, h.length).getValues();
+    if (pi === -1 || !table.rows.length) return empty;
+    var rows = table.rows;
     for (var i = 0; i < rows.length; i++) {
       if (String(rows[i][pi]).trim() !== want) continue;
       var v = {};
@@ -3013,14 +3047,12 @@ function planExpiresAt(fromMs) {
  * any backfill over bookings taken before r38.
  */
 function planAlreadyOffered(sheet, planId) {
-  var h = sheetHeaders(sheet);
-  var col = h.indexOf("plan_id");
-  var last = sheet.getLastRow();
-  if (col === -1 || last < 2) return false;
-  var values = sheet.getRange(2, col + 1, last - 1, 1).getValues();
+  var plans = sheetValues(sheet);   // r44: one fresh read
+  var col = plans.headers.indexOf("plan_id");
+  if (col === -1 || !plans.rows.length) return false;
   var needle = String(planId).trim();
-  for (var i = 0; i < values.length; i++) {
-    if (String(values[i][0]).trim() === needle) return true;
+  for (var i = 0; i < plans.rows.length; i++) {
+    if (String(plans.rows[i][col]).trim() === needle) return true;
   }
   return false;
 }
@@ -3093,13 +3125,12 @@ function createRecurringPlan(ss, data, record, ids) {
  */
 function clientRecurringPlan(ss, leadId) {
   try {
-    var sheet = ss.getSheetByName(RECURRING_PLANS_TAB);
-    if (!sheet) return null;
-    var h = sheetHeaders(sheet);
-    var last = sheet.getLastRow();
-    if (last < 2) return null;
+    var table = readTable(ss, RECURRING_PLANS_TAB);
+    if (!table) return null;
+    var h = table.headers;
+    if (!table.rows.length) return null;
 
-    var rows = sheet.getRange(2, 1, last - 1, h.length).getValues();
+    var rows = table.rows;
     /* Lower-cased and trimmed, the same way getContactBookings matches it: a
        lead_id is an email address and cases drift between forms. */
     var want = String(leadId || "").trim().toLowerCase();
@@ -4276,7 +4307,12 @@ const VENDOR_PHOTOS_TAB    = "VENDOR_PHOTOS";
 
 /** The Ops workbook. Never the active spreadsheet — this code runs bound to Leads. */
 function opsBook() {
-  return SpreadsheetApp.openById(OPS_SPREADSHEET_ID);
+  /* r44. Opening a workbook is one of the slowest calls Apps Script makes,
+     and a vendor portal used to make it three or four times. A handle is not
+     a copy of any data, so one per request is safe for POSTs too. */
+  if (!REQUEST_SCOPE) return SpreadsheetApp.openById(OPS_SPREADSHEET_ID);
+  if (!REQUEST_SCOPE.ops) REQUEST_SCOPE.ops = SpreadsheetApp.openById(OPS_SPREADSHEET_ID);
+  return REQUEST_SCOPE.ops;
 }
 
 
@@ -4408,13 +4444,12 @@ var OPERATOR_EDITABLE = ["public_display_name", "first_name", "last_initial",
 function opsRow(sheetName, idColumn, wantedId) {
   var want = String(wantedId || "").trim();
   if (!want) return null;
-  var sheet = opsBook().getSheetByName(sheetName);
-  if (!sheet) return null;
-  var h = sheetHeaders(sheet);
+  var table = readTable(opsBook(), sheetName);
+  if (!table) return null;
+  var h = table.headers;
   var i = h.indexOf(idColumn);
-  var last = sheet.getLastRow();
-  if (i === -1 || last < 2) return null;
-  var rows = sheet.getRange(2, 1, last - 1, h.length).getValues();
+  if (i === -1 || !table.rows.length) return null;
+  var rows = table.rows;
   for (var r = 0; r < rows.length; r++) {
     if (String(rows[r][i]).trim() !== want) continue;
     var o = { __row: r + 2, __headers: h };
@@ -4429,13 +4464,12 @@ function opsRows(sheetName, idColumn, wantedId) {
   var want = String(wantedId || "").trim();
   var out = [];
   if (!want) return out;
-  var sheet = opsBook().getSheetByName(sheetName);
-  if (!sheet) return out;
-  var h = sheetHeaders(sheet);
+  var table = readTable(opsBook(), sheetName);
+  if (!table) return out;
+  var h = table.headers;
   var i = h.indexOf(idColumn);
-  var last = sheet.getLastRow();
-  if (i === -1 || last < 2) return out;
-  var rows = sheet.getRange(2, 1, last - 1, h.length).getValues();
+  if (i === -1 || !table.rows.length) return out;
+  var rows = table.rows;
   for (var r = 0; r < rows.length; r++) {
     if (String(rows[r][i]).trim() !== want) continue;
     var o = { __row: r + 2 };
@@ -4645,23 +4679,21 @@ function getOperator(ss, operatorId) {
 function getVendorBookings(ss, vendorId) {
   var want = String(vendorId || "").trim();
   if (!want) return [];
-  var jobs = requireTab(ss, JOBS_TAB);
-  var h = sheetHeaders(jobs);
+  var jobs = requireTable(ss, JOBS_TAB);
+  var h = jobs.headers;
   var vi = h.indexOf("vendor_id");
   var idc = h.indexOf("job_id");
   /* No column means no assignments have ever been recorded — an empty list,
      not an error. The portal says so rather than looking broken. */
   if (vi === -1 || idc === -1) return [];
 
-  var last = jobs.getLastRow();
-  if (last < 2) return [];
-  var rows = jobs.getRange(2, 1, last - 1, h.length).getValues();
-
+  /* r44. From the row in hand — see getContactBookings. */
+  var rows = jobs.rows;
+  var tz = sheetTimeZone(ss);
   var out = [];
   for (var i = 0; i < rows.length; i++) {
     if (String(rows[i][vi]).trim() !== want) continue;
-    var b = getBooking(ss, String(rows[i][idc]).trim());
-    if (b) out.push(b);
+    out.push(bookingFromRow(h, rows[i], tz));
   }
   out.sort(function (a, z) {
     var av = a.scheduledDate || "9999-99-99";
@@ -5011,15 +5043,14 @@ function handleKnownProperty(key) {
 
     var ss = SPREADSHEET_ID ? SpreadsheetApp.openById(SPREADSHEET_ID)
                             : SpreadsheetApp.getActiveSpreadsheet();
-    var tab = ss.getSheetByName(PROPERTIES_TAB);
+    var tab = readTable(ss, PROPERTIES_TAB);
     if (!tab) return json({ found: false });
 
-    var h = sheetHeaders(tab);
+    var h = tab.headers;
     var iKey = h.indexOf("property_key");
-    var last = tab.getLastRow();
-    if (iKey === -1 || last < 2) return json({ found: false });
+    if (iKey === -1 || !tab.rows.length) return json({ found: false });
 
-    var rows = tab.getRange(2, 1, last - 1, h.length).getValues();
+    var rows = tab.rows;
     for (var i = 0; i < rows.length; i++) {
       if (String(rows[i][iKey]).trim().toUpperCase() !== want) continue;
 
@@ -5058,6 +5089,9 @@ const TICKET_SECRET_KEY = "TICKET_SECRET";
  * makes a token stable for the life of a job.
  */
 function ticketSecret() {
+  /* r44. The vendor portal signs a ticket link per booking, and each one used
+     to read the property again. */
+  if (REQUEST_SCOPE && REQUEST_SCOPE.secret) return REQUEST_SCOPE.secret;
   var props = PropertiesService.getScriptProperties();
   var s = props.getProperty(TICKET_SECRET_KEY);
   if (!s) {
@@ -5066,6 +5100,7 @@ function ticketSecret() {
     console.log("Minted a ticket secret. Existing ticket links are unaffected " +
                 "because there were none.");
   }
+  if (REQUEST_SCOPE) REQUEST_SCOPE.secret = s;
   return s;
 }
 
@@ -5261,7 +5296,10 @@ function upsertLead(ss, data, leadId) {
   if (!sheet) throw new Error('Tab "' + LEADS_TAB + '" not found — cannot upsert the lead.');
   assertWritable(LEADS_TAB);
 
-  const headers = sheetHeaders(sheet);
+  /* r44. Headers and rows in one read, fresh — this function writes to the
+     rows it matched. */
+  const leadsNow = sheetValues(sheet);
+  const headers = leadsNow.headers;
   if (!headers.length) throw new Error('Tab "' + LEADS_TAB + '" has no header row.');
 
   /* Which of the fields we care about actually exist on the tab. Keyed by
@@ -5283,8 +5321,7 @@ function upsertLead(ss, data, leadId) {
   const matchOnEmail = (col.lead_id === undefined);
   const needle = matchOnEmail ? normalizeEmail(data.email) : String(leadId).trim().toLowerCase();
 
-  const lastRow  = sheet.getLastRow();
-  const existing = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, headers.length).getValues() : [];
+  const existing = leadsNow.rows;
 
   let rowIndex = -1;
   if (isSet(needle)) {
@@ -5452,7 +5489,9 @@ function upsertProperty(ss, data, propertyKey) {
   if (!sheet) throw new Error('Tab "' + PROPERTIES_TAB + '" not found.');
   assertPropertiesWritable(PROPERTIES_TAB);
 
-  const headers = sheetHeaders(sheet);
+  /* r44. One fresh read — see upsertLead. */
+  const propertiesNow = sheetValues(sheet);
+  const headers = propertiesNow.headers;
   if (!headers.length) throw new Error('Tab "' + PROPERTIES_TAB + '" has no header row.');
 
   const col = {}, missing = [];
@@ -5475,8 +5514,7 @@ function upsertProperty(ss, data, propertyKey) {
     bathrooms:    valOrBlank(data.bathrooms),
   };
 
-  const lastRow  = sheet.getLastRow();
-  const existing = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, headers.length).getValues() : [];
+  const existing = propertiesNow.rows;
 
   const idCol   = headers.indexOf("property_id");
   const addrCol = headers.indexOf(propertiesHeaderFor("address"));
@@ -5566,14 +5604,14 @@ function ensurePropertyMemoryRow(ss, propertyId) {
   if (!sheet) return "skipped (no " + PROPERTY_MEMORY_TAB + " tab)";
   assertPropertyMemoryWritable(PROPERTY_MEMORY_TAB);
 
-  const headers = sheetHeaders(sheet);
+  const memoryNow = sheetValues(sheet);   // r44: one fresh read
+  const headers = memoryNow.headers;
   const idCol = headers.indexOf("property_id");
   if (idCol === -1) return "skipped (no property_id column)";
 
-  const lastRow = sheet.getLastRow();
-  const existing = lastRow > 1 ? sheet.getRange(2, idCol + 1, lastRow - 1, 1).getValues() : [];
+  const existing = memoryNow.rows;
   for (let i = 0; i < existing.length; i++) {
-    if (String(existing[i][0]).trim() === String(propertyId).trim()) return "already present";
+    if (String(existing[i][idCol]).trim() === String(propertyId).trim()) return "already present";
   }
 
   const row = new Array(headers.length).fill("");
@@ -5695,7 +5733,7 @@ function bookAvailabilitySlot(sched, jobId, serviceCode) {
   }
 
   try {
-    const ops = SpreadsheetApp.openById(OPS_SPREADSHEET_ID);
+    const ops = opsBook();   // r44: once per request
     const av  = ops.getSheetByName(AVAILABILITY_TAB);
     if (!av) throw new Error('Ops workbook "' + ops.getName() + '" has no ' + AVAILABILITY_TAB + ' tab.');
     assertAvailabilityWritable(AVAILABILITY_TAB);
@@ -5704,7 +5742,10 @@ function bookAvailabilitySlot(sched, jobId, serviceCode) {
        only one that reads them back the way availability.gs published them. */
     const opsTz = sheetTimeZone(ops);
 
-    const headers = sheetHeaders(av);
+    /* r44. One fresh read at write time — the whole point of this function is
+       to look at the sheet as it is NOW, inside the lock. */
+    const slotsNow = sheetValues(av);
+    const headers = slotsNow.headers;
     const iDate = headers.indexOf("date"),
           iTime = headers.indexOf("start_time"),
           iStat = headers.indexOf("status"),
@@ -5726,11 +5767,10 @@ function bookAvailabilitySlot(sched, jobId, serviceCode) {
                       ". Row 1 reads: " + headers.join(" | "));
     }
 
-    const lastRow = av.getLastRow();
-    if (lastRow < 2) return { ok: true, action: "conflict", reason: "no availability rows" };
+    if (!slotsNow.rows.length) return { ok: true, action: "conflict", reason: "no availability rows" };
 
     /* Read at write time, not from the customer's cached view. */
-    const rows = av.getRange(2, 1, lastRow - 1, headers.length).getValues();
+    const rows = slotsNow.rows;
 
     /* r16. Collect every open row for this date and time, not merely the
        first. With one row this is identical to the old behaviour; with
@@ -5818,12 +5858,13 @@ function releaseAvailabilitySlot(jobId, exceptRow) {
   var keep = Number(exceptRow) || 0;
 
   try {
-    const ops = SpreadsheetApp.openById(OPS_SPREADSHEET_ID);
+    const ops = opsBook();   // r44: once per request
     const av  = ops.getSheetByName(AVAILABILITY_TAB);
     if (!av) throw new Error('Ops workbook "' + ops.getName() + '" has no ' + AVAILABILITY_TAB + ' tab.');
     assertAvailabilityWritable(AVAILABILITY_TAB);
 
-    const headers = sheetHeaders(av);
+    const slotsNow = sheetValues(av);   // r44: one fresh read, inside the lock
+    const headers = slotsNow.headers;
     const iStat = headers.indexOf("status");
     const iJob  = headers.indexOf("job_id");
 
@@ -5837,10 +5878,9 @@ function releaseAvailabilitySlot(jobId, exceptRow) {
                       ". Row 1 reads: " + headers.join(" | "));
     }
 
-    const lastRow = av.getLastRow();
-    if (lastRow < 2) return { ok: true, action: "not_found", reason: "no availability rows" };
+    if (!slotsNow.rows.length) return { ok: true, action: "not_found", reason: "no availability rows" };
 
-    const rows = av.getRange(2, 1, lastRow - 1, headers.length).getValues();
+    const rows = slotsNow.rows;
     const freed = [];
     for (let r = 0; r < rows.length; r++) {
       if ((r + 2) === keep) continue;                          // just booked — see above
@@ -6147,6 +6187,129 @@ function writeRow(sheet, record, map) {
   }));
 
   return { noColumn: noColumn };
+}
+
+/* ============================================================
+   ONE READ PER TAB, PER REQUEST  —  r44
+   ============================================================
+
+   WHY THIS EXISTS. Every SpreadsheetApp call is a round trip to Google, and
+   they add up far faster than the work itself. r43 opened a five-booking
+   customer's portal with 211 of them, because each helper fetched the tabs it
+   needed for itself: getContactBookings read JOBS and then called getBooking,
+   which read JOBS again, once per booking; the photo tab was read whole once
+   per booking; the Ops workbook was reopened by every helper that touched it.
+   The page could show nothing until the last one returned.
+
+   TWO LEVELS OF SHARING, and the difference between them is the design.
+
+     handles    The Ops workbook (opsBook), each workbook's timezone
+                (sheetTimeZone) and the ticket secret (ticketSecret) are looked
+                up once per request, GET or POST. None of them can change while
+                a request runs, and none is a copy of sheet data, so sharing
+                them cannot go stale.
+
+     snapshots  A tab's values, read whole in one call and then shared by
+                every helper that asks during the same request. ONLY IN doGet.
+                A GET writes nothing, so a snapshot taken at its start is still
+                true at its end. A POST reads, writes and reads again — books
+                the new slot, then releases the old one; saves an answer, then
+                reports whether the home is complete — and a shared snapshot
+                would hand the second read a sheet from before the first write.
+                So a POST reads fresh on every call: the same one-call reader,
+                never shared.
+
+   THE SCOPE IS OPENED BY doGet/doPost AND CLEARED IN A finally. Apps Script
+   already gives each execution fresh globals, so in production the finally is
+   belt and braces. It is load-bearing in the test harness, where one
+   long-lived context serves many requests and a leaked snapshot would answer a
+   later request with an earlier sheet. Code run from the editor — backfills,
+   sweeps, diagnostics — has no request and reads exactly as it always did.
+
+   KEYED BY WORKBOOK OBJECT, then tab name. Leads and Ops are different objects,
+   so a tab name that exists in both cannot collide. A workbook opened twice is
+   two objects — a missed share, never a wrong answer.
+
+   NEVER MUTATE WHAT readTable RETURNS. Inside a GET every caller holds the same
+   arrays. The converted helpers only read them and build new objects.
+
+   A GET THAT STARTS WRITING BREAKS THIS. tests/read-budget.test.js asserts that
+   the GET routes make no writes at all, so it fails before a stale read ships.
+   ============================================================ */
+
+var REQUEST_SCOPE = null;
+
+/**
+ * Run fn inside a request scope. `snapshots` is true only for doGet.
+ * Re-entrant: a nested call joins the scope already open rather than opening a
+ * second one (and closing the outer one early on its way out).
+ */
+function withRequestScope(snapshots, fn) {
+  if (REQUEST_SCOPE) return fn();
+  REQUEST_SCOPE = {
+    snapshots: !!snapshots,
+    ops: null,              // the Ops workbook, opened once
+    zones: new Map(),       // workbook -> its timezone
+    tables: new Map(),      // workbook -> { tabName: table | null }
+    secret: "",             // TICKET_SECRET, read once
+  };
+  try {
+    return fn();
+  } finally {
+    REQUEST_SCOPE = null;
+  }
+}
+
+/**
+ * One whole tab: { sheet, headers, rows } — or null when the tab does not exist.
+ *
+ * ONE CALL FOR THE DATA. getDataRange().getValues() returns the header row and
+ * every data row together, where the reads it replaces made four or five
+ * (getLastColumn, the header range, getLastRow, the data range — and often a
+ * second pass for one column). `headers` is trimmed exactly as sheetHeaders()
+ * trims it; `rows` excludes the header and is [] for a tab with no data.
+ *
+ * Shared for the rest of the request inside doGet; fresh on every call
+ * anywhere else. Read the rows, never write to them.
+ */
+function readTable(ss, name) {
+  var shelf = null;
+  if (REQUEST_SCOPE && REQUEST_SCOPE.snapshots) {
+    shelf = REQUEST_SCOPE.tables.get(ss);
+    if (!shelf) { shelf = {}; REQUEST_SCOPE.tables.set(ss, shelf); }
+    if (Object.prototype.hasOwnProperty.call(shelf, name)) return shelf[name];
+  }
+
+  var sheet = ss.getSheetByName(name);
+  var table = sheet ? sheetValues(sheet) : null;
+
+  if (shelf) shelf[name] = table;
+  return table;
+}
+
+/**
+ * The same one-call read, for a sheet the caller already holds:
+ * { sheet, headers, rows }. ALWAYS FRESH — never shared, in any scope — which
+ * is what makes it safe inside the write paths, where a tab is read, written
+ * and possibly read again in the same request.
+ */
+function sheetValues(sheet) {
+  var values = sheet.getDataRange().getValues();
+  var headers = values.length
+    ? values[0].map(function (h) { return String(h).trim(); })
+    : [];
+  /* An empty sheet's data range is one blank cell, not zero cells.
+     sheetHeaders() answers [] for that sheet, and so must this. */
+  if (values.length === 1 && headers.length === 1 && headers[0] === "") headers = [];
+  return { sheet: sheet, headers: headers, rows: values.slice(1) };
+}
+
+/** readTable for a tab that must exist. Same refusal, same order, as requireTab. */
+function requireTable(ss, name) {
+  var table = readTable(ss, name);
+  if (!table) throw new Error('Tab "' + name + '" not found. Check the tab-name constants.');
+  assertWritable(name);
+  return table;
 }
 
 function sheetHeaders(sheet) {
@@ -6642,7 +6805,7 @@ const TEST_UNIT    = "TEST";
  */
 function findOpenSlot() {
   try {
-    const ops = SpreadsheetApp.openById(OPS_SPREADSHEET_ID);
+    const ops = opsBook();   // r44: once per request
     const av  = ops.getSheetByName(AVAILABILITY_TAB);
     if (!av) return null;
     /* r33: the Ops workbook's own timezone, not this project's. */
@@ -7209,10 +7372,12 @@ const BOOKING_PHOTOS_HEADERS = ["photo_id", "job_id", "room_key", "object_key",
   "status", "bytes", "created_at", "updated_at", "booking_link"];
 
 function bookingPhotoRows(ss) {
-  var sheet = ss.getSheetByName("BOOKING_PHOTOS");
-  if (!sheet || sheet.getLastRow() < 2) return [];
-  var h = sheetHeaders(sheet);
-  return sheet.getRange(2, 1, sheet.getLastRow() - 1, h.length).getValues().map(function (r, i) {
+  /* r44. Read once per GET — the portal used to read this whole tab again for
+     every booking on the account, finished ones included. */
+  var table = readTable(ss, "BOOKING_PHOTOS");
+  if (!table || !table.rows.length) return [];
+  var h = table.headers;
+  return table.rows.map(function (r, i) {
     var out = { sheetRow: i + 2 };
     BOOKING_PHOTOS_HEADERS.forEach(function (k) { out[k] = r[h.indexOf(k)]; });
     return out;

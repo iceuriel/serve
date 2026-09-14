@@ -1020,6 +1020,45 @@ After any deploy that changes `triggers`, confirm the schedules are listed under
 the Worker's Settings → Triggers in the Cloudflare dashboard; `wrangler deploy
 --dry-run` validates the config but does not report them.
 
+#### How the webhook reads the sheets — ONE READ PER TAB, PER REQUEST (r44)
+
+Every SpreadsheetApp call is a round trip to Google. r43 opened a five-booking
+customer's portal with **211** of them — JOBS read seventeen times, the whole
+photo tab once per booking — and the page could show nothing until the last
+came back. r44 opens the same portal with **39**, the vendor portal with 19
+(was 79), a cleaner's ticket with 22 (was 51), a saved access answer with 28
+(was 102) and a new booking with 77 (was 103). Measured by counting harness,
+not estimated; the before/after responses and every tab were compared and are
+**identical**.
+
+**What any response contains did not change.** This is a contract about how
+often the sheet is asked, and it has three rules a future change must keep:
+
+| Rule | Why | Enforced by |
+|---|---|---|
+| **A GET reads each tab at most once**, and its cost does not grow with the number of bookings. `readTable(ss, name)` shares a tab's values for the rest of the request. | This is the speed-up. | `tests/read-budget.test.js` §1–2 |
+| **A GET writes nothing.** | The shared snapshot is only true because nothing changes the sheet mid-request. A GET that starts writing must not also keep reading through `readTable`. | `read-budget` §3 — every GET route is checked for zero writes |
+| **A POST never shares a snapshot.** `readTable` reads fresh on every call inside `doPost`, and `sheetValues(sheet)` — what the write paths use — is fresh everywhere. | A POST reads, writes and reads again (book the new slot, then release the old one). | `read-budget` §4, including a check of the scope `doGet`/`doPost` actually open |
+
+Handles that are not data — the Ops workbook (`opsBook()`), each workbook's
+timezone (`sheetTimeZone()`) and the ticket secret — are looked up once per
+request, GET or POST. Code run from the editor has no request scope and reads
+exactly as it always did.
+
+**One behaviour did change, deliberately.** A booking in a portal or vendor
+list is now built from *its own* JOBS row. Before, it was re-found by `job_id`
+and the first match won — so on a sheet where an operator had copied a row
+without changing its id, a second customer's portal showed the first
+customer's row. Only a duplicated `job_id` can see the difference.
+
+**The three signed-link pages start their request from `<head>`** (r44 site),
+before the stylesheet and scripts have downloaded, and the page script adopts
+that answer. The address is therefore built in two places — the inline script in
+`h.html`/`j.html`/`v.html` and the page script — and **must stay identical**,
+or the page quietly asks twice. `tests/early-load.test.js` runs both and counts
+the requests. Change a query parameter of `/api/portal`, `/api/job` or
+`/api/vendor` and change both.
+
 **Deploy settings both need:** Execute as **Me**, Who has access **Anyone**.
 Anything else and the browser gets a login page instead of JSON.
 
@@ -1118,6 +1157,7 @@ held `direct ×1` and blank ×12, with no channel values anywhere.
 
 | Date | Change |
 |---|---|
+| 2026-09-13 | **One read per tab, per request — webhook r44, plus the site.** No column, tab or response change. The portal, tickets and vendor portal were slow because every helper re-read the tabs it needed; a request now reads each tab once (`readTable`, shared only inside `doGet`), opens Ops once, and builds bookings from the JOBS rows already in hand (`bookingFromRow`). Portal load 211 → 39 Sheets calls; vendor portal 79 → 19; a new booking 103 → 77. Old and new were run through the same 82-request sequence in two timezones — reads, saves, reschedule, cancel, plan confirmation and a booking — and every response, tab and log line came out identical. Site: /h, /j and /v paint a skeleton immediately and start their request from `<head>`; the portal fetches open times before the customer clicks; the booking form asks for times at the first touch of step 1 and keeps a second try if that fails. New contract in "How the webhook reads the sheets" above; `read-budget.test.js` and `early-load.test.js` enforce it. See `HANDOFF.md` §r44. |
 | 2026-09-13 | **Reschedule and cancel — webhook r43.** Two portal writes act on a booking the customer already has, and `releaseAvailabilitySlot()` closes the "nothing releases a slot" open item that had stood since r5 — every cancellation before today leaked its time out of the feed permanently. No new column: `job_status` gains the value `cancelled` (written by the script, second value it writes), and the row is **kept, never deleted**, so counts of booked work keep including work that was given back. `JOBS.vendor_id` stays ops-owned — `setJobCells()` throws on any ops column rather than skipping it. **The anchor is untouched by both writes**, which is the property the release exists to protect: a one-off move shifts one visit, never the cadence. New optional Ops `SETTINGS` key `cancel_notice_hours`, defaulting to `0` — the mechanism is built and enforces nothing until the founder sets a number, because a notice window is a customer promise with a refund question attached. Two real defects were caught by the new tests rather than in production: a release that gave back the slot a move had just booked, and a guard comparing `getBooking`'s display time (`"1:00 PM ET"`) against a raw slot time (`"1:00 PM"`), which meant it never once fired. See `HANDOFF.md` §r43. |
 | 2026-09-02 | **Server-side price verification — no schema change, one new payload key.** The pricing engine moved out of `script.js` into `pricing-engine.js`, and the Worker now re-derives every booking's price instead of trusting `quote_price` from the browser. `pricing_version` joins the payload and rides in `quote_meta`; it is what lets the server tell an edited payload (same version, different price → refused) from a deploy that landed mid-session (different version → the quoted price is honoured). 86,400 configurations priced before and after the extraction and compared by hash — identical. **This caused a live outage:** the two shared files are classic `<script>` files exporting through `if (typeof module …)`, which never runs under a bundler that treats `.js` as ESM, so the Worker's import was `undefined`, every geo-mapped ZIP priced as unmapped, and bookings from 49 ZIPs were rejected for about an hour. Fixed by generating a real ES module (`src/engine.generated.mjs`) rather than importing the sources. Rejection is now gated on `CAN_PRICE`, so a Worker that cannot reproduce the browser's arithmetic relays instead of refusing. See `HANDOFF.md` §2026-09-02 before touching the Worker's imports. |
 | 2026-09-01 | **Webhook r10 — `job_notes` updates an existing JOBS row.** The reserve step's "anything we should know?" textarea was removed: asking at the moment of commitment costs bookings, and free text is the worst shape to ask in — it arrives as prose to be re-typed into PROPERTY_MEMORY by hand. The same question now sits on the confirmation screen, after the spot is claimed, and posts a `job_notes` event carrying the booking's `submission_id`. **This is the one write path that deliberately skips `alreadyWritten()`** — everywhere else a repeated submission_id is a replay to ignore; here it is how the booking gets found. Blank-fill only, so a second send cannot erase the first and a hand-edit always survives, and it never throws because the booking is already confirmed on screen. No new column: it fills `customer_notes` and `pets_flag`, both of which now arrive **blank at booking**. The site sends neither key rather than sending `''` and `false` — `FALSE` would read as "asked, and no pets" when nobody was asked, the same trap as a blank `levels`. `PET_WORDS` extracted so `petsFlag()` and `petsFromText()` cannot drift. Covered by SCENARIO 6 in `tests/webhook-routing.test.js`. **Repo is r10; production is still r9.** |

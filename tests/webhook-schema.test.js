@@ -35,6 +35,10 @@ function makeSheet(name, headers, audit) {
     getLastRow: () => rows.length,
     appendRow: r => { audit.push({ tab: name, op: 'appendRow' }); rows.push(r.slice()); },
     setFrozenRows: () => {},
+    /* r44: readTable/sheetValues read a whole tab in one call, the way real
+       Sheets does. Without this stub the booking path threw inside the
+       harness only — and reported LEADS as failed rather than the stub. */
+    getDataRange: () => ({ getValues: () => rows.map(r => r.slice()) }),
     getRange: (r, c, nr, nc) => ({
       getValues: () => { const o = []; for (let i = 0; i < nr; i++) { const row = rows[r-1+i] || []; o.push(row.slice(c-1, c-1+nc)); } return o; },
       setValue: v => { audit.push({ tab: name, op: 'setValue', r, c, v });

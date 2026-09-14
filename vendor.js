@@ -35,8 +35,19 @@
 
     if (!id || !token) { fail('This link is incomplete.'); return; }
 
-    fetch(API + '?id=' + encodeURIComponent(id) + '&t=' + encodeURIComponent(token))
-        .then(function (r) { return r.json(); })
+    /* r44. THE FIRST ANSWER MAY ALREADY BE ON ITS WAY. v.html starts this
+       request from its <head>, before the stylesheet and the scripts have
+       downloaded. Adopted only for exactly the address this file would have
+       asked for; anything else — no early start, a different address — asks
+       here, exactly as before. Taken once, so a later load asks fresh. */
+    function firstLoad(url) {
+        var early = window.ServeFirstLoad;
+        window.ServeFirstLoad = null;
+        if (early && early.url === url && early.answer) return early.answer;
+        return fetch(url).then(function (r) { return r.json(); });
+    }
+
+    firstLoad(API + '?id=' + encodeURIComponent(id) + '&t=' + encodeURIComponent(token))
         .then(function (d) {
             /* view === vendor, not merely ok. An older deployment has no
                vendor route, so doGet falls through to the health check, which

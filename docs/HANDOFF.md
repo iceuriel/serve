@@ -13,7 +13,131 @@ except where a later section supersedes them.
 
 ---
 
-## Current work — 2026-09-13, Claude Code: the warm ping (Worker only)
+## Current work — 2026-09-13, Claude Code: r44, the portals read each sheet once
+
+**COMMITTED, NOT DEPLOYED, NOT PUSHED.** Two halves, and — unusually — **they do
+not depend on each other**: the r44 site works against the r43 script, and the
+r44 script works under the r43 site. Follow the standing order anyway:
+
+1. Paste `apps-script/webhook.gs` into Leads MASTER → Deploy → Manage
+   deployments → pencil → New version.
+2. Confirm the `/exec` health check answers `2026-09-13 r44` (use `curl -sL`).
+3. Push. Cloudflare builds the site.
+4. Open a real portal link: a skeleton should appear at once, then the account.
+
+`availability.gs` is untouched — no second paste.
+
+### The problem
+
+The founder reported that portals and the vendor page were slow, especially for
+instructions and access questions to "fully load". **Nothing on those pages
+appears until one request returns**, and that request was slow for two reasons:
+
+- **A fixed ~1–2s floor.** Measured in production: a portal request with a bad
+  token (which reaches Apps Script and reads no sheets) took 0.9–1.9s; the
+  Worker alone answers in 0.1s. That is Apps Script, and no code here changes it.
+- **The server re-read the same sheets.** Counted by instrumented harness on a
+  realistic account (5 bookings, 2 homes, one partner): **211** SpreadsheetApp
+  calls to open the portal. `getContactBookings` read JOBS, then called
+  `getBooking` per booking, which re-read JOBS (headers, id column, row) each
+  time; `publicBookingPhotos` read the whole photo tab once per booking,
+  finished ones included; instructions once per upcoming booking; access once
+  per home; the Ops workbook reopened by every helper that touched it.
+
+### What changed — webhook.gs r44
+
+- **`withRequestScope`**, opened by `doGet` (shared snapshots) and `doPost`
+  (fresh reads only), closed in a `finally`.
+- **`readTable(ss, name)`** — a whole tab in one `getDataRange().getValues()`,
+  shared for the rest of a GET. **`sheetValues(sheet)`** — the same one-call
+  read for a sheet already in hand, never shared; the write paths use it.
+- **`bookingFromRow`** split out of `getBooking`; contact and vendor booking
+  lists build from the rows already read.
+- `opsBook()`, `sheetTimeZone()` and `ticketSecret()` answer once per request.
+- Converted readers: `getContact`, `getBooking`, `getContactBookings`,
+  `getVendorBookings`, `getPropertyAccess`, `getBookingAccess`,
+  `getBookingInstructions`, `bookingPhotoRows`, `clientRecurringPlan`,
+  `handleKnownProperty`, `opsRow`, `opsRows`; and on the write side
+  `upsertLead`, `upsertProperty`, `ensurePropertyMemoryRow`,
+  `planAlreadyOffered`, `bookAvailabilitySlot`, `releaseAvailabilitySlot`.
+  `alreadyWritten` deliberately still reads one column: JOBS and EVENTS grow
+  forever, and a whole-tab read there would get slower over time, not faster.
+
+| Request | r43 calls | r44 calls |
+|---|---|---|
+| Customer portal | 211 | **39** |
+| Client ticket | 43 | **19** |
+| Cleaner's ticket | 51 | **22** |
+| Vendor portal | 79 | **19** |
+| Save an access answer | 102 | **28** |
+| Save an instruction | 99 | **25** |
+| New booking | 103 | **77** |
+
+These are Sheets calls, not seconds. The ~1–2s floor stays; what goes is the
+multiple of it. **Production timing has not been measured** — it needs the paste
+and a real signed link.
+
+**The one intended behaviour change:** a list booking is built from its own row.
+On a sheet with a duplicated `job_id`, r43 showed the first row carrying that
+id — possibly another customer's — in the second customer's portal.
+
+### What changed — the site
+
+- **Skeletons.** `h.html`, `j.html` and `v.html` paint the page's shape in
+  place of "Loading…" (sidebar-shaped from 720px on the portals, so nothing jumps
+  sideways), with a screen-reader label, a pulse that stops under reduced motion,
+  and "Still loading…" after 6s. `fail()` writes over it, `start()` hides it.
+- **The request starts from `<head>`.** An inline script above the stylesheet
+  starts the fetch; `portal.js`, `ticket.js` and `vendor.js` adopt it through
+  `firstLoad(url)` only for the identical address, and ask for themselves
+  otherwise. Saves the stylesheet + scripts download time, which is the whole
+  wait on a phone opening a link from a text.
+- **Open times fetched before the click** (`portal.js`): when the page has an
+  open plan or a visit that can move, it asks once after painting; a click inside
+  60s reuses the answer; an empty answer is not kept; a plan confirmation,
+  reschedule or cancel forgets it.
+- **Booking form** (`script.js`): times are requested at the first `focusin` on
+  step 1 instead of at step 2, and a failed or empty attempt no longer uses up the
+  only try — step 2 asks again.
+
+### Verified
+
+- **29/29 test files pass.** New: `tests/read-budget.test.js` (budgets, no writes
+  in a GET, shared-vs-fresh scopes and the entry-point wiring, scope closing, the
+  duplicated-`job_id` fix, the Sydney timezone path) and `tests/early-load.test.js`
+  (the early request and each page script agree on the address — exactly one
+  request; tampered/absent/offline/no-token cases; the skeleton contract; the
+  booking form's second try). `portal-render.test.js` gained section K.
+- **Differential run:** r43 and r44 driven through the same 82 requests in New
+  York and Sydney timezones, frozen clock — every response, every tab and every
+  log line identical, with reschedule, the already-there guard, cancel, plan
+  confirmation and a booking all genuinely succeeding (not failing identically).
+- **Mutations: 14/14 server, 17/17 site, plus one by hand** (a stylesheet placed
+  above the early script) — each caught, every file restored byte-identical.
+  The first server mutation — letting `doPost` share snapshots — changed **no
+  output and failed no pre-existing test**, because no POST today reads back
+  through `readTable` after writing. That rule is now pinned directly.
+- Four test harnesses (`webhook-routing`, `leads-upsert`, `webhook-atomicity`,
+  `webhook-schema`) gained the `getDataRange` stub real Sheets has. Without it
+  the booking path threw inside the harness and **reported LEADS as failed** —
+  the failure looked like the code, not the stub.
+- `scripts/build-site.sh`: 74 files staged, nothing private.
+- Headless Chrome screenshots of the skeleton at 512px and 1280px.
+
+### NOT verified
+
+- **The r44 script is not deployed** and no real portal has been timed on it.
+- **Phone-width rendering below 512px**: headless Chrome will not lay out
+  narrower, and crops the capture; the unchanged r43 page crops identically.
+
+---
+
+## Earlier — 2026-09-13, Claude Code: the warm ping (Worker only)
+
+**Pushed as `190f2a5`.** Post-push probes all answered: `/api/health` ok three
+times, `/api/slots` ok with 13 slots, `/api/portal` with a bad token
+`not_found` (route alive, auth working), `portal.js` serving r43, `/` 200.
+**Cron registration is still unconfirmed** — see "NOT verified" below.
 
 **NO APPS SCRIPT PASTE. `webhook.gs` is untouched and stays at r43** — nothing
 here changes the server, so there is no script-before-site ordering to respect.

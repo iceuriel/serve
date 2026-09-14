@@ -974,6 +974,13 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
     });
 
     /* Step 1 submit */
+    /* r44. ASK FOR TIMES AS SOON AS SOMEBODY STARTS, not when they finish step
+       1. The feed can take a second or two — longer if the server was idle —
+       and the head start is the whole of step 1. Still one request per visit
+       that succeeds: prefetchAvailability guards itself, and the submit below
+       calls it again, which only does anything if this attempt failed. */
+    buildForm.addEventListener('focusin', () => prefetchAvailability(), { once: true });
+
     buildForm.addEventListener('submit', (e) => {
         e.preventDefault();
         buildError.textContent = '';
@@ -1185,6 +1192,11 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
             if (timeUi === 'loading') setTimeUi('fallback');
         }, AVAILABILITY_TIMEOUT_MS);
 
+        /* r44. Starting at first touch means a failure can land while the
+           customer is still on step 1. Forget it, so moving on to step 2 asks
+           once more instead of settling for the fallback. */
+        const allowRetry = () => { if (!availSlots || !availSlots.length) availFetched = false; };
+
         fetch(AVAILABILITY_SOURCE_URL, { signal: ctrl ? ctrl.signal : undefined })
             .then(res => {
                 if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -1203,12 +1215,14 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
                 } else if (timeUi === 'loading') {
                     setTimeUi('fallback');
                 }
+                allowRetry();
             })
             .catch(err => {
                 clearTimeout(timer);
                 clearTimeout(failSafe);
                 console.warn('Availability unavailable — serving the time-preference fallback.', err);
                 if (timeUi === 'loading') setTimeUi('fallback');
+                allowRetry();
             });
     }
 

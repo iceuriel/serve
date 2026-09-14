@@ -25,6 +25,9 @@ function makeSheet(name, headers) {
     getLastRow: () => rows.length,
     appendRow: (r) => rows.push(r.slice()),
     setFrozenRows: () => {},
+    /* r44: readTable reads a whole tab in one call, the way real Sheets does.
+       Without this stub every ticket lookup threw inside the harness only. */
+    getDataRange: () => ({ getValues: () => rows.map(r => r.slice()) }),
     getRange: (r, c, nr, nc) => ({
       getValues: () => { const o = []; for (let i = 0; i < nr; i++) { const row = rows[r-1+i] || []; o.push(row.slice(c-1, c-1+nc)); } return o; },
       /* Real Apps Script has both. handleJobNotes reads a single cell before

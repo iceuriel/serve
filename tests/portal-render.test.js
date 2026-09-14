@@ -116,6 +116,9 @@ async function boot(model, opts) {
   const els = {};
   const warns = [];
   const posts = [];
+  /* r44: every GET of the feed, so warming it can be counted rather than
+     assumed. */
+  const slotGets = [];
   /* What the NEXT read of the account returns. After a confirmation the offer
      has become a booking, so a page that repaints must stop offering it. */
   let served = model;
@@ -148,6 +151,7 @@ async function boot(model, opts) {
           opts.reply || { ok: true, job_id: 'SRV-CONFIRMED' }) });
       }
       if (String(url).indexOf('/api/slots') === 0) {
+        slotGets.push(url);
         return Promise.resolve({ ok: true, json: () => Promise.resolve(
           { ok: true, slots: opts.slots || FEED }) });
       }
@@ -155,6 +159,14 @@ async function boot(model, opts) {
     },
   };
   box.window = box;
+  /* r44: a clock the test can move, so "fresh for a minute" is checked
+     without waiting a minute. Everything else about Date is the real one. */
+  if (opts.clock) {
+    const RealDate = Date;
+    box.Date = class extends RealDate {
+      static now() { return opts.clock.now; }
+    };
+  }
   vm.createContext(box);
   vm.runInContext(SCOPE, box);
   /* r43: SKIPPABLE, so the page can be driven without the slots module. The
@@ -171,7 +183,7 @@ async function boot(model, opts) {
   };
   await settle();
   return { body: els['p-body'] || node('div'), state: els['p-state'] || node('div'),
-           warns, posts, settle };
+           warns, posts, settle, slotGets };
 }
 
 /* --- reading the rendered tree. Every lookup degrades rather than throws:
@@ -461,6 +473,64 @@ const PRETTY = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][D.getDay()] +
 
   t('the visit can still be called off', (J.posts[0] || {}).kind, 'cancel');
   t('and nothing threw', J.warns, []);
+
+  head('K. The schedule is asked for before the click (r44)');
+
+  /* "Loading times..." used to start on click and last as long as the feed
+     took. Now the page asks once as it opens, when something on it could use
+     the answer, and a click inside a minute uses what is already in hand. */
+  const clock = { now: 1000000 };
+  const K = await boot(model(), { clock });
+  t('an open plan and an upcoming visit warm the feed before any click', K.slotGets.length, 1);
+
+  click(K.body, 'sched__btn');
+  await K.settle();
+  t('opening "move" uses the warmed answer instead of asking again', K.slotGets.length, 1);
+  t('and still offers exactly the bookable times',
+    byClass(K.body, 'slot-chip').map(n => n._text), ['9:00 AM', '1:00 PM', '11:00 AM']);
+
+  click(K.body, 'plan__cta');
+  await K.settle();
+  t('so does choosing a time for the plan', K.slotGets.length, 1);
+
+  const NOTHING = model({ plan: null, bookings: [
+    { bookingId: 'SRV-0', serviceLabel: 'Move-out clean', serviceCode: 'CLEAN_MOVEOUT',
+      date: '2026-08-02', time: '1:00 PM', price: 300, paid: true,
+      completed: '2026-08-02', rooms: [], photos: [] },
+    { bookingId: 'SRV-9', serviceLabel: 'First clean', serviceCode: 'CLEAN_DEEP',
+      date: '2026-09-01', time: '9:00 AM', price: 200, paid: false, completed: '',
+      cancelled: true, rooms: [], partner: null },
+  ] });
+  const K0 = await boot(NOTHING);
+  t('a page with nothing to schedule does not ask at all', K0.slotGets.length, 0);
+
+  /* An empty answer is as likely to be a slow server as a full calendar. */
+  const KE = await boot(model(), { slots: [] });
+  t('an empty warm answer is still one request', KE.slotGets.length, 1);
+  click(KE.body, 'sched__btn');
+  await KE.settle();
+  t('but is not kept: the click asks again', KE.slotGets.length, 2);
+
+  const later = { now: 5000000 };
+  const KC = await boot(model(), { clock: later });
+  later.now += 61000;
+  click(KC.body, 'sched__btn');
+  await KC.settle();
+  t('a click more than a minute later asks again', KC.slotGets.length, 2);
+
+  /* Moving a visit changes what is open. The warmed list no longer says. */
+  const KM = await boot(model(), { clock: { now: 9000000 } });
+  click(KM.body, 'sched__btn');
+  await KM.settle();
+  click(KM.body, 'slot-chip');
+  click(KM.body, 'sched__move');
+  await KM.settle();
+  t('the move went through', (KM.posts[0] || {}).kind, 'reschedule');
+  const before = KM.slotGets.length;
+  click(KM.body, 'sched__btn');
+  await KM.settle();
+  t('after a move, the next look at the schedule asks again', KM.slotGets.length, before + 1);
+  t('and none of section K threw', [].concat(K.warns, K0.warns, KE.warns, KC.warns, KM.warns), []);
 
   console.log('\n' + (bad ? bad + ' FAILURES' : 'all portal-render checks passed'));
   process.exit(bad ? 1 : 0);
