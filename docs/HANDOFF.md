@@ -13,6 +13,29 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-14, Claude Code: professionals get the ZIP-check hero
+
+**COMMITTED (`e1aefa3`), PUSHED, AND VERIFIED IN PRODUCTION.** Site only.
+
+- `HERO_SKINS.pro` headline is now "Get your weekends back with Serve" (the
+  "Come back Friday…" sentence is gone) and it names the same body as move-in.
+  That block was renamed `#hero-body-movein` → `#hero-body-zip` (class
+  `hero__body--zip`); the entries below still use the old id. Both skins share
+  it on purpose, so the copy under the two headlines cannot drift apart. Every
+  pro-prefixed tag gets it: dh-, poster-, qr- (including the founder card
+  `/q`), flyer-, eddm-, email-/em-.
+- Move-in alone preselects Move In / Move Out; pro stays on First Clean.
+- `.hero__lead` top margin 2.25rem → 1.1rem (18px rendered under "Instantly
+  quote & book…"), both skins.
+- Checked: 30/30; four deliberate breaks (pro body dropped, old headline, pro
+  pointed at the default body, ZIP body not hidden) each fail. Local Chrome at
+  1280 and 390: pro ZIP 02116 → green check → Build with the ZIP filled,
+  First Clean kept; no overflow at the top or at Build; no page errors.
+  Production: the three files hash-match; in Chrome `/clean` shows the new
+  headline with the ZIP body and first_clean, `/movein` shows move_out, `/`
+  shows the default hero.
+- Not verified: a real phone.
+
 ## Current work — 2026-09-14, Claude Code: one font on the front page; move-in starts on the move clean
 
 **COMMITTED (`c35d6ba`, `27af1be`), PUSHED, AND VERIFIED IN PRODUCTION.** Site
