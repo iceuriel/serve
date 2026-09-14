@@ -15,7 +15,10 @@ except where a later section supersedes them.
 
 ## Current work — 2026-09-14, Claude Code: "Made to Serve your needs" set like the lead
 
-**LOCAL EDITS ONLY — not committed or pushed.** Founder asked the tagline to
+**PUSHED (`af1cbd8`) AND VERIFIED IN PRODUCTION (2026-09-14).** Production
+`style.css` matches the repo (ignoring CR). Computed style on servecleaning.com
+at 1280px with `?src=poster` and `?src=deed`: `.hero__tagline` is Times New
+Roman, rgb(249, 250, 251), 18.4px. Not checked: a real phone. Founder asked the tagline to
 match "Serve handles the rest…": Times New Roman and #f9fafb, size unchanged.
 It now appears only in `#hero-body-zip` (move-in and pro); the untagged hero
 has had no tagline since `2fe2bce`.
