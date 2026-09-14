@@ -420,8 +420,8 @@ t('the headline is the two-line lockup',
    unescaped dot matches every character, so it failed on correct markup. */
 const headline = (INDEX.match(/<h1 class="hero__headline">([\s\S]*?)<\/h1>/) || [])[1] || '';
 t('the headline carries no full stops', headline.indexOf('.') === -1, headline);
-t('the sub leads with manages',
-  /hero__sub">Serve manages, coordinates, and books your service through partnerships/.test(INDEX));
+t('the sub names the three jobs, then the network (2026-09-14)',
+  INDEX.includes('hero__sub">Coordination, Booking &amp; Management<br>Powered by Serve&rsquo;s network of established &amp; local providers</p>'));
 
 /* Order matters: the sub explains the headline, and the tagline closes under
    it. Reversing them puts a slogan between a claim and its explanation. */

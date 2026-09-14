@@ -190,9 +190,9 @@ t('hero ZIP label is word for word the Build label', !!buildLabel && heroLabel =
 
 /* Read in order through the hero: the authored hero is the first four, a
    skin swaps the first for the last two. */
-const order = ['id="hero-body-default"', 'Serve manages, coordinates, and books your service', 'for="hero-zip"',
+const order = ['id="hero-body-default"', 'Coordination, Booking &amp; Management<br>Powered by', 'for="hero-zip"',
                'Instantly quote &amp; book in under 1 minute', 'Serve handles the rest', 'id="hero-body-zip"',
-               'Serve manages, coordinates, and books your service', 'Made to Serve <strong>your</strong> needs'];
+               'Coordination, Booking &amp; Management<br>Powered by', 'Made to Serve <strong>your</strong> needs'];
 let cursor = 0;
 const at = order.map(s => { const i = heroHtml.indexOf(s, cursor); if (i !== -1) cursor = i + s.length; return i; });
 t('hero reads: [manages] ZIP check, under-a-minute, handles the rest, [manages, tagline]',

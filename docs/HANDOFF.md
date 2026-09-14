@@ -13,6 +13,20 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-14, Claude Code: new hero sub copy
+
+**LOCAL EDITS ONLY — not committed or pushed.** Founder's copy replaces "Serve
+manages, coordinates, and books your service through partnerships with local &
+trusted Boston vendors." on every hero variant with two lines: "Coordination,
+Booking & Management" / "Powered by Serve’s network of established & local
+providers".
+- `index.html` — both copies of `.hero__sub` (in `#hero-body-default` and
+  `#hero-body-zip`), one `<p>` with a `<br>`; styling unchanged.
+- Tests: pricing-and-services 7a asserts the new sub; segment-and-skins 2b's
+  reading order keys on the new text in both blocks.
+Checked: `node tests/run-all.js` all 31 pass; headless screenshots untagged
+at 1400px and 540px and `?src=poster` at 1400px look right.
+
 ## Current work — 2026-09-14, Claude Code: "Made to Serve your needs" set like the lead
 
 **PUSHED (`af1cbd8`) AND VERIFIED IN PRODUCTION (2026-09-14).** Production
