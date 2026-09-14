@@ -15,7 +15,11 @@ except where a later section supersedes them.
 
 ## Current work — 2026-09-14, Claude Code: new hero sub copy
 
-**LOCAL EDITS ONLY — not committed or pushed.** Founder's copy replaces "Serve
+**PUSHED (`e050f20`) AND VERIFIED IN PRODUCTION (2026-09-14).** Production
+`index.html` matches the repo (ignoring CR). On servecleaning.com at 1280px,
+untagged, `?src=poster` and `?src=deed` each show exactly one visible
+`.hero__sub` reading the new two lines; no console errors. Not checked: a real
+phone. Founder's copy replaces "Serve
 manages, coordinates, and books your service through partnerships with local &
 trusted Boston vendors." on every hero variant with two lines: "Coordination,
 Booking & Management" / "Powered by Serve’s network of established & local
