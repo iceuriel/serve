@@ -13,6 +13,56 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-14, Claude Code: the move-in hero leads with a ZIP check
+
+**COMMITTED (`0f3dbc3`), PUSHED, AND LIVE — files verified in production.** Site
+only: no Apps Script, Worker, or sheet change.
+
+**The ask.** On the page `/movein` visitors see: "Moving in or out?" replaces the
+"Just closed on a new home?…" headline; under it Build's ZIP field with Build's
+"Check if we're in your area" label; then "Instantly quote & book in under 1
+minute", "Serve handles the rest…", the "Serve manages, coordinates, and books…"
+sentence, and "Made to Serve your needs". A ZIP we serve gets a green check and
+a scroll down to Build with the ZIP already entered.
+
+**What shipped.**
+- `index.html` — two hero bodies under the one `h1`: `#hero-body-default`
+  (unchanged, with the Instant Booking button) and `#hero-body-movein`, authored
+  `hidden`. The move-in body has no button; the ZIP check is its CTA.
+- `script.js` — `HERO_SKINS.movein` is `{ headline, body: 'hero-body-movein' }`;
+  `applyHeroSkin` swaps bodies only when both are found. `HERO ZIP CHECK` (in the
+  booking IIFE, just above Step 1 submit) writes a full ZIP into Build's `#zip`,
+  runs `evaluateZip()`, and reads `state.tier` back — coverage is decided in one
+  place. Served: green check, `prefetchAvailability()`, 700ms, blur,
+  `setView(1)`. Unserved: "We're not in X yet." and a waitlist link to Build,
+  whose waitlist is already showing; the page never moves on its own.
+- `style.css` — `.hero-zip*`, `.hero__lead`, after `.hero__logo`. Input rules are
+  scoped under `.hero-zip` because `.flow-input` sits later at equal weight.
+- `tests/segment-and-skins.test.js` — body swap incl. half-present pairs; the
+  authored body (hidden, label word-for-word Build's, line order, no button); the
+  real ZIP block sliced out and run against fakes. "Skins define a headline and
+  nothing else" is now "a headline, and at most a body id authored hidden".
+
+**Checked.** 29/29 before and after. Eight deliberate breaks (Build not written,
+no pause, jump not cancelled, default not hidden, half swap, jump to Price,
+unserved jumps, wrong headline) each fail the test; script.js restored. Headless
+Chrome over CDP, local server, 1280px and 390px emulated: direct and pro heroes
+untouched; 02116 shows the green check before moving, then lands on Build with
+`#zip` = 02116 and Step 1 active; 90210 never scrolls and shows the waitlist
+link; no page exceptions; no horizontal overflow at 390. Production after the
+Pages build: `index.html`, `script.js`, `style.css` hash-match the repo;
+`/movein` answers 302 `/?src=deed-movein`.
+
+**Not verified.** A real phone (keyboard dismissal, smooth scroll); the flow
+driven in a browser on production — only file identity was checked there.
+
+**Open for the founder.** "Serve handles the rest…" existed nowhere, so it
+shipped as typed. Build still preselects First Clean for move-in visitors;
+preselecting Move In / Move Out is small but is a sales choice, so not done.
+
+**Concurrent.** Codex is active in this checkout (entry below). None of its files
+were staged or committed; only this entry was staged from this file.
+
 ## Current work — 2026-09-14, Claude Code: r46, the move plan box never drew
 
 **COMMITTED AND PUSHED. NEEDS THE FOUNDER'S PASTE of `apps-script/webhook.gs`;
