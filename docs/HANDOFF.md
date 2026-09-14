@@ -15,15 +15,25 @@ except where a later section supersedes them.
 
 ## Current work — 2026-09-13, Claude Code: r44, the portals read each sheet once
 
-**COMMITTED, NOT DEPLOYED, NOT PUSHED.** Two halves, and — unusually — **they do
-not depend on each other**: the r44 site works against the r43 script, and the
-r44 script works under the r43 site. Follow the standing order anyway:
+**DEPLOYED AND VERIFIED IN PRODUCTION, in the standing order.** The founder
+pasted the script; `/exec` answered `2026-09-13 r44` before anything was pushed.
+Then `6786c82` was pushed and was live on the fourth 15-second poll. Checked
+against production:
 
-1. Paste `apps-script/webhook.gs` into Leads MASTER → Deploy → Manage
-   deployments → pencil → New version.
-2. Confirm the `/exec` health check answers `2026-09-13 r44` (use `curl -sL`).
-3. Push. Cloudflare builds the site.
-4. Open a real portal link: a skeleton should appear at once, then the account.
+- `/h`, `/j` and `/v` each serve the early `<head>` request and the skeleton.
+- `portal.js`, `ticket.js`, `vendor.js`, `script.js` and `style.css` are
+  byte-identical to the repo (line endings normalised).
+- `/api/health` ok; `/api/slots` ok with 11 slots; `/api/portal`, `/api/vendor`
+  and `/api/job` with a bad token answer `not_found`; `/` 200; `/h` still sends
+  `no-store`, `noindex` and `no-referrer`.
+- Bad-token timings 0.9–2.1s, the same floor as before. **One vendor probe took
+  6.6s**, the first request after the new script version — a cold container, not
+  a regression; the next seven were normal.
+
+**Still not verified: a real signed link.** Every token-less probe returns before
+any sheet is read, so r44's reading code has run in production only behind a
+real portal, ticket or vendor link. Open one of each: a skeleton first, then the
+account, with bookings, instructions and access answers as before.
 
 `availability.gs` is untouched — no second paste.
 
@@ -126,7 +136,7 @@ id — possibly another customer's — in the second customer's portal.
 
 ### NOT verified
 
-- **The r44 script is not deployed** and no real portal has been timed on it.
+- **No real signed link has been opened on r44** — see the deploy note above.
 - **Phone-width rendering below 512px**: headless Chrome will not lay out
   narrower, and crops the capture; the unchanged r43 page crops identically.
 
