@@ -1777,6 +1777,28 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
        shared click handler tells a same-page prefill from a cross-page one. */
     window.ServeQuote = { applyPrefill: applyPrefill };
 
+    /* MOVE-IN VISITORS START ON THE MOVE CLEAN (founder, 2026-09-14).
+       Someone whose first touch was a deed- / db- / mv- link was just asked
+       "Moving in or out?", so Build opens with Move In / Move Out chosen rather
+       than First Clean. Keyed on the same first-touch segment as the hero skin,
+       so the headline and the form cannot disagree.
+
+       HERE, NOT BESIDE THE RADIO LISTENERS. The change handler calls
+       syncAddonsToService(), which reads the add-on consts declared further
+       down; dispatching any earlier throws before they exist. And it runs just
+       BEFORE readPrefillParams, so a link that names a service still wins.
+       Dispatched rather than assigned, so add-ons clear exactly as on a click. */
+    const SEGMENT_DEFAULT_SERVICE = { movein: 'move_out' };
+
+    (function preselectServiceForSegment() {
+        const service = SEGMENT_DEFAULT_SERVICE[SERVE_ATTRIBUTION.segment];
+        if (!service) return;
+        const radio = buildForm.querySelector('input[name="service"][value="' + service + '"]');
+        if (!radio || radio.checked) return;
+        radio.checked = true;
+        radio.dispatchEvent(new Event('change', { bubbles: true }));
+    })();
+
     (function readPrefillParams() {
         let params;
         try { params = new URLSearchParams(location.search); } catch (_) { return; }

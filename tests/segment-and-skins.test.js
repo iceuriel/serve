@@ -299,6 +299,53 @@ t('a page without the hero markup loses nothing (no throw)', (() => {
 })());
 
 /* ============================================================ */
+console.log('\n=== 2d. move-in visitors start on the move clean ===');
+/* Sliced to the end of its own IIFE, so the order checks below report a
+   misplaced block instead of the slice itself failing to find it. */
+const preFrom = SITE.indexOf('const SEGMENT_DEFAULT_SERVICE');
+const preFn   = SITE.indexOf('function preselectServiceForSegment', preFrom);
+const preTo   = preFn === -1 ? -1 : SITE.indexOf('})();', preFn) + '})();'.length;
+if (preFrom === -1 || preFn === -1 || preTo < preFn) throw new Error('could not slice the segment preselect');
+const preselectSrc = SITE.slice(preFrom, preTo);
+
+/* Where it sits IS the guarantee, so assert it. After the add-on consts: the
+   change handler reaches syncAddonsToService(), which reads them, and a
+   dispatch before they exist throws. Before readPrefillParams: a link that
+   names its own service must still win. */
+const addonConstAt = SITE.indexOf('const addonFridge');
+t('runs after the add-on consts exist', addonConstAt !== -1 && addonConstAt < preFrom, [addonConstAt, preFrom]);
+const prefillParamsAt = SITE.indexOf('(function readPrefillParams()');
+t("runs before a link's own &service= is applied", prefillParamsAt > preFrom, [preFrom, prefillParamsAt]);
+
+function preselectFor(segment, alreadyChecked) {
+  const radios = ['first_clean', 'move_out'].map(v => ({
+    value: v, checked: v === (alreadyChecked || 'first_clean'), events: [],
+    dispatchEvent(e) { this.events.push(e.type + (e.bubbles ? '+bubbles' : '')); return true; },
+  }));
+  const box = {
+    SERVE_ATTRIBUTION: { segment },
+    Event: class { constructor(type, o) { this.type = type; this.bubbles = !!(o && o.bubbles); } },
+    buildForm: { querySelector: sel => radios.find(r => sel === 'input[name="service"][value="' + r.value + '"]') || null },
+  };
+  vm.createContext(box);
+  vm.runInContext(preselectSrc, box);
+  const by = v => radios.find(r => r.value === v);
+  return { move: by('move_out'), first: by('first_clean') };
+}
+
+let ps = preselectFor('movein');
+t('movein: Move In / Move Out is checked', ps.move.checked === true);
+t("movein: through the radio's own change handler, as a click would", JSON.stringify(ps.move.events) === '["change+bubbles"]', ps.move.events);
+t('movein: First Clean is not touched', ps.first.events.length === 0);
+
+ps = preselectFor('pro');
+t('pro keeps First Clean', ps.first.checked && !ps.move.checked && ps.move.events.length === 0);
+ps = preselectFor('direct');
+t('direct keeps First Clean', ps.first.checked && !ps.move.checked && ps.move.events.length === 0);
+ps = preselectFor('movein', 'move_out');
+t('already on the move clean: no second change event', ps.move.events.length === 0, ps.move.events);
+
+/* ============================================================ */
 console.log('\n=== 3. vanity redirects feed the same first-touch path ===');
 const red = fs.readFileSync(path.join(REPO_ROOT, '_redirects'), 'utf8');
 const rules = red.split('\n').filter(l => l.trim() && !l.trim().startsWith('#'))
