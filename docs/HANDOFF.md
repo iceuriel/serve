@@ -13,6 +13,22 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-14, Claude Code: skin headlines in Times, ZIP placeholder
+
+**LOCAL EDITS ONLY — not committed or pushed.** Founder asked: the move-in
+("Moving in or out?") and pro ("Get your weekends back with Serve") hero
+headlines in Times New Roman, and the hero ZIP placeholder as "ZIP CODE",
+properly centred in the white field.
+- `style.css` — `body[data-segment=movein|pro] .hero__headline` set in Times at
+  2 / 2.4 / 3rem (the Inter sizes ÷ 0.875); the default headline stays Inter.
+  `.hero-zip__input` gets `text-indent: 0.06em` to cancel the trailing
+  letter-spacing that pulled the text left, plus an explicit line-height.
+- `index.html` — placeholder "ZIP CODE".
+- `tests/static-checks.test.js` — that selector added to `SERIF_ALLOWED`.
+Checked: `node tests/run-all.js` all 31 pass; headless Chrome screenshots at
+800px and 1400px with `?src=deed` and `?src=poster` look right. Not checked:
+a real phone. Next: founder review, then commit and push (no Apps Script change).
+
 ## Current work — 2026-09-14, Claude Code: r48, the cleaner ticket's rooms simplified (photos + notes)
 
 **DEPLOYED IN ORDER AND VERIFIED IN PRODUCTION (2026-09-14).** The founder

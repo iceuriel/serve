@@ -544,6 +544,8 @@ const SERIF_ALLOWED = [
   '.footer__logo',         // the same wordmark in the footer
   '.ticket__brand',        // the ticket pages' header (the front page's sample ticket overrides it)
   '.serve-page-head h1',   // the /pricing and /services page titles
+  // the move-in and pro skin headlines (2026-09-14, founder's call)
+  'body[data-segment="movein"] .hero__headline, body[data-segment="pro"] .hero__headline',
 ];
 const serifRules = [...cssNoComments.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
   .filter(m => /font-family\s*:[^;]*(Times|Georgia|(?<!sans-)serif\b)/i.test(m[2]))

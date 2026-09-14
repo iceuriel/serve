@@ -358,6 +358,22 @@ a {
     color: #f9fafb;
 }
 
+/* The move-in and pro skin headlines are set in Times New Roman (2026-09-14),
+   matching the logo wordmark; the default headline stays Inter. Times runs
+   narrower, so these take back the 1/0.875 the Inter sizes gave up. */
+body[data-segment="movein"] .hero__headline, body[data-segment="pro"] .hero__headline {
+    font-family: 'Times New Roman', Times, serif;
+    font-size: 2rem;
+}
+@media (min-width: 640px) {
+    body[data-segment="movein"] .hero__headline,
+    body[data-segment="pro"] .hero__headline { font-size: 2.4rem; }
+}
+@media (min-width: 1024px) {
+    body[data-segment="movein"] .hero__headline,
+    body[data-segment="pro"] .hero__headline { font-size: 3rem; }
+}
+
 /* The tagline now sits BELOW this, so the big gap moved down with it: these
    two lines belong together and the air belongs before the button. */
 .hero__sub {
@@ -439,7 +455,11 @@ a {
 .hero-zip .hero-zip__input {
     text-align: center;
     font-size: 1.15rem;
+    line-height: 1.3;
     letter-spacing: 0.06em;
+    /* Letter-spacing trails the last glyph, which nudges centred text left;
+       an equal indent puts it back on the true centre. */
+    text-indent: 0.06em;
     padding-left: 2.75rem;
     padding-right: 2.75rem;
 }
