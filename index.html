@@ -168,10 +168,12 @@
         <div class="hero__content">
             <h1 class="hero__headline">A Clean Home<br>One Less Thing to Manage</h1>
             <!-- Two bodies under the ONE headline. The first is the hero
-                 everyone sees. The second is the move-in skin: script.js
-                 (HERO_SKINS) shows it, and hides the first, for visitors whose
-                 first touch was a deed- / db- / mv- link such as /movein. It
-                 ships hidden, so without JavaScript — or on any failure — the
+                 untagged visitors see. The second is the ZIP-check hero:
+                 script.js (HERO_SKINS) shows it, and hides the first, for BOTH
+                 tagged audiences — move-in (deed- / db- / mv-, e.g. /movein)
+                 and professionals (dh- / qr- / poster- / email- …, e.g.
+                 /clean). Only the headline above differs between them. It ships
+                 hidden, so without JavaScript — or on any failure — the
                  authored hero stands. Three lines appear in both bodies; change
                  one and change the other. -->
             <div class="hero__body" id="hero-body-default">
@@ -180,7 +182,7 @@
                 <a href="#quote" class="btn btn--primary serve-pulse">Instant Booking</a>
                 <p class="hero__note">Instantly quote &amp; book in under 1 minute</p>
             </div>
-            <div class="hero__body hero__body--movein" id="hero-body-movein" hidden>
+            <div class="hero__body hero__body--zip" id="hero-body-zip" hidden>
                 <!-- The ZIP check IS the call to action here. It asks the same
                      question as Build's first field and answers it by filling
                      that field in, so coverage is decided in one place only. A

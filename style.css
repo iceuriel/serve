@@ -411,9 +411,9 @@ a {
     box-shadow: none;
 }
 
-/* --- Move-in hero body (2026-09-14) ------------------------------------
-   Shown in place of the default body for the move-in skin; see HERO_SKINS in
-   script.js. It sits on the dark hero, so the greens are the LIGHT ones —
+/* --- ZIP-check hero body (2026-09-14) ----------------------------------
+   Shown in place of the default body for the move-in and pro skins; see
+   HERO_SKINS in script.js. It sits on the dark hero, so the greens are the LIGHT ones —
    Build's #166534 would all but disappear against #1f2937. */
 .hero-zip {
     max-width: 320px;
@@ -504,21 +504,22 @@ a {
     .hero-zip__check { transition: none; }
 }
 
-.hero__body--movein .hero__note {
+.hero__body--zip .hero__note {
     margin-top: 0.35rem;
 }
 
-/* "Serve handles the rest…" — the lead-in to the sub beneath it, so it takes
-   the air above and sits close to what it introduces. Same face, size and
-   colour as .hero__tagline, at the founder's request (2026-09-14). */
+/* "Serve handles the rest…" — the lead-in to the sub beneath it, so it sits
+   close to what it introduces. Same face, size and colour as .hero__tagline,
+   at the founder's request (2026-09-14). The gap above it was 2.25rem until
+   the founder found it too wide under "Instantly quote & book…". */
 .hero__lead {
     font-family: var(--flow-sans);
     font-size: 1.15rem;
     color: #cbd5e1;
-    margin: 2.25rem 0 0.35rem;
+    margin: 1.1rem 0 0.35rem;
 }
 
-.hero__body--movein .hero__tagline {
+.hero__body--zip .hero__tagline {
     margin-bottom: 0;
 }
 

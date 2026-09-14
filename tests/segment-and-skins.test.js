@@ -27,10 +27,10 @@ const to   = SITE.indexOf('   Booking Flow — Build -> Price -> Reserve');
 if (from === -1 || to === -1) throw new Error('could not slice attribution/skin code');
 const slice = SITE.slice(from, SITE.lastIndexOf('/*', to));
 
-/* The two hero bodies, as authored: the default showing, move-in hidden.
-   `omit` drops one, to prove a half-present pair is never half-swapped. */
+/* The two hero bodies, as authored: the default showing, the ZIP-check body
+   hidden. `omit` drops one, to prove a half-present pair is never half-swapped. */
 function heroBodies(omit) {
-  const els = { 'hero-body-default': { hidden: false }, 'hero-body-movein': { hidden: true } };
+  const els = { 'hero-body-default': { hidden: false }, 'hero-body-zip': { hidden: true } };
   if (omit) delete els[omit];
   return els;
 }
@@ -110,11 +110,14 @@ const mv = skinFor('?src=deed-movein');
 t('movein hero renders', MOVEIN_HEADLINE.test(mv.headline), mv.headline.slice(0, 50));
 t('movein segment', mv.segment === 'movein');
 t('body carries data-segment', mv.body['data-segment'] === 'movein', mv.body);
-t('movein shows its own body, and only that one', shown(mv.els) === 'hero-body-movein', shown(mv.els));
+t('movein shows the ZIP-check body, and only that one', shown(mv.els) === 'hero-body-zip', shown(mv.els));
 
 const pro = skinFor('?src=dh-bh-01');
-t('pro hero renders', /Come back Friday to a clean home/.test(pro.headline), pro.headline.slice(0, 50));
-t('pro keeps the authored body', shown(pro.els) === 'hero-body-default', shown(pro.els));
+t('pro hero renders', /^Get your weekends back with Serve$/.test(pro.headline), pro.headline.slice(0, 50));
+t('pro headline no longer leads with Friday', !/Friday/.test(pro.headline));
+t('pro shows the same ZIP-check body, and only that one', shown(pro.els) === 'hero-body-zip', shown(pro.els));
+t('pro body missing -> the default body stays visible',
+  shown(skinFor('?src=dh-bh-01', null, heroBodies('hero-body-zip')).els) === 'hero-body-default');
 
 const dir = skinFor('');
 t('untagged leaves the authored hero untouched', dir.headline === 'DEFAULT', dir.headline);
@@ -124,10 +127,10 @@ t('unknown tag also leaves the hero alone', skinFor('?src=who-knows').headline =
 
 /* Half a pair must never be half-swapped: the default hidden with nothing
    shown in its place would be a hero with no body at all. */
-const noAlt = skinFor('?src=deed-movein', null, heroBodies('hero-body-movein'));
-t('move-in body missing -> the default body stays visible', shown(noAlt.els) === 'hero-body-default', shown(noAlt.els));
+const noAlt = skinFor('?src=deed-movein', null, heroBodies('hero-body-zip'));
+t('ZIP-check body missing -> the default body stays visible', shown(noAlt.els) === 'hero-body-default', shown(noAlt.els));
 const noMain = skinFor('?src=deed-movein', null, heroBodies('hero-body-default'));
-t('default body missing -> move-in body is not shown either', shown(noMain.els) === '', shown(noMain.els));
+t('default body missing -> the ZIP-check body is not shown either', shown(noMain.els) === '', shown(noMain.els));
 
 /* first touch wins over a later tag, within one session */
 const shared = fakeStorage();
@@ -152,17 +155,23 @@ t('storage blocked still derives the skin from the URL',
   blockedSkin && MOVEIN_HEADLINE.test(blockedSkin.headline));
 
 /* ============================================================ */
-console.log('\n=== 2b. the move-in hero body, as authored ===');
+console.log('\n=== 2b. the ZIP-check hero body, as authored ===');
 /* Authored in this order, both inside the hero section. */
 const defaultAt   = HTML.indexOf('id="hero-body-default"');
-const moveinAt    = HTML.indexOf('id="hero-body-movein"');
-const heroEnd     = HTML.indexOf('</section>', moveinAt);
-const defaultBody = defaultAt !== -1 && moveinAt > defaultAt ? HTML.slice(defaultAt, moveinAt) : '';
-const moveinBody  = moveinAt !== -1 && heroEnd !== -1 ? HTML.slice(moveinAt, heroEnd) : '';
-t('both hero bodies exist, default first', defaultBody !== '' && moveinBody !== '', [defaultAt, moveinAt]);
+const zipBodyAt   = HTML.indexOf('id="hero-body-zip"');
+const heroEnd     = HTML.indexOf('</section>', zipBodyAt);
+const defaultBody = defaultAt !== -1 && zipBodyAt > defaultAt ? HTML.slice(defaultAt, zipBodyAt) : '';
+const moveinBody  = zipBodyAt !== -1 && heroEnd !== -1 ? HTML.slice(zipBodyAt, heroEnd) : '';
+t('both hero bodies exist, default first', defaultBody !== '' && moveinBody !== '', [defaultAt, zipBodyAt]);
 
-t('the move-in body ships hidden (no JS -> the authored hero)',
-  /<div[^>]*id="hero-body-movein"[^>]*\shidden[\s>]/.test(HTML));
+/* One body for both tagged audiences, so the copy under the two headlines
+   cannot drift apart. */
+const skinsHere = vm.runInContext('HERO_SKINS', makeBox('', fakeStorage(), { value: '' }));
+t('move-in and pro name the SAME body', skinsHere.movein.body === 'hero-body-zip' && skinsHere.pro.body === 'hero-body-zip',
+  [skinsHere.movein.body, skinsHere.pro.body]);
+
+t('the ZIP-check body ships hidden (no JS -> the authored hero)',
+  /<div[^>]*id="hero-body-zip"[^>]*\shidden[\s>]/.test(HTML));
 t('the default body does not', !/<div[^>]*id="hero-body-default"[^>]*\shidden[\s>]/.test(HTML));
 t('the default body keeps the Instant Booking button',
   /class="btn btn--primary[^"]*">Instant Booking<\/a>/.test(defaultBody));
@@ -175,9 +184,9 @@ t('hero ZIP label is word for word the Build label', !!buildLabel && heroLabel =
 const order = ['for="hero-zip"', 'Instantly quote &amp; book in under 1 minute', 'Serve handles the rest',
                'Serve manages, coordinates, and books your service', 'Made to Serve <strong>your</strong> needs']
   .map(s => moveinBody.indexOf(s));
-t('move-in body reads: ZIP check, under-a-minute, handles the rest, manages, tagline',
+t('ZIP-check body reads: ZIP check, under-a-minute, handles the rest, manages, tagline',
   order.every(i => i !== -1) && order.every((i, n) => n === 0 || i > order[n - 1]), order);
-t('the move-in body has no Instant Booking button — the ZIP check is its CTA',
+t('the ZIP-check body has no Instant Booking button — the ZIP check is its CTA',
   !/Instant Booking/.test(moveinBody));
 
 /* ============================================================ */

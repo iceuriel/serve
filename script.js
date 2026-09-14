@@ -193,10 +193,11 @@ const SERVE_ATTRIBUTION = readAttribution();
    Same page, same offer. The headline changes, because that is the line
    deciding whether someone reads the second one. A skin MAY also name a
    `body`: the id of an alternate block authored hidden in index.html, shown
-   in place of #hero-body-default. Only move-in has one (2026-09-14) — its
-   hero leads with a ZIP check instead of the button, and the booking flow
-   below wires that check to Build. A skin with no body keeps the authored
-   one, button and all.
+   in place of #hero-body-default. Move-in and pro both name #hero-body-zip
+   (2026-09-14): a hero that leads with a ZIP check instead of the button,
+   which the booking flow below wires to Build. They share one body so the
+   copy under the two headlines cannot drift apart. A skin with no body keeps
+   the authored one, button and all.
 
    Selection is FIRST touch, never last. Someone who arrives on a deed link and
    later scans a poster QR is still a mover — the poster did not change why they
@@ -213,10 +214,11 @@ const SERVE_ATTRIBUTION = readAttribution();
 const HERO_SKINS = {
     movein: {
         headline: 'Moving in or out?',
-        body:     'hero-body-movein',
+        body:     'hero-body-zip',
     },
     pro: {
-        headline: 'Come back Friday to a clean home. Get your weekends back with Serve',
+        headline: 'Get your weekends back with Serve',
+        body:     'hero-body-zip',
     },
 };
 
