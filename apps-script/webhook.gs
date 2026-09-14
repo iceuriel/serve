@@ -1,7 +1,7 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-14  ·  master  ·  r46 — a ZIP read back from Sheets keeps its zero
+ * VERSION STAMP:  2026-09-14  ·  master  ·  r47 — retained cleaner completion photos
  *
  * r45 = SOMEBODY WHO BOOKED A MOVE WAS NEVER OFFERED A PLAN. createRecurringPlan
  *      refuses a move booking by design, and nothing else asked. The portal now
@@ -1401,7 +1401,7 @@ function routeGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-14 r46" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-14 r47" });
 }
 
 
@@ -2360,6 +2360,10 @@ function buildVendorTicketModel(ss, booking) {
     view: "partner",
     bookingId: booking.bookingId,
     photos: publicBookingPhotos(ss, booking.bookingId),
+    completionPhotoSupport: !!booking.vendorId && !!PropertiesService.getScriptProperties().getProperty("PHOTO_BRIDGE_SECRET"),
+    completionPhotos: completionPhotoRows(ss).filter(function (r) {
+      return r.job_id === booking.bookingId && r.vendor_id === booking.vendorId && r.status === "READY";
+    }).map(completionPhotoPublic),
 
     booking: {
       serviceCode:  booking.serviceCode,
@@ -5411,6 +5415,7 @@ function buildVendorPortalModel(ss, vendor) {
     ok: true,
     view: "vendor",
     vendorId: vendor.vendorId,
+    completionHistory: vendorCompletionHistory(ss, vendor.vendorId),
 
     company: {
       displayName:       vendor.displayName,
@@ -8085,6 +8090,7 @@ function handleBookingPhoto(ss, data) {
   var lock = LockService.getScriptLock();
   try {
     lock.waitLock(8000);
+    if (data.purpose === "completion") return handleCompletionPhoto(ss, data);
     if (data.action === "cleanup" || data.action === "purged") return cleanupBookingPhotos(ss, data);
     var jobId = String(data.job_id || "");
     var kind = String(data.auth_kind || "");
@@ -8168,6 +8174,106 @@ function handleBookingPhoto(ss, data) {
   } finally {
     lock.releaseLock();
   }
+}
+
+/* Completion evidence is append-only and NEVER passed to customer-photo cleanup.
+ * Vendor ownership and room/job labels are stamped at upload, so the archive
+ * survives completion, later reassignment, or removal of the operational job.
+ */
+const COMPLETION_PHOTOS_HEADERS = ["photo_id", "job_id", "vendor_id", "room_key",
+  "room_label", "service_label", "scheduled_date", "object_key", "status",
+  "bytes", "created_at", "updated_at"];
+
+function completionPhotoRows(ss) {
+  var table = readTable(ss, "COMPLETION_PHOTOS");
+  if (!table) return [];
+  return table.rows.map(function (row, i) {
+    var out = { sheetRow: i + 2 };
+    COMPLETION_PHOTOS_HEADERS.forEach(function (key) { out[key] = row[table.headers.indexOf(key)]; });
+    return out;
+  });
+}
+
+function completionPhotoPublic(r) {
+  return { id: String(r.photo_id), roomKey: String(r.room_key),
+    createdAt: String(r.created_at), purpose: "completion" };
+}
+
+function vendorCompletionHistory(ss, vendorId) {
+  var jobs = {};
+  completionPhotoRows(ss).forEach(function (r) {
+    if (r.vendor_id !== vendorId || r.status !== "READY") return;
+    var job = jobs[r.job_id];
+    if (!job) job = jobs[r.job_id] = { bookingId: String(r.job_id),
+      serviceLabel: String(r.service_label), date: dateCellText(r.scheduled_date), rooms: [] };
+    var room = job.rooms.filter(function (x) { return x.key === r.room_key; })[0];
+    if (!room) { room = { key: String(r.room_key), label: String(r.room_label), photos: [] }; job.rooms.push(room); }
+    room.photos.push(completionPhotoPublic(r));
+  });
+  return Object.keys(jobs).map(function (id) { return jobs[id]; }).sort(function (a, b) {
+    return b.date.localeCompare(a.date) || b.bookingId.localeCompare(a.bookingId);
+  });
+}
+
+// Called only after Worker bridge authentication and acquisition of the lock.
+function handleCompletionPhoto(ss, data) {
+  var action = String(data.action || ""), kind = String(data.auth_kind || "");
+  var id = String(data.job_id || ""), roomKey = String(data.room_key || ""), tok = String(data.t || "");
+  var photoId = String(data.photo_id || "");
+  if (["begin", "commit", "read"].indexOf(action) < 0) return json({ ok: false, error: "bad_action" });
+  if (!tok || !id || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(photoId)) {
+    return json({ ok: false, error: "not_found" });
+  }
+  var rows = completionPhotoRows(ss), record = null;
+  rows.forEach(function (r) { if (r.photo_id === photoId) record = r; });
+  if (record && (record.job_id !== id || record.room_key !== roomKey)) return json({ ok: false, error: "not_found" });
+  var booking = null;
+  if (kind === "vendor") {
+    var vendorId = String(data.vendor_id || "");
+    if (action !== "read" || !vendorId || vendorToken(vendorId) !== tok || !getVendor(ss, vendorId) ||
+        !record || record.vendor_id !== vendorId) return json({ ok: false, error: "not_found" });
+  } else if (kind === "partner" && ticketToken(id, "partner") === tok) {
+    booking = getBooking(ss, id);
+    if (!booking || !booking.vendorId) return json({ ok: false, error: "not_found" });
+    if (booking.completedDate || String(booking.status).toLowerCase() === "cancelled") return json({ ok: false, error: "closed" });
+    if (record && record.vendor_id !== booking.vendorId) return json({ ok: false, error: "not_found" });
+  } else return json({ ok: false, error: "not_found" });
+  function result() { return json({ ok: true, status: record.status, object_key: record.object_key,
+    photo: completionPhotoPublic(record) }); }
+  if (action === "read") return record && record.status === "READY" ? result() : json({ ok: false, error: "not_found" });
+  var room = deriveRooms(booking.beds, booking.baths).filter(function (r) { return r.key === roomKey; })[0];
+  if (!room) return json({ ok: false, error: "unknown_room" });
+  var sheet = ss.getSheetByName("COMPLETION_PHOTOS"), now = new Date();
+  if (action === "begin") {
+    // Retrying an upload keeps its ID and original bytes, including after a lost response.
+    if (record) return result();
+    if (data.finished !== true) return json({ ok: false, error: "room_not_finished" });
+    var bytes = Number(data.bytes);
+    if (!Number.isInteger(bytes) || bytes < 4 || bytes > 1500000) return json({ ok: false, error: "bad_size" });
+    var count = rows.filter(function (r) { return r.job_id === id && r.room_key === roomKey &&
+      (r.status === "READY" || now - new Date(r.created_at) < 600000); }).length;
+    if (count >= 20) return json({ ok: false, error: "completion_photo_limit" });
+    if (!sheet) {
+      assertWritable("COMPLETION_PHOTOS"); sheet = ss.insertSheet("COMPLETION_PHOTOS");
+      sheet.appendRow(COMPLETION_PHOTOS_HEADERS); sheet.setFrozenRows(1);
+    }
+    var h = sheetHeaders(sheet);
+    if (COMPLETION_PHOTOS_HEADERS.some(function (key) { return h.indexOf(key) < 0; })) return json({ ok: false, error: "photo_unavailable" });
+    record = { photo_id: photoId, job_id: id, vendor_id: booking.vendorId,
+      room_key: roomKey, room_label: room.label, service_label: booking.serviceLabel,
+      scheduled_date: booking.scheduledDate, object_key: "completion-photos/" + photoId + ".jpg",
+      status: "PENDING", bytes: bytes, created_at: now, updated_at: now };
+    sheet.appendRow(h.map(function (key) { return record[key] === undefined ? "" : record[key]; }));
+    return result();
+  }
+  if (!record) return json({ ok: false, error: "not_found" });
+  if (record.status === "READY") return result();
+  if (record.status !== "PENDING") return json({ ok: false, error: "not_found" });
+  var headers = sheetHeaders(sheet);
+  sheet.getRange(record.sheetRow, headers.indexOf("status") + 1).setValue("READY");
+  sheet.getRange(record.sheetRow, headers.indexOf("updated_at") + 1).setValue(now);
+  record.status = "READY";
+  return result();
 }
 
 /* END BOOKING PHOTOS */

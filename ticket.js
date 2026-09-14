@@ -560,8 +560,14 @@
                 line.appendChild(el('span', 'tk-scope__name', r.label));
                 if (r.instruction) line.appendChild(el('span', 'tk-scope__ins', r.instruction));
                 if (typeof ServePhotos !== 'undefined' && (d.photos || []).some(function (p) { return p.roomKey === r.key; })) {
+                    line.appendChild(el('strong', 'room-photos__note', 'Customer reference photos'));
                     line.appendChild(ServePhotos.mount({ jobId: id, roomKey: r.key, roomLabel: r.label,
                         photos: d.photos, editable: false, auth: { auth_kind: 'partner', t: token } }));
+                }
+                if (typeof ServePhotos !== 'undefined' && d.completionPhotoSupport) {
+                    line.appendChild(ServePhotos.mount({ jobId: id, roomKey: r.key, roomLabel: r.label,
+                        purpose: 'completion', photos: d.completionPhotos || [], editable: !b.completed,
+                        auth: { auth_kind: 'partner', t: token } }));
                 }
                 ssec.appendChild(line);
             });

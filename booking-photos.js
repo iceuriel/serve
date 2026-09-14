@@ -57,7 +57,9 @@
         not_found: 'This photo is no longer available.'
     };
     function mount(opts) {
+        var completion = opts.purpose === 'completion';
         var wrap = node('div', 'room-photos');
+        if (completion) wrap.classList.add('room-photos--completion');
         var grid = node('div', 'room-photos__grid');
         var status = node('p', 'room-photos__status');
         status.setAttribute('role', 'status');
@@ -68,8 +70,11 @@
             observers.forEach(function (o) { o.disconnect(); }); active.delete(record); } };
         active.add(record);
         function auth(action, photoId) { return Object.assign({}, opts.auth, {
-            action: action, job_id: opts.jobId, room_key: opts.roomKey, photo_id: photoId }); }
-        function error(err) { status.textContent = messages[err.message] || 'That did not finish. Please try again.'; }
+            action: action, job_id: opts.jobId, room_key: opts.roomKey, photo_id: photoId,
+            purpose: completion ? 'completion' : 'instruction', finished: completion && !!(finished && finished.checked) }); }
+        function error(err) { status.textContent = err.message === 'completion_photo_limit' ? '20 completion photos are already saved for this room. Contact Serve if you need to add more.' :
+            err.message === 'room_not_finished' ? 'Finish cleaning this room, then check the confirmation before adding a photo.' :
+            messages[err.message] || 'That did not finish. Please try again.'; }
         function loading(value) {
             busy = value;
             if (value) wrap.setAttribute('data-photo-busy', 'true'); else wrap.removeAttribute('data-photo-busy');
@@ -94,7 +99,7 @@
                         if (disposed || !card.isConnected) return;
                         loaded = URL.createObjectURL(blob); urls.push(loaded);
                         var img = node('img'); img.src = loaded;
-                        img.alt = opts.roomLabel + ' instruction photo ' + (index + 1);
+                        img.alt = opts.roomLabel + (completion ? ' completion photo ' : ' instruction photo ') + (index + 1);
                         show.textContent = ''; show.appendChild(img);
                     } catch (_) { show.textContent = 'Retry photo'; }
                     finally { fetching = false; }
@@ -103,7 +108,7 @@
                     if (!loaded) { load(); return; }
                     var dialog = node('dialog', 'room-photos__dialog');
                     var close = node('button', 'tk-edit__save', 'Close photo'); close.type = 'button';
-                    var full = node('img'); full.src = loaded; full.alt = opts.roomLabel + ' instruction photo';
+                    var full = node('img'); full.src = loaded; full.alt = opts.roomLabel + (completion ? ' completion photo' : ' instruction photo');
                     dialog.appendChild(close); dialog.appendChild(full); wrap.appendChild(dialog);
                     close.addEventListener('click', function () { dialog.close(); });
                     dialog.addEventListener('close', function () { dialog.remove(); });
@@ -115,7 +120,11 @@
                         if (entries.some(function (e) { return e.isIntersecting; })) { observer.disconnect(); load(); }
                     }); observer.observe(card); observers.push(observer);
                 }
-                if (opts.editable) {
+                if (completion && p.createdAt) {
+                    var stamp = new Date(p.createdAt);
+                    card.appendChild(node('p', 'room-photos__note', 'Uploaded ' + (isNaN(stamp.getTime()) ? p.createdAt : stamp.toLocaleString())));
+                }
+                if (opts.editable && !completion) {
                     var remove = node('button', 'room-photos__remove', 'Remove'); remove.type = 'button';
                     remove.setAttribute('aria-label', 'Remove ' + opts.roomLabel + ' photo ' + (index + 1));
                     remove.addEventListener('click', async function () {
@@ -128,17 +137,36 @@
                 }
             });
         }
+        var finished;
+        if (completion) {
+            wrap.appendChild(node('strong', 'completion-photos__title', 'Finished-room photos'));
+            wrap.appendChild(node('p', 'completion-photos__instruction', opts.editable ?
+                'Finish cleaning ' + opts.roomLabel + ' first. Then take or upload photos showing the completed room.' :
+                'Saved completion evidence. These photos stay available in your company’s portal.'));
+            if (opts.editable) {
+                var confirmation = node('label', 'completion-photos__confirm');
+                finished = node('input'); finished.type = 'checkbox';
+                confirmation.appendChild(finished);
+                confirmation.appendChild(node('span', '', 'I have finished cleaning ' + opts.roomLabel));
+                wrap.appendChild(confirmation);
+            }
+        }
         wrap.appendChild(grid);
         if (opts.editable) {
             var actions = node('div', 'room-photos__actions');
             [['Take a photo', true], ['Upload photo', false]].forEach(function (pair) {
                 var input = node('input'); input.type = 'file'; input.accept = 'image/*'; input.hidden = true;
                 if (pair[1]) input.setAttribute('capture', 'environment');
-                var button = node('button', 'tk-edit__save', pair[0]); button.type = 'button';
-                button.addEventListener('click', function () { if (!busy) input.click(); });
+                var button = node('button', 'tk-edit__save', completion ? (pair[1] ? 'Take finished-room photo' : 'Upload finished-room photo') : pair[0]); button.type = 'button';
+                button.setAttribute('aria-label', button.textContent + ' for ' + opts.roomLabel);
+                button.addEventListener('click', function () {
+                    if (completion && !finished.checked) { error(new Error('room_not_finished')); finished.focus(); return; }
+                    if (!busy) input.click();
+                });
                 input.addEventListener('change', async function () {
                     var file = input.files && input.files[0]; if (!file || busy) return;
-                    if (photos.length >= 3) { error(new Error('photo_limit')); input.value = ''; return; }
+                    if (completion && !finished.checked) { error(new Error('room_not_finished')); input.value = ''; return; }
+                    if (photos.length >= (completion ? 20 : 3)) { error(new Error(completion ? 'completion_photo_limit' : 'photo_limit')); input.value = ''; return; }
                     loading(true); status.textContent = 'Preparing photo…';
                     var photoId = crypto.randomUUID();
                     try {
@@ -148,14 +176,16 @@
                         try { result = await request(auth('upload', photoId), blob); }
                         catch (err) { if (err.message !== 'photo_unavailable' && err.name !== 'AbortError' && !(err instanceof TypeError)) throw err;
                             result = await request(auth('upload', photoId), blob); }
-                        photos.push(result.photo); changed(); draw(); status.textContent = 'Saved — shared with your service partner';
+                        photos.push(result.photo); changed(); draw(); status.textContent = completion ? 'Saved — retained in your company’s completion photo archive' : 'Saved — shared with your service partner';
                     } catch (err) { error(err); }
                     finally { input.value = ''; loading(false); }
                 });
                 actions.appendChild(button); actions.appendChild(input);
             });
             wrap.appendChild(actions);
-            wrap.appendChild(node('p', 'room-photos__note', 'Optional · Up to 3 photos. Shared with Serve and your service partner.'));
+            wrap.appendChild(node('p', 'room-photos__note', completion ?
+                'Up to 20 photos per room. Saved photos cannot be removed or replaced. Your company can review them after the job closes.' :
+                'Optional · Up to 3 photos. Shared with Serve and your service partner.'));
         }
         wrap.appendChild(status); draw(); return wrap;
     }

@@ -1463,11 +1463,14 @@ async function handlePhotos(request, env) {
   } catch (_) { return reply({ ok: false, error: "bad_upload" }, 400); }
   const action = data.action;
   if (!["upload", "read", "delete"].includes(action)) return reply({ ok: false, error: "bad_action" }, 400);
+  const completion = data.purpose === "completion";
+  if (completion && action === "delete") return reply({ ok: false, error: "bad_action" }, 400);
   // Caller-supplied storage keys, internal actions, and bridge tokens are ignored.
   const auth = { event_type: "booking_photo", bridge_token: env.PHOTO_BRIDGE_SECRET,
     auth_kind: String(data.auth_kind || ""), contact_id: String(data.contact_id || ""),
     job_id: String(data.job_id || ""), room_key: String(data.room_key || ""),
-    photo_id: String(data.photo_id || ""), t: String(data.t || "") };
+    photo_id: String(data.photo_id || ""), t: String(data.t || ""),
+    vendor_id: String(data.vendor_id || ""), purpose: completion ? "completion" : "instruction" };
   if (Object.values(auth).some(v => v.length > 256)) return reply({ ok: false, error: "bad_upload" }, 400);
   const authorize = async (operation, extra = {}) => {
     const upstream = await relay(env.WEBHOOK_URL, { method: "POST",
@@ -1477,7 +1480,8 @@ async function handlePhotos(request, env) {
     const answer = JSON.parse(upstream.text);
     if (!answer || answer.ok !== true) return answer || { ok: false, error: "photo_unavailable" };
     // Old webhook health responses must never authorize storage.
-    if (!/^booking-photos\/[a-f0-9-]{36}\.jpg$/.test(answer.object_key || "") ||
+    if (answer.object_key !== (completion ? "completion-photos/" : "booking-photos/") + auth.photo_id + ".jpg" ||
+        !/^[a-f0-9-]{36}$/.test(auth.photo_id) ||
         !answer.photo || answer.photo.id !== auth.photo_id || answer.photo.roomKey !== auth.room_key) {
       throw new Error("photo_unavailable");
     }
@@ -1491,11 +1495,13 @@ async function handlePhotos(request, env) {
           bytes[bytes.length - 2] !== 255 || bytes[bytes.length - 1] !== 217) {
         return reply({ ok: false, error: "bad_upload" }, 400);
       }
-      const reservation = await authorize("begin", { bytes: bytes.length });
+      const reservation = await authorize("begin", { bytes: bytes.length, finished: data.finished === true });
       if (!reservation.ok) return reply(reservation);
       if (reservation.status === "READY") return reply({ ok: true, photo: reservation.photo });
       // First write wins on retries: an acknowledged photo is immutable.
-      await env.BOOKING_PHOTOS.put(reservation.object_key, bytes, {
+      // Locked completion objects cannot be overwritten. A retry after a lost
+      // commit skips the existing object and finalizes its original reservation.
+      if (!completion || !(await env.BOOKING_PHOTOS.head(reservation.object_key))) await env.BOOKING_PHOTOS.put(reservation.object_key, bytes, {
         onlyIf: { etagDoesNotMatch: "*" }, httpMetadata: { contentType: "image/jpeg" }
       });
       const committed = await authorize("commit");

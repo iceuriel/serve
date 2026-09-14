@@ -432,6 +432,47 @@ references from browser requests. Public view models return only `id`, `roomKey`
 and `createdAt`. Browser image requests use POST bodies; blob URLs are local to
 the page and are revoked when the view is replaced. No public R2 URL is enabled.
 
+### COMPLETION_PHOTOS — retained cleaner evidence (r47)
+
+Separate from customer instruction pictures in BOOKING_PHOTOS. Auto-created in
+Leads MASTER on the first authorized cleaner upload. Private image bytes stay
+in the same R2 bucket, under `completion-photos/<photo_id>.jpg`.
+
+`photo_id · job_id · vendor_id · room_key · room_label · service_label · scheduled_date · object_key · status · bytes · created_at · updated_at`
+
+The assigned vendor company, room label, service and date are captured when the
+upload begins. The vendor portal's `completionHistory` reads those snapshots,
+so completion, reassignment or removal of the JOBS row does not remove the
+original company's archive. Another company cannot inherit those photos simply
+by receiving the job. No object keys, credentials or customer contact details
+are returned in the archive. Photo metadata adds `purpose: completion`.
+
+`/api/photos` uses `purpose: completion` to select this separate authorization
+path. An open assigned job's partner ticket can upload/read; upload reservation
+requires `finished: true`. Vendor-company credentials can only read records
+stamped with their vendor_id, including after the ticket expires. Client tokens
+cannot read or write completion photos. No completion delete operation exists
+in either the Worker or Apps Script, and neither cleanup nor customer photo
+deletion can select this table or prefix.
+
+PENDING becomes READY only after R2 storage succeeds. Retries use the same UUID
+and preserve the first stored bytes; no overwrite or replacement is allowed.
+The UI displays success only after metadata commit. Maximum 20 READY/recent
+PENDING photos per room; older pending reservations do not consume new upload
+slots, but are retained and can be recovered by retry while the job is open.
+JPEG resizing/metadata stripping and size limits match customer pictures.
+
+Retention has no time limit. The deployment should include an indefinite R2
+bucket-lock rule scoped to `completion-photos/`, preserving customer-photo
+deletion outside that prefix. Account administrators can change retention rules;
+this is protection against routine app/lifecycle deletion, not a guarantee
+against account loss or an administrator overriding storage policy.
+
+The ticket places a finished-room confirmation and camera/upload buttons under
+each Scope room. Customer photos are labeled reference photos. The vendor owner
+has a permanent Completion photo archive, refreshed through the existing live
+view polling. Archived galleries have no delete/edit controls.
+
 ### Shared portal updates (r21 site)
 
 Customer portal, client/partner tickets and vendor portal reread their existing

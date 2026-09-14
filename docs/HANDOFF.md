@@ -63,6 +63,36 @@ preselecting Move In / Move Out is small but is a sales choice, so not done.
 **Concurrent.** Codex is active in this checkout (entry below). None of its files
 were staged or committed; only this entry was staged from this file.
 
+## Current work — 2026-09-14, Codex: cleaner completion photos
+
+**BACKEND r47 LIVE; site publication in progress.** User approved continuing
+deployment after the browser approval reviewer timed out and blocked its retry.
+The original editor matched committed r46 and was backed up privately. Saved
+r47 was read back byte-for-byte (normalized newlines); the existing /exec URL
+now answers `2026-09-14 r47`. No real booking or photo test records were created.
+
+Each Scope room gains finished-room confirmation, camera and upload controls.
+COMPLETION_PHOTOS auto-creates on the first authorized upload; objects use the
+private completion-photos/ R2 prefix. No delete/replace operation. The vendor
+company is stamped at upload, and its portal keeps a dated per-room archive
+after completion/reassignment/removal of the operational JOBS row. Customer
+reference photos remain separate; customers cannot read completion evidence.
+
+**Checked:** 30/30 suites; deliberate removal of finished confirmation, owner
+read check, archive owner filter and room binding each fails the new suite.
+390px iframe preview: finish-first guard, real browser JPEG compression/upload,
+saved image and reload. Synthetic booking completed, vendor archive still loads
+and enlarges the photo with no delete controls. Desktop gallery reviewed.
+Actual phone camera/device picker and live R2 upload have not been exercised.
+
+**Remaining:** push site after backend, verify production assets, and add an
+indefinite R2 bucket lock for completion-photos/ only. Cloudflare browser session
+expired; the available Google login reached a different account without
+the existing bucket. Founder was asked to switch to the account owning Worker
+serve / bucket serve-booking-photos (account f8247a197ff42a877f92b16d227bcc0e).
+Do not claim the storage lock exists yet. App cleanup cannot select completion
+photos, regardless. Preserve unrelated AGENTS.md/CLAUDE.md changes and images.
+
 ## Current work — 2026-09-14, Claude Code: r46, the move plan box never drew
 
 **COMMITTED AND PUSHED. NEEDS THE FOUNDER'S PASTE of `apps-script/webhook.gs`;
