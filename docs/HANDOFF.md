@@ -15,13 +15,18 @@ except where a later section supersedes them.
 
 ## Current work — 2026-09-14, Claude Code: r48, the cleaner ticket's rooms simplified (photos + notes)
 
-**COMMITTED LOCALLY, NOT PUSHED. NEEDS THE FOUNDER'S PASTE of
-`apps-script/webhook.gs` FIRST — `/exec` must answer `2026-09-14 r48` — and
-only then `git push`.** Pushing before the paste breaks the cleaner ticket
-against live r47: uploads are refused (`room_not_finished`), and a note
-(`partner_note`) falls through to `handleEvent` as an EVENTS row carrying the
-ticket token. Pasting r48 first is safe with the site now live: r48 ignores
-r47's `finished` flag and the old vendor page tolerates the missing archive.
+**DEPLOYED IN ORDER AND VERIFIED IN PRODUCTION (2026-09-14).** The founder
+pasted webhook.gs; `/exec` answered `2026-09-14 r48` before anything was
+pushed. A `partner_note` with a fake token through production `/api/job`
+returned `not_found` (r47 would have logged it as an event). Then `0f613ee`
+was pushed; Workers Builds published it in about a minute. Production
+`ticket.js`, `booking-photos.js`, `vendor.js`, `portal.js` and `style.css`
+match the repo; `/j` and `/v` no longer link `completion-photos.css`, which now
+404s; `/api/photos` with `purpose: completion` and a fake token answers
+`not_found`. Not verified live: a real ticket, upload or note (no real signed
+link was used), or a real phone. (Keep the order for any later change: pushing
+before a paste would make uploads fail on r47 and drop a note, with its ticket
+token, into EVENTS.)
 
 **Why.** The founder did not like r47 (Codex, entry below, now superseded): too
 much, and every Scope room expanded into a large panel. Asked for: rooms that
@@ -82,9 +87,9 @@ write a phone number there, which is the contact-around-Serve route the partner
 surfaces otherwise avoid. Delivered as asked; say if customer visibility should
 be narrowed.
 
-**Next action.** Founder pastes webhook.gs r48 → confirm `/exec` says r48 →
-`git push origin master` → confirm production serves the new ticket.js and no
-completion-photos.css.
+**Next action.** None required. First real job: open its partner ticket on a
+phone, add a photo and a note, and confirm both appear in that job on the
+vendor portal and the note on the customer portal.
 
 ## Current work — 2026-09-14, Claude Code: professionals get the ZIP-check hero
 
