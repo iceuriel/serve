@@ -1,7 +1,7 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-14  ·  master  ·  r45 — a plan after a move
+ * VERSION STAMP:  2026-09-14  ·  master  ·  r46 — a ZIP read back from Sheets keeps its zero
  *
  * r45 = SOMEBODY WHO BOOKED A MOVE WAS NEVER OFFERED A PLAN. createRecurringPlan
  *      refuses a move booking by design, and nothing else asked. The portal now
@@ -1401,7 +1401,7 @@ function routeGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-14 r45" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-14 r46" });
 }
 
 
@@ -3541,7 +3541,10 @@ function isMoveBooking(b) {
  */
 function homeSpecFor(b) {
   if (!b) return null;
-  var zip = String(b.zip || "").trim();
+  /* zipN, NEVER the raw cell. appendRow hands Sheets "02116" and Sheets keeps
+     the NUMBER 2116, so every Boston ZIP comes back four digits long. r45
+     first shipped reading the cell as text: no move customer saw the box. */
+  var zip = zipN(b.zip);
   var beds = Number(b.beds), baths = Number(b.baths);
   if (!/^\d{5}$/.test(zip)) return null;
   if (b.beds === null || !isFinite(beds) || beds < 0) return null;

@@ -1931,7 +1931,10 @@ head('25. r45 — a plan after a move');
     set('condition', 'heavy');
     set('beds', 3); set('baths', 2); set('quoted_price', 640);
     set('scheduled_date', '2026-10-10'); set('start_time', '9:00 AM');
-    set('address', '9 Tremont St'); set('unit', '2'); set('zip', '02116');
+    /* A NUMBER, NOT '02116'. appendRow hands Sheets the text and Sheets keeps
+       2116 — every Boston ZIP loses its leading zero. r45 first shipped reading
+       the text fixture, passed, and drew no box for any real booking. */
+    set('address', '9 Tremont St'); set('unit', '2'); set('zip', 2116);
     set('quote_meta', '{"levels":2}');
     set('name', 'Mo Ver'); set('email', leadId); set('phone', '617-555-0199');
     set('vendor_id', 'VEN-MOVE');

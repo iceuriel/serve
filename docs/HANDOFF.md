@@ -13,6 +13,40 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-14, Claude Code: r46, the move plan box never drew
+
+**COMMITTED AND PUSHED. NEEDS THE FOUNDER'S PASTE of `apps-script/webhook.gs`;
+`/exec` must answer `2026-09-14 r46`.** Apps Script only — no site change.
+
+**The report.** r45 was pasted (`/exec` answered r45) and the site was live, but
+the founder's move-in / move-out test booking showed no plan box.
+
+**The cause.** `homeSpecFor()` required the stored ZIP to match `/^\d{5}$/`.
+`writeRow` uses `appendRow`, and Sheets turns `"02116"` into the NUMBER
+`2116`, so every Boston ZIP reads back four digits long. The spec came back
+null and `movePlanForPortal` returned null for EVERY real move booking. The
+same null would have made `movePlanPrices` refuse every write.
+
+**Why 29/29 and 24/24 did not catch it.** The section 25 fixture stored the ZIP
+as the text `'02116'` — something real Sheets never gives back. A green suite
+and a clean mutation run proved the code agreed with a fixture that did not
+describe production. `zipN()` — "Survives Sheets' numeric coercion" — already
+existed for exactly this.
+
+**Fix.** `homeSpecFor` reads `zipN(b.zip)`. The fixture now stores the number
+`2116`; against the r45 code it fails at "a move customer is shown the plan
+box -> null" (checked before the fix), and passes after. 29/29.
+
+**Lesson for fixtures:** seed sheet cells the way Sheets returns them (numbers
+for ZIPs, beds, prices; Dates for dates), not the way the code wrote them.
+
+**After the paste:** reopen the test booking's portal link. If the box is still
+missing, the next suspects are that booking's row: blank or non-numeric
+`beds`/`baths`, a `job_status` of cancelled, or a `service_type` that does not
+contain "move".
+
+---
+
 ## Current work — 2026-09-14, Claude Code: r45, a plan after a move
 
 **PUSHED AND VERIFIED (site + Worker, `d660d0d`). WAITING ON THE FOUNDER'S PASTE
