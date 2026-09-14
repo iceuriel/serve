@@ -222,7 +222,7 @@
        ======================================================== */
     function renderJobs() {
         var list = model.bookings || [];
-        if (!list.length && !(model.completionHistory || []).length) {
+        if (!list.length) {
             bodyEl.appendChild(el('p', 'tk-val',
                 'No jobs assigned yet. They appear here as soon as Serve books one to you.'));
             return;
@@ -238,31 +238,6 @@
             bodyEl.appendChild(el('h2', 'portal__h', 'Completed'));
             past.forEach(function (b) { bodyEl.appendChild(jobRow(b)); });
         }
-        var history = model.completionHistory || [];
-        bodyEl.appendChild(el('h2', 'portal__h', 'Completion photo archive'));
-        bodyEl.appendChild(el('p', 'tk-val', history.length ?
-            'Finished-room photos stay here after a job is completed. Open a booking to review them.' :
-            'Photos your cleaners save from their job tickets will appear here and remain available after completion.'));
-        history.forEach(function (job) {
-            var archive = el('details', 'pb');
-            archive.setAttribute('data-live-key', 'photos-' + job.bookingId);
-            var summary = el('summary', 'pb__sum');
-            summary.appendChild(el('span', 'pb__title', job.serviceLabel || 'Cleaning'));
-            summary.appendChild(el('span', 'pb__when', job.date || 'Date not recorded'));
-            var count = (job.rooms || []).reduce(function (n, room) { return n + room.photos.length; }, 0);
-            summary.appendChild(el('span', 'pb__price', count + (count === 1 ? ' photo' : ' photos')));
-            archive.appendChild(summary);
-            var inner = el('div', 'pb__body'); inner.appendChild(el('p', 'room-photos__note', 'Booking ' + job.bookingId));
-            (job.rooms || []).forEach(function (room) {
-                inner.appendChild(el('h3', 'tk-scope__name', room.label));
-                if (typeof ServePhotos !== 'undefined') inner.appendChild(ServePhotos.mount({
-                    jobId: job.bookingId, roomKey: room.key, roomLabel: room.label,
-                    purpose: 'completion', photos: room.photos, editable: false,
-                    auth: { auth_kind: 'vendor', vendor_id: id, t: token }
-                }));
-            });
-            archive.appendChild(inner); bodyEl.appendChild(archive);
-        });
     }
 
     function jobRow(b) {
@@ -294,6 +269,23 @@
         add(inner, fact('Home', b.home));
         add(inner, fact('Condition', b.condition));
         add(inner, fact('Status', b.status));
+
+        /* What the cleaner left on the ticket, room by room: their photos and
+           notes. Only rooms with something in them. */
+        (b.report || []).forEach(function (room, i) {
+            if (i === 0) inner.appendChild(el('h3', 'pb__h', 'From the job ticket'));
+            var blk = el('div', 'tk-blk');
+            blk.appendChild(el('div', 'tk-lbl', room.label));
+            if (room.note) blk.appendChild(el('div', 'tk-val', room.note));
+            if ((room.photos || []).length && typeof ServePhotos !== 'undefined') {
+                blk.appendChild(ServePhotos.mount({
+                    jobId: b.bookingId, roomKey: room.key, roomLabel: room.label,
+                    purpose: 'completion', photos: room.photos, editable: false,
+                    auth: { auth_kind: 'vendor', vendor_id: id, t: token }
+                }));
+            }
+            inner.appendChild(blk);
+        });
 
         /* The job ticket is where the scope, the instructions and the access
            notes live. One place for those, not two that can disagree. */

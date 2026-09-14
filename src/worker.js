@@ -1495,7 +1495,7 @@ async function handlePhotos(request, env) {
           bytes[bytes.length - 2] !== 255 || bytes[bytes.length - 1] !== 217) {
         return reply({ ok: false, error: "bad_upload" }, 400);
       }
-      const reservation = await authorize("begin", { bytes: bytes.length, finished: data.finished === true });
+      const reservation = await authorize("begin", { bytes: bytes.length });
       if (!reservation.ok) return reply(reservation);
       if (reservation.status === "READY") return reply({ ok: true, photo: reservation.photo });
       // First write wins on retries: an acknowledged photo is immutable.

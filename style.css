@@ -4468,6 +4468,13 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
 .room-photos__dialog img { display: block; max-width: 100%; max-height: 78vh; margin: 12px auto 0; object-fit: contain; }
 @media (max-width: 480px) { .room-photos__grid { gap: 6px; } }
 .tk-room > .room-photos { padding: 0 .85rem .85rem; box-sizing: border-box; margin-top: 0; }
+/* The cleaner's room box: what the customer asked for, one Add photos row with
+   its reminder beside the button, then the optional note. */
+.tk-room__from { padding: 0 .85rem .85rem; }
+.tk-room__from .room-photos { margin-top: 8px; }
+.room-photos__grid:empty + .room-photos__actions { margin-top: 0; }
+.room-photos__actions { align-items: center; }
+.room-photos__actions .room-photos__note { margin: 0; }
 
 
 /* ---- The partner's work, and what people said about it (r35) ------------ */

@@ -151,8 +151,12 @@
 
        Optimistic UI is deliberately NOT used. A note the customer believes was
        saved and was not is worse than a half-second wait — the cleaner arrives
-       without it and nobody finds out until the day. ======================= */
-    function saveInstruction(scopeType, scopeKey, text, statusEl, btn) {
+       without it and nobody finds out until the day.
+
+       `payload` is the rest of the body: an instruction from the customer's
+       view, or a cleaner's room note (partner_note) from the partner view.
+       Apps Script checks which token may send which. ======================= */
+    function saveInstruction(payload, statusEl, btn) {
         statusEl.textContent = 'Saving…';
         statusEl.className = 'tk-save';
         if (btn) btn.disabled = true;
@@ -160,14 +164,7 @@
         return fetch(API, {
             method: 'POST',
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify({
-                event_type:  'booking_instruction',
-                job_id:      id,
-                t:           token,
-                scope_type:  scopeType,
-                scope_key:   scopeKey,
-                instruction: text,
-            }),
+            body: JSON.stringify(Object.assign({ job_id: id, t: token }, payload)),
         })
         .then(function (r) { return r.json(); })
         .then(function (d) {
@@ -224,7 +221,10 @@
 
         btn.addEventListener('click', function () {
             var text = ta.value.trim();
-            saveInstruction(opts.scopeType, opts.scopeKey, text, status, btn).then(function (ok) {
+            var payload = opts.payload ? opts.payload(text) : {
+                event_type: 'booking_instruction', scope_type: opts.scopeType,
+                scope_key: opts.scopeKey, instruction: text };
+            saveInstruction(payload, status, btn).then(function (ok) {
                 if (ok && ta.value.trim() !== text) {
                     status.textContent = 'Not saved yet'; status.className = 'tk-save is-dirty';
                 }
@@ -551,26 +551,13 @@
         }
         add(bodyEl, block('Add-ons', b.addOns));
 
-        /* Scope: every room, and what was asked for in it. */
+        /* Scope: every room, closed until tapped, the way the customer's rooms
+           are. Inside: what the customer asked for, then the cleaner's photos
+           and an optional note. */
         var scope = d.scope || [];
         if (scope.length) {
             var ssec = section('Scope');
-            scope.forEach(function (r) {
-                var line = el('div', 'tk-scope');
-                line.appendChild(el('span', 'tk-scope__name', r.label));
-                if (r.instruction) line.appendChild(el('span', 'tk-scope__ins', r.instruction));
-                if (typeof ServePhotos !== 'undefined' && (d.photos || []).some(function (p) { return p.roomKey === r.key; })) {
-                    line.appendChild(el('strong', 'room-photos__note', 'Customer reference photos'));
-                    line.appendChild(ServePhotos.mount({ jobId: id, roomKey: r.key, roomLabel: r.label,
-                        photos: d.photos, editable: false, auth: { auth_kind: 'partner', t: token } }));
-                }
-                if (typeof ServePhotos !== 'undefined' && d.completionPhotoSupport) {
-                    line.appendChild(ServePhotos.mount({ jobId: id, roomKey: r.key, roomLabel: r.label,
-                        purpose: 'completion', photos: d.completionPhotos || [], editable: !b.completed,
-                        auth: { auth_kind: 'partner', t: token } }));
-                }
-                ssec.appendChild(line);
-            });
+            scope.forEach(function (r) { ssec.appendChild(scopeRoom(d, r)); });
             bodyEl.appendChild(ssec);
         }
 
@@ -609,5 +596,53 @@
         asec.appendChild(el('div', 'tk-note',
             'Entry codes are never on this page. If you need one, message Uriel.'));
         bodyEl.appendChild(asec);
+    }
+
+    function scopeRoom(d, r) {
+        var det = document.createElement('details');
+        det.className = 'tk-room';
+        det.setAttribute('data-live-key', r.key);
+        var sum = document.createElement('summary');
+        sum.className = 'tk-room__sum';
+        sum.appendChild(el('span', 'tk-room__name', r.label));
+        var flag = el('span', 'tk-room__flag');
+        sum.appendChild(flag);
+        det.appendChild(sum);
+
+        /* A called-off visit keeps what was said, and offers nothing to add. */
+        var open = !(d.booking && d.booking.cancelled);
+        var mine = (d.completionPhotos || []).filter(function (p) { return p.roomKey === r.key; });
+        var theirs = (d.photos || []).some(function (p) { return p.roomKey === r.key; });
+        function showFlag(count) {
+            flag.textContent = [r.instruction || theirs ? 'Has instructions' : '',
+                count ? count + (count === 1 ? ' photo' : ' photos') : ''].filter(Boolean).join(' · ') || 'Add photos';
+        }
+        showFlag(mine.length);
+
+        if (r.instruction || theirs) {
+            var from = el('div', 'tk-room__from');
+            from.appendChild(el('div', 'tk-lbl', 'From the customer'));
+            if (r.instruction) from.appendChild(el('div', 'tk-val', r.instruction));
+            if (theirs && typeof ServePhotos !== 'undefined') {
+                from.appendChild(ServePhotos.mount({ jobId: id, roomKey: r.key, roomLabel: r.label,
+                    photos: d.photos, editable: false, auth: { auth_kind: 'partner', t: token } }));
+            }
+            det.appendChild(from);
+        }
+        if (d.completionPhotoSupport && typeof ServePhotos !== 'undefined') {
+            det.appendChild(ServePhotos.mount({ jobId: id, roomKey: r.key, roomLabel: r.label,
+                purpose: 'completion', photos: mine, editable: open,
+                auth: { auth_kind: 'partner', t: token },
+                onChange: function (photos) { showFlag(photos.length); } }));
+        }
+        det.appendChild(editor({
+            label: 'Notes (optional)', scopeType: 'NOTE', scopeKey: r.key,
+            value: r.note, rows: 2, readOnly: !open,
+            placeholder: 'Anything the customer, your company or Serve should know.',
+            payload: function (text) {
+                return { event_type: 'partner_note', room_key: r.key, note: text };
+            },
+        }));
+        return det;
     }
 })();

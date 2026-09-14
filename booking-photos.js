@@ -54,12 +54,16 @@
         expired: 'This booking link has closed.',
         unsupported_photo: 'Please choose a JPG, PNG or WebP photo under 25 MB. If a phone photo will not open, try a screenshot.',
         retry_upload: 'This upload expired. Choose the photo again.',
-        not_found: 'This photo is no longer available.'
+        not_found: 'This photo is no longer available.',
+        completion_photo_limit: 'This room already has 20 photos.'
     };
+    /* Two kinds of room photo. A customer's (the default) shows the cleaner what
+       they mean: up to 3, removable. A cleaner's (purpose: 'completion') shows
+       the finished room: one Add photos button, several at a time, and no
+       remove — what was uploaded stays with Serve and the vendor company. */
     function mount(opts) {
         var completion = opts.purpose === 'completion';
         var wrap = node('div', 'room-photos');
-        if (completion) wrap.classList.add('room-photos--completion');
         var grid = node('div', 'room-photos__grid');
         var status = node('p', 'room-photos__status');
         status.setAttribute('role', 'status');
@@ -71,16 +75,26 @@
         active.add(record);
         function auth(action, photoId) { return Object.assign({}, opts.auth, {
             action: action, job_id: opts.jobId, room_key: opts.roomKey, photo_id: photoId,
-            purpose: completion ? 'completion' : 'instruction', finished: completion && !!(finished && finished.checked) }); }
-        function error(err) { status.textContent = err.message === 'completion_photo_limit' ? '20 completion photos are already saved for this room. Contact Serve if you need to add more.' :
-            err.message === 'room_not_finished' ? 'Finish cleaning this room, then check the confirmation before adding a photo.' :
-            messages[err.message] || 'That did not finish. Please try again.'; }
+            purpose: completion ? 'completion' : 'instruction' }); }
+        function error(err) { status.textContent = messages[err.message] || 'That did not finish. Please try again.'; }
         function loading(value) {
             busy = value;
             if (value) wrap.setAttribute('data-photo-busy', 'true'); else wrap.removeAttribute('data-photo-busy');
             wrap.querySelectorAll('button, input').forEach(function (n) { n.disabled = value; });
         }
         function changed() { if (opts.onChange) opts.onChange(photos.slice()); }
+        // One photo, compressed and stored. `of` is '' or ' 2 of 3' for a batch.
+        async function upload(file, of) {
+            status.textContent = 'Preparing photo' + of + '…';
+            var photoId = crypto.randomUUID();
+            var blob = await compress(file); status.textContent = 'Uploading' + of + '…';
+            var result;
+            // Retry the same ID: a lost response must not create a duplicate.
+            try { result = await request(auth('upload', photoId), blob); }
+            catch (err) { if (err.message !== 'photo_unavailable' && err.name !== 'AbortError' && !(err instanceof TypeError)) throw err;
+                result = await request(auth('upload', photoId), blob); }
+            photos.push(result.photo); changed(); draw();
+        }
         function draw() {
             observers.forEach(function (o) { o.disconnect(); }); observers = [];
             urls.forEach(function (u) { URL.revokeObjectURL(u); }); urls = [];
@@ -120,10 +134,6 @@
                         if (entries.some(function (e) { return e.isIntersecting; })) { observer.disconnect(); load(); }
                     }); observer.observe(card); observers.push(observer);
                 }
-                if (completion && p.createdAt) {
-                    var stamp = new Date(p.createdAt);
-                    card.appendChild(node('p', 'room-photos__note', 'Uploaded ' + (isNaN(stamp.getTime()) ? p.createdAt : stamp.toLocaleString())));
-                }
                 if (opts.editable && !completion) {
                     var remove = node('button', 'room-photos__remove', 'Remove'); remove.type = 'button';
                     remove.setAttribute('aria-label', 'Remove ' + opts.roomLabel + ' photo ' + (index + 1));
@@ -137,55 +147,50 @@
                 }
             });
         }
-        var finished;
-        if (completion) {
-            wrap.appendChild(node('strong', 'completion-photos__title', 'Finished-room photos'));
-            wrap.appendChild(node('p', 'completion-photos__instruction', opts.editable ?
-                'Finish cleaning ' + opts.roomLabel + ' first. Then take or upload photos showing the completed room.' :
-                'Saved completion evidence. These photos stay available in your company’s portal.'));
-            if (opts.editable) {
-                var confirmation = node('label', 'completion-photos__confirm');
-                finished = node('input'); finished.type = 'checkbox';
-                confirmation.appendChild(finished);
-                confirmation.appendChild(node('span', '', 'I have finished cleaning ' + opts.roomLabel));
-                wrap.appendChild(confirmation);
-            }
-        }
         wrap.appendChild(grid);
-        if (opts.editable) {
+        if (opts.editable && completion) {
+            var actions = node('div', 'room-photos__actions');
+            // No `capture`: a phone then offers the camera AND the photo library.
+            var input = node('input'); input.type = 'file'; input.accept = 'image/*'; input.multiple = true; input.hidden = true;
+            var button = node('button', 'tk-edit__save', 'Add photos'); button.type = 'button';
+            button.setAttribute('aria-label', 'Add photos of ' + opts.roomLabel);
+            button.addEventListener('click', function () { if (!busy) input.click(); });
+            input.addEventListener('change', async function () {
+                var files = Array.prototype.slice.call(input.files || []);
+                if (!files.length || busy) { input.value = ''; return; }
+                loading(true);
+                try {
+                    for (var i = 0; i < files.length; i++) {
+                        if (photos.length >= 20) throw new Error('completion_photo_limit');
+                        await upload(files[i], files.length > 1 ? ' ' + (i + 1) + ' of ' + files.length : '');
+                    }
+                    status.textContent = files.length > 1 ? files.length + ' photos saved' : 'Photo saved';
+                } catch (err) { error(err); }
+                finally { input.value = ''; loading(false); }
+            });
+            actions.appendChild(button); actions.appendChild(input);
+            actions.appendChild(node('p', 'room-photos__note', 'Add photos when completed'));
+            wrap.appendChild(actions);
+        } else if (opts.editable) {
             var actions = node('div', 'room-photos__actions');
             [['Take a photo', true], ['Upload photo', false]].forEach(function (pair) {
                 var input = node('input'); input.type = 'file'; input.accept = 'image/*'; input.hidden = true;
                 if (pair[1]) input.setAttribute('capture', 'environment');
-                var button = node('button', 'tk-edit__save', completion ? (pair[1] ? 'Take finished-room photo' : 'Upload finished-room photo') : pair[0]); button.type = 'button';
+                var button = node('button', 'tk-edit__save', pair[0]); button.type = 'button';
                 button.setAttribute('aria-label', button.textContent + ' for ' + opts.roomLabel);
-                button.addEventListener('click', function () {
-                    if (completion && !finished.checked) { error(new Error('room_not_finished')); finished.focus(); return; }
-                    if (!busy) input.click();
-                });
+                button.addEventListener('click', function () { if (!busy) input.click(); });
                 input.addEventListener('change', async function () {
                     var file = input.files && input.files[0]; if (!file || busy) return;
-                    if (completion && !finished.checked) { error(new Error('room_not_finished')); input.value = ''; return; }
-                    if (photos.length >= (completion ? 20 : 3)) { error(new Error(completion ? 'completion_photo_limit' : 'photo_limit')); input.value = ''; return; }
-                    loading(true); status.textContent = 'Preparing photo…';
-                    var photoId = crypto.randomUUID();
-                    try {
-                        var blob = await compress(file); status.textContent = 'Uploading…';
-                        var result;
-                        // Retry the same ID: a lost response must not create a duplicate.
-                        try { result = await request(auth('upload', photoId), blob); }
-                        catch (err) { if (err.message !== 'photo_unavailable' && err.name !== 'AbortError' && !(err instanceof TypeError)) throw err;
-                            result = await request(auth('upload', photoId), blob); }
-                        photos.push(result.photo); changed(); draw(); status.textContent = completion ? 'Saved — retained in your company’s completion photo archive' : 'Saved — shared with your service partner';
-                    } catch (err) { error(err); }
+                    if (photos.length >= 3) { error(new Error('photo_limit')); input.value = ''; return; }
+                    loading(true);
+                    try { await upload(file, ''); status.textContent = 'Saved — shared with your service partner'; }
+                    catch (err) { error(err); }
                     finally { input.value = ''; loading(false); }
                 });
                 actions.appendChild(button); actions.appendChild(input);
             });
             wrap.appendChild(actions);
-            wrap.appendChild(node('p', 'room-photos__note', completion ?
-                'Up to 20 photos per room. Saved photos cannot be removed or replaced. Your company can review them after the job closes.' :
-                'Optional · Up to 3 photos. Shared with Serve and your service partner.'));
+            wrap.appendChild(node('p', 'room-photos__note', 'Optional · Up to 3 photos. Shared with Serve and your service partner.'));
         }
         wrap.appendChild(status); draw(); return wrap;
     }

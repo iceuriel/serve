@@ -13,6 +13,79 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-14, Claude Code: r48, the cleaner ticket's rooms simplified (photos + notes)
+
+**COMMITTED LOCALLY, NOT PUSHED. NEEDS THE FOUNDER'S PASTE of
+`apps-script/webhook.gs` FIRST — `/exec` must answer `2026-09-14 r48` — and
+only then `git push`.** Pushing before the paste breaks the cleaner ticket
+against live r47: uploads are refused (`room_not_finished`), and a note
+(`partner_note`) falls through to `handleEvent` as an EVENTS row carrying the
+ticket token. Pasting r48 first is safe with the site now live: r48 ignores
+r47's `finished` flag and the old vendor page tolerates the missing archive.
+
+**Why.** The founder did not like r47 (Codex, entry below, now superseded): too
+much, and every Scope room expanded into a large panel. Asked for: rooms that
+open/close like the customer's, one add-photos button (take or upload) with a
+slight "Add photos when completed", and an optional note box for the
+vendor/client/Serve.
+
+**What changed.**
+- `ticket.js` — Scope rooms are closed `<details class="tk-room">` (same as the
+  customer's), flag "Has instructions · N photos" / "Add photos". Inside: "From
+  the customer" (instruction + their photos, read-only), the photo control, and
+  "Notes (optional)" saving `partner_note`. `saveInstruction` now takes a
+  payload; the customer view's body is unchanged. Called-off visit: read-only.
+- `booking-photos.js` — cleaner kind (`purpose: completion`): one **Add photos**
+  button, `accept="image/*" multiple`, no `capture` (phone offers camera or
+  library), several uploaded in turn, reminder beside it. r47's checkbox, title,
+  timestamps and retention copy removed. Customer kind unchanged (two buttons,
+  3 per room, Remove).
+- `vendor.js` — r47's "Completion photo archive" section removed; each job row
+  shows "From the job ticket": room, note, photos (read-only).
+- `portal.js` — "Notes from your service partner" on upcoming and finished
+  bookings (room label + text only). Cleaner photos are NOT shown to customers.
+- `apps-script/webhook.gs` r48 — new `PARTNER_NOTES` tab + `handlePartnerNote`
+  (partner token only; closed/cancelled refused; formula-looking text written
+  as text). Own tab on purpose: `sortInstructions` would file an unknown scope
+  as the customer's general note. `scope[].note`, vendor `bookings[].report`
+  (replaces `completionHistory`), portal `bookings[].partnerNotes`.
+  `COMPLETION_PHOTOS` drops room_label/service_label/scheduled_date and the
+  finished requirement. `src/worker.js` stops forwarding `finished`.
+- `completion-photos.css` deleted (links in j.html/v.html, build-site.sh);
+  five small rules in style.css.
+- Tests: `completion-photos.test.js` rewritten for r48 + notes (auth, whitelist,
+  vendor stamp, in-place update, formula, blank, cancel/complete);
+  new `cleaner-ticket-render.test.js` boots the real ticket.js,
+  booking-photos.js and vendor.js; portal-render section M. SCHEMA updated.
+
+**Checked.** 31/31 suites. 17 deliberate breaks, each failing its suite
+(client token accepted, vendor id leaked to customer, vendor stamp ignored,
+finished requirement restored, formula raw, rooms open, note saved as an
+instruction, capture forced, single file, batch cut short, reminder dropped,
+flag not updated, customer payload changed, vendor report or finished-booking
+notes dropped, blank note creating the tab). Real headless Chrome against the
+real Worker + real webhook.gs over in-memory Sheets/R2, 390px and 1280px: five
+rooms closed (331px for the section), room opens to button + reminder + note;
+two real JPEGs picked → compressed, two READY rows stamped with the vendor, two
+`completion-photos/` objects, thumbnails drawn, flag "2 photos"; note saved to
+PARTNER_NOTES; both back after reload; customer instruction untouched; vendor
+portal shows note + 2 photos in the job, no archive; customer portal shows the
+note and no cleaner photos; no page errors. Not checked: a real phone's
+picker, live R2, live Sheets.
+
+**Not done, on purpose.** No R2 bucket lock (r47's proposal; optional, and it
+would stop Serve deleting a wrongly uploaded photo). Client `/j` ticket does not
+show cleaner notes — the customer's page is the portal.
+
+**Flag for the founder.** Notes reach the customer verbatim; a cleaner could
+write a phone number there, which is the contact-around-Serve route the partner
+surfaces otherwise avoid. Delivered as asked; say if customer visibility should
+be narrowed.
+
+**Next action.** Founder pastes webhook.gs r48 → confirm `/exec` says r48 →
+`git push origin master` → confirm production serves the new ticket.js and no
+completion-photos.css.
+
 ## Current work — 2026-09-14, Claude Code: professionals get the ZIP-check hero
 
 **COMMITTED (`e1aefa3`), PUSHED, AND VERIFIED IN PRODUCTION.** Site only.
@@ -142,7 +215,7 @@ preselecting Move In / Move Out is small but is a sales choice, so not done.
 **Concurrent.** Codex is active in this checkout (entry below). None of its files
 were staged or committed; only this entry was staged from this file.
 
-## Current work — 2026-09-14, Codex: cleaner completion photos
+## Current work — 2026-09-14, Codex: cleaner completion photos — SUPERSEDED by r48 above
 
 **BACKEND r47 LIVE; site publication in progress.** User approved continuing
 deployment after the browser approval reviewer timed out and blocked its retry.

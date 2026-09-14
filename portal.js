@@ -1186,6 +1186,7 @@
                         photos: b.photos, editable: false, auth: { auth_kind: 'portal', contact_id: id, t: token } }));
                 });
             }
+            add(inner, partnerNotes(b));
             add(inner, line('Completed', prettyDate(b.completed) || b.completed));
             add(inner, line('Payment', b.paid ? 'Paid' : 'Due'));
             inner.appendChild(el('p', 'tk-note',
@@ -1203,6 +1204,7 @@
            the question unanswered. */
         inner.appendChild(el('h3', 'pb__h', 'Your service partner'));
         inner.appendChild(ServePartner.block(b.partner));
+        add(inner, partnerNotes(b));
 
         /* Rooms, each with a note the customer can add. */
         (b.rooms || []).forEach(function (r) {
@@ -1343,6 +1345,17 @@
         b.appendChild(el('div', 'tk-lbl', label));
         b.appendChild(el('div', 'tk-val', value));
         return b;
+    }
+
+    /* What the cleaner noted on the job ticket, room by room. From the
+       company, never a named person — the model carries no author. */
+    function partnerNotes(b) {
+        var notes = b.partnerNotes || [];
+        if (!notes.length) return null;
+        var blk = el('div', 'tk-blk');
+        blk.appendChild(el('div', 'tk-lbl', 'Notes from your service partner'));
+        notes.forEach(function (n) { blk.appendChild(el('div', 'tk-val', n.roomLabel + ': ' + n.note)); });
+        return blk;
     }
 
     /* ========================================================

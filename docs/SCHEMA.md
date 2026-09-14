@@ -432,46 +432,71 @@ references from browser requests. Public view models return only `id`, `roomKey`
 and `createdAt`. Browser image requests use POST bodies; blob URLs are local to
 the page and are revoked when the view is replaced. No public R2 URL is enabled.
 
-### COMPLETION_PHOTOS — retained cleaner evidence (r47)
+### COMPLETION_PHOTOS — the cleaner's room photos (r47, simplified r48)
 
 Separate from customer instruction pictures in BOOKING_PHOTOS. Auto-created in
 Leads MASTER on the first authorized cleaner upload. Private image bytes stay
 in the same R2 bucket, under `completion-photos/<photo_id>.jpg`.
 
-`photo_id · job_id · vendor_id · room_key · room_label · service_label · scheduled_date · object_key · status · bytes · created_at · updated_at`
+`photo_id · job_id · vendor_id · room_key · object_key · status · bytes · created_at · updated_at`
 
-The assigned vendor company, room label, service and date are captured when the
-upload begins. The vendor portal's `completionHistory` reads those snapshots,
-so completion, reassignment or removal of the JOBS row does not remove the
-original company's archive. Another company cannot inherit those photos simply
-by receiving the job. No object keys, credentials or customer contact details
-are returned in the archive. Photo metadata adds `purpose: completion`.
+**r48** dropped `room_label`, `service_label` and `scheduled_date` (only the
+removed archive read them); a tab created by r47 with those columns still works
+and they are left blank. The vendor company is stamped when an upload begins,
+so a job moved to another company does not hand them the first company's
+photos. Photo metadata adds `purpose: completion`; no object key, credential or
+customer contact detail is returned.
 
 `/api/photos` uses `purpose: completion` to select this separate authorization
-path. An open assigned job's partner ticket can upload/read; upload reservation
-requires `finished: true`. Vendor-company credentials can only read records
-stamped with their vendor_id, including after the ticket expires. Client tokens
-cannot read or write completion photos. No completion delete operation exists
-in either the Worker or Apps Script, and neither cleanup nor customer photo
-deletion can select this table or prefix.
+path. The assigned job's partner ticket can upload/read while the job is open —
+**no finished-room confirmation (r47's `finished: true`) is required since
+r48**. Vendor-company credentials can only read records stamped with their
+vendor_id, including after the ticket expires. Client tokens cannot read or
+write these photos, and the customer portal does not receive them. No delete
+operation exists in either the Worker or Apps Script, and neither cleanup nor
+customer photo deletion can select this table or prefix.
 
 PENDING becomes READY only after R2 storage succeeds. Retries use the same UUID
 and preserve the first stored bytes; no overwrite or replacement is allowed.
 The UI displays success only after metadata commit. Maximum 20 READY/recent
-PENDING photos per room; older pending reservations do not consume new upload
-slots, but are retained and can be recovered by retry while the job is open.
-JPEG resizing/metadata stripping and size limits match customer pictures.
+PENDING photos per room. JPEG resizing/metadata stripping and size limits match
+customer pictures. Retention has no time limit; **no R2 bucket-lock rule has
+been configured** (r47 proposed one for `completion-photos/`; it is optional
+hardening, not needed for the feature to work).
 
-Retention has no time limit. The deployment should include an indefinite R2
-bucket-lock rule scoped to `completion-photos/`, preserving customer-photo
-deletion outside that prefix. Account administrators can change retention rules;
-this is protection against routine app/lifecycle deletion, not a guarantee
-against account loss or an administrator overriding storage policy.
+**Where they show (r48).** Partner ticket: `completionPhotos`, inside each
+Scope room — a closed `<details>` like the customer's rooms, holding what the
+customer asked for, one **Add photos** control (`accept="image/*" multiple`, no
+`capture`, so a phone offers camera or library) with "Add photos when
+completed", and the room note below. Vendor portal: each `bookings[]` row
+carries `report` — `[{ key, label, note, photos }]`, only rooms with a photo or
+a note, only this company's — rendered inside that job. r47's separate
+`completionHistory` archive is gone.
 
-The ticket places a finished-room confirmation and camera/upload buttons under
-each Scope room. Customer photos are labeled reference photos. The vendor owner
-has a permanent Completion photo archive, refreshed through the existing live
-view polling. Archived galleries have no delete/edit controls.
+### PARTNER_NOTES — the cleaner's note on a room (r48)
+
+Auto-created in Leads MASTER on the first non-empty note.
+
+`note_id · job_id · vendor_id · room_key · room_label · note · created_at · updated_at`
+
+One row per (job_id, vendor_id, room_key), updated in place; blanking keeps the
+row and empties it. Written only by `event_type: partner_note` (POST `/api/job`,
+relayed as-is) with the job's **partner** ticket token — a client ticket,
+portal or vendor token is refused `not_found`. Refused `closed` once the job is
+completed or cancelled; `unknown_room` for a key the booking does not have.
+Text is trimmed to 2,000 characters; a note starting with `= + - @` is written
+with a leading apostrophe so Sheets keeps it as text.
+
+**Its own tab, not a scope_type in BOOKING_INSTRUCTIONS:** `sortInstructions`
+files anything that is not ROOM or ACCESS as the customer's general note, so a
+cleaner's note stored there would replace the customer's own words.
+
+Read by, and only by: the partner ticket (`scope[].note`), the vendor portal
+(`bookings[].report[].note`) and the customer portal
+(`bookings[].partnerNotes: [{ roomLabel, note }]`, in room order, empty for a
+cancelled booking, shown as "Notes from your service partner"). Each reader
+matches the booking's current vendor_id. No author, vendor id or timestamp
+reaches the customer.
 
 ### Shared portal updates (r21 site)
 
@@ -1249,6 +1274,7 @@ held `direct ×1` and blank ×12, with no channel values anywhere.
 
 | Date | Change |
 |---|---|
+| 2026-09-14 | **The cleaner ticket's rooms, simplified — webhook r48, the Worker and the site.** Supersedes r47's UI. New tab **`PARTNER_NOTES`** (auto-created; partner-token writes via `partner_note`). **`COMPLETION_PHOTOS`** drops `room_label`, `service_label`, `scheduled_date` and no longer requires `finished: true`. View models: partner ticket `scope[].note`; vendor portal `bookings[].report` replaces `completionHistory`; customer portal `bookings[].partnerNotes`. Site: each Scope room is a closed box with one Add photos control and an optional note; `completion-photos.css` removed. See `HANDOFF.md` §r48. |
 | 2026-09-14 | **A plan after a move — webhook r45, the Worker and the site.** No column or tab change. The portal model gains `movePlan`; two portal writes `plan_start` and `plan_change`; `/api/quote` also returns `recurring` (the engine's three per-visit prices). A move-in / move-out customer chooses a cadence priced by the engine for their home, books the first visit at an open time or earlier/later, and the box stays as their plan until they change it. `bookPlanVisit`, `visitAlreadyAt` and `moveVisit` were split out of r42/r43 unchanged. New section "A plan after a move" above. See `HANDOFF.md` §r45. |
 | 2026-09-13 | **One read per tab, per request — webhook r44, plus the site.** No column, tab or response change. The portal, tickets and vendor portal were slow because every helper re-read the tabs it needed; a request now reads each tab once (`readTable`, shared only inside `doGet`), opens Ops once, and builds bookings from the JOBS rows already in hand (`bookingFromRow`). Portal load 211 → 39 Sheets calls; vendor portal 79 → 19; a new booking 103 → 77. Old and new were run through the same 82-request sequence in two timezones — reads, saves, reschedule, cancel, plan confirmation and a booking — and every response, tab and log line came out identical. Site: /h, /j and /v paint a skeleton immediately and start their request from `<head>`; the portal fetches open times before the customer clicks; the booking form asks for times at the first touch of step 1 and keeps a second try if that fails. New contract in "How the webhook reads the sheets" above; `read-budget.test.js` and `early-load.test.js` enforce it. See `HANDOFF.md` §r44. |
 | 2026-09-13 | **Reschedule and cancel — webhook r43.** Two portal writes act on a booking the customer already has, and `releaseAvailabilitySlot()` closes the "nothing releases a slot" open item that had stood since r5 — every cancellation before today leaked its time out of the feed permanently. No new column: `job_status` gains the value `cancelled` (written by the script, second value it writes), and the row is **kept, never deleted**, so counts of booked work keep including work that was given back. `JOBS.vendor_id` stays ops-owned — `setJobCells()` throws on any ops column rather than skipping it. **The anchor is untouched by both writes**, which is the property the release exists to protect: a one-off move shifts one visit, never the cadence. New optional Ops `SETTINGS` key `cancel_notice_hours`, defaulting to `0` — the mechanism is built and enforces nothing until the founder sets a number, because a notice window is a customer promise with a refund question attached. Two real defects were caught by the new tests rather than in production: a release that gave back the slot a move had just booked, and a guard comparing `getBooking`'s display time (`"1:00 PM ET"`) against a raw slot time (`"1:00 PM"`), which meant it never once fired. See `HANDOFF.md` §r43. |

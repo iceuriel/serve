@@ -1,7 +1,26 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-14  ·  master  ·  r47 — retained cleaner completion photos
+ * VERSION STAMP:  2026-09-14  ·  master  ·  r48 — room photos and notes on the cleaner ticket
+ *
+ * r48 = THE CLEANER TICKET'S ROOMS, SIMPLIFIED. r47 put a finished-room
+ *      checkbox, two camera buttons and a paragraph of retention copy under
+ *      every Scope room. Each room is now a collapsed box like the customer's;
+ *      inside are one Add photos control and an optional note.
+ *
+ *      PHOTOS: the finished confirmation is no longer required, and the vendor
+ *      portal's separate completion archive (completionHistory) is gone. Each
+ *      job the company holds carries `report` — the rooms with a cleaner photo
+ *      or note — instead. COMPLETION_PHOTOS drops room_label, service_label
+ *      and scheduled_date, which only that archive read; an existing tab with
+ *      those columns still works. Uploads stay append-only, in their own R2
+ *      prefix, stamped with the vendor company.
+ *
+ *      NOTES: a new PARTNER_NOTES tab, written only with a partner ticket
+ *      token (event_type partner_note). Its own tab on purpose — see
+ *      PARTNER_NOTES_TAB. Read by the partner ticket (scope[].note), the vendor
+ *      portal (bookings[].report) and the customer portal
+ *      (bookings[].partnerNotes: room label and text, nothing else).
  *
  * r45 = SOMEBODY WHO BOOKED A MOVE WAS NEVER OFFERED A PLAN. createRecurringPlan
  *      refuses a move booking by design, and nothing else asked. The portal now
@@ -1131,6 +1150,8 @@ function routePost(e) {
        booking rather than the site reporting one. */
     if (eventType === "booking_instruction") return handleInstruction(ss, data);
     if (eventType === "booking_photo") return handleBookingPhoto(ss, data);
+    /* r48. A cleaner's note on a room, from the partner ticket. */
+    if (eventType === "partner_note") return handlePartnerNote(ss, data);
 
     /* Portal writes. Authorised by a portal token and an ownership check
        rather than by a per-job ticket token — see handlePortalWrite. */
@@ -1401,7 +1422,7 @@ function routeGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-14 r47" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-14 r48" });
 }
 
 
@@ -1495,6 +1516,112 @@ function ensureInstructionsTab(ss) {
     console.log('Created the "' + INSTRUCTIONS_TAB + '" tab.');
   }
   return sheet;
+}
+
+/* PARTNER_NOTES — what the cleaner wants the customer, their company or Serve
+   to know about a room. r48.
+   -------------------------------------------------------------------
+   ITS OWN TAB, NOT ANOTHER scope_type IN BOOKING_INSTRUCTIONS. That tab is
+   read by sortInstructions, which files anything that is not ROOM or ACCESS
+   as the customer's general note — so a cleaner's note stored there would
+   replace what the customer asked for, on the customer's own page. Nothing
+   reads this tab unless it names it.
+
+   One row per (job_id, vendor_id, room_key), updated in place like an
+   instruction; blanking the text keeps the row and empties it. The vendor
+   company is stamped when the note is written, so a job moved to another
+   company does not hand them the first company's notes. Auto-created on the
+   first non-empty note. */
+const PARTNER_NOTES_TAB = "PARTNER_NOTES";
+const PARTNER_NOTES_HEADERS = ["note_id", "job_id", "vendor_id", "room_key",
+  "room_label", "note", "created_at", "updated_at"];
+
+function partnerNoteRows(ss) {
+  var table = readTable(ss, PARTNER_NOTES_TAB);
+  if (!table || !table.rows.length) return [];
+  var h = table.headers;
+  return table.rows.map(function (row) {
+    var out = {};
+    PARTNER_NOTES_HEADERS.forEach(function (key) {
+      var i = h.indexOf(key);
+      out[key] = i < 0 || row[i] === null || row[i] === undefined ? "" : String(row[i]).trim();
+    });
+    return out;
+  });
+}
+
+/** The current note for one room, from one company, on one job. "" if none. */
+function partnerNoteFor(rows, jobId, vendorId, roomKey) {
+  var hit = rows.filter(function (n) {
+    return n.job_id === String(jobId) && n.vendor_id === String(vendorId || "") &&
+           n.room_key.toUpperCase() === roomKey;
+  })[0];
+  return hit ? hit.note : "";
+}
+
+/** A job's notes from its company, in room order: label and text, nothing else. */
+function partnerNotesForRooms(rows, booking) {
+  if (!booking.vendorId) return [];
+  return deriveRooms(booking.beds, booking.baths).map(function (r) {
+    return { roomLabel: r.label, note: partnerNoteFor(rows, booking.bookingId, booking.vendorId, r.key) };
+  }).filter(function (n) { return n.note; });
+}
+
+/* Routed from routePost. A PARTNER ticket token only: the customer's ticket,
+   the portal and the vendor portal cannot write a cleaner's note. Never fatal,
+   like handleInstruction. */
+function handlePartnerNote(ss, data) {
+  var jobId = String(data.job_id || "").trim();
+  if (!jobId || ticketToken(jobId, "partner") !== String(data.t || "").trim()) {
+    return json({ ok: false, error: "not_found" });
+  }
+  try {
+    var booking = getBooking(ss, jobId);
+    if (!booking || !booking.vendorId) return json({ ok: false, error: "not_found" });
+    if (booking.completedDate || bookingIsCancelled(booking)) return json({ ok: false, error: "closed" });
+
+    var roomKey = String(data.room_key || "").trim().toUpperCase();
+    var room = deriveRooms(booking.beds, booking.baths).filter(function (r) { return r.key === roomKey; })[0];
+    if (!room) return json({ ok: false, error: "unknown_room" });
+
+    var text = String(data.note || "").trim().slice(0, 2000);
+    /* Typed by hand into a workbook that holds customer details: a note that
+       starts like a formula is kept as text, never evaluated. */
+    var cellText = /^[=+\-@]/.test(text) ? "'" + text : text;
+    var vendorId = String(booking.vendorId);
+
+    assertWritable(PARTNER_NOTES_TAB);
+    var sheet = ss.getSheetByName(PARTNER_NOTES_TAB);
+    if (!sheet) {
+      if (!text) return json({ ok: true, updated: false });
+      sheet = ss.insertSheet(PARTNER_NOTES_TAB);
+      sheet.appendRow(PARTNER_NOTES_HEADERS);
+      sheet.setFrozenRows(1);
+    }
+    var table = sheetValues(sheet), h = table.headers, now = new Date();
+    if (PARTNER_NOTES_HEADERS.some(function (k) { return h.indexOf(k) < 0; })) {
+      return json({ ok: false, error: "save_failed" });
+    }
+    for (var i = 0; i < table.rows.length; i++) {
+      var r = table.rows[i];
+      if (String(r[h.indexOf("job_id")]).trim() !== jobId) continue;
+      if (String(r[h.indexOf("vendor_id")]).trim() !== vendorId) continue;
+      if (String(r[h.indexOf("room_key")]).trim().toUpperCase() !== roomKey) continue;
+      sheet.getRange(i + 2, h.indexOf("note") + 1).setValue(cellText);
+      sheet.getRange(i + 2, h.indexOf("updated_at") + 1).setValue(now);
+      return json({ ok: true, updated: true });
+    }
+    if (!text) return json({ ok: true, updated: false });
+
+    var record = { note_id: "NOTE-" + Utilities.getUuid().slice(0, 8).toUpperCase(),
+      job_id: jobId, vendor_id: vendorId, room_key: roomKey, room_label: room.label,
+      note: cellText, created_at: now, updated_at: now };
+    sheet.appendRow(h.map(function (k) { return record[k] === undefined ? "" : record[k]; }));
+    return json({ ok: true, created: true });
+  } catch (err) {
+    console.error("handlePartnerNote failed: " + (err && err.stack ? err.stack : err));
+    return json({ ok: false, error: "save_failed" });
+  }
 }
 
 
@@ -2354,12 +2481,14 @@ function buildVendorTicketModel(ss, booking) {
   var access = getBookingAccess(ss, booking.propertyId);
 
   var sorted = sortInstructions(instructions);
+  var notes = partnerNoteRows(ss);
 
   return {
     ok: true,
     view: "partner",
     bookingId: booking.bookingId,
     photos: publicBookingPhotos(ss, booking.bookingId),
+    /* r47/r48. The cleaner's own room photos, for the company assigned now. */
     completionPhotoSupport: !!booking.vendorId && !!PropertiesService.getScriptProperties().getProperty("PHOTO_BRIDGE_SECRET"),
     completionPhotos: completionPhotoRows(ss).filter(function (r) {
       return r.job_id === booking.bookingId && r.vendor_id === booking.vendorId && r.status === "READY";
@@ -2418,7 +2547,9 @@ function buildVendorTicketModel(ss, booking) {
     },
 
     scope: rooms.map(function (r) {
-      return { key: r.key, label: r.label, instruction: sorted.rooms[r.key] || "" };
+      return { key: r.key, label: r.label, instruction: sorted.rooms[r.key] || "",
+               /* r48. What this company's cleaner noted about the room. */
+               note: partnerNoteFor(notes, booking.bookingId, booking.vendorId, r.key) };
     }),
 
     instructions: {
@@ -4574,6 +4705,7 @@ function buildPortalModel(ss, contact) {
   var bookings = getContactBookings(ss, contact.leadId);
   /* A customer with a standing partner has the same vendor on every row. */
   var vendorMemo = {};
+  var partnerNotes = partnerNoteRows(ss);
 
   var homes = getContactProperties(bookings).map(function (p) {
     var access = getPropertyAccess(ss, p.propertyId);
@@ -4619,6 +4751,10 @@ function buildPortalModel(ss, contact) {
       var row = {
         bookingId:    b.bookingId,
         photos:       publicBookingPhotos(ss, b.bookingId),
+        /* r48. What the cleaner noted, room by room: the room's label and the
+           text, never who wrote it. Routed to the company, like everything
+           else a customer sees about who did the work. */
+        partnerNotes: cancelled ? [] : partnerNotesForRooms(partnerNotes, b),
         /* The code, not only the label: the portal renders what a service
            includes from SERVE_SCOPE, which is keyed by code. The label is prose
            and may be reworded; the code is the join.
@@ -5410,12 +5546,13 @@ function buildVendorPortalModel(ss, vendor) {
   var bookings = getVendorBookings(ss, vendor.vendorId);
   var offered = {};
   getVendorServices(vendor.vendorId).forEach(function (s) { offered[s.serviceCode] = s; });
+  var photoRows = completionPhotoRows(ss);
+  var noteRows = partnerNoteRows(ss);
 
   return {
     ok: true,
     view: "vendor",
     vendorId: vendor.vendorId,
-    completionHistory: vendorCompletionHistory(ss, vendor.vendorId),
 
     company: {
       displayName:       vendor.displayName,
@@ -5494,9 +5631,27 @@ function buildVendorPortalModel(ss, vendor) {
         address:      [b.address, b.unit].filter(Boolean).join(", "),
         zip:          b.zip,
         ticketUrl:    ticketUrl(b.bookingId, "partner"),
+        /* r48. What this company's cleaner left on the ticket: rooms with a
+           photo or a note, and only this company's. */
+        report:       vendorJobReport(b, vendor.vendorId, photoRows, noteRows),
       };
     }),
   };
+}
+
+/** Rooms with a cleaner photo or note on this job, from this company only. */
+function vendorJobReport(booking, vendorId, photoRows, noteRows) {
+  return deriveRooms(booking.beds, booking.baths).map(function (r) {
+    return {
+      key: r.key,
+      label: r.label,
+      note: partnerNoteFor(noteRows, booking.bookingId, vendorId, r.key),
+      photos: photoRows.filter(function (p) {
+        return p.job_id === booking.bookingId && p.vendor_id === vendorId &&
+               p.room_key === r.key && p.status === "READY";
+      }).map(completionPhotoPublic),
+    };
+  }).filter(function (r) { return r.note || r.photos.length; });
 }
 
 /** GET the vendor portal. */
@@ -8176,13 +8331,12 @@ function handleBookingPhoto(ss, data) {
   }
 }
 
-/* Completion evidence is append-only and NEVER passed to customer-photo cleanup.
- * Vendor ownership and room/job labels are stamped at upload, so the archive
- * survives completion, later reassignment, or removal of the operational job.
+/* The cleaner's room photos. Append-only and NEVER passed to customer-photo
+ * cleanup. The vendor company is stamped at upload, so a job moved to another
+ * company does not hand them the first company's photos.
  */
 const COMPLETION_PHOTOS_HEADERS = ["photo_id", "job_id", "vendor_id", "room_key",
-  "room_label", "service_label", "scheduled_date", "object_key", "status",
-  "bytes", "created_at", "updated_at"];
+  "object_key", "status", "bytes", "created_at", "updated_at"];
 
 function completionPhotoRows(ss) {
   var table = readTable(ss, "COMPLETION_PHOTOS");
@@ -8197,22 +8351,6 @@ function completionPhotoRows(ss) {
 function completionPhotoPublic(r) {
   return { id: String(r.photo_id), roomKey: String(r.room_key),
     createdAt: String(r.created_at), purpose: "completion" };
-}
-
-function vendorCompletionHistory(ss, vendorId) {
-  var jobs = {};
-  completionPhotoRows(ss).forEach(function (r) {
-    if (r.vendor_id !== vendorId || r.status !== "READY") return;
-    var job = jobs[r.job_id];
-    if (!job) job = jobs[r.job_id] = { bookingId: String(r.job_id),
-      serviceLabel: String(r.service_label), date: dateCellText(r.scheduled_date), rooms: [] };
-    var room = job.rooms.filter(function (x) { return x.key === r.room_key; })[0];
-    if (!room) { room = { key: String(r.room_key), label: String(r.room_label), photos: [] }; job.rooms.push(room); }
-    room.photos.push(completionPhotoPublic(r));
-  });
-  return Object.keys(jobs).map(function (id) { return jobs[id]; }).sort(function (a, b) {
-    return b.date.localeCompare(a.date) || b.bookingId.localeCompare(a.bookingId);
-  });
 }
 
 // Called only after Worker bridge authentication and acquisition of the lock.
@@ -8247,7 +8385,6 @@ function handleCompletionPhoto(ss, data) {
   if (action === "begin") {
     // Retrying an upload keeps its ID and original bytes, including after a lost response.
     if (record) return result();
-    if (data.finished !== true) return json({ ok: false, error: "room_not_finished" });
     var bytes = Number(data.bytes);
     if (!Number.isInteger(bytes) || bytes < 4 || bytes > 1500000) return json({ ok: false, error: "bad_size" });
     var count = rows.filter(function (r) { return r.job_id === id && r.room_key === roomKey &&
@@ -8260,8 +8397,7 @@ function handleCompletionPhoto(ss, data) {
     var h = sheetHeaders(sheet);
     if (COMPLETION_PHOTOS_HEADERS.some(function (key) { return h.indexOf(key) < 0; })) return json({ ok: false, error: "photo_unavailable" });
     record = { photo_id: photoId, job_id: id, vendor_id: booking.vendorId,
-      room_key: roomKey, room_label: room.label, service_label: booking.serviceLabel,
-      scheduled_date: booking.scheduledDate, object_key: "completion-photos/" + photoId + ".jpg",
+      room_key: roomKey, object_key: "completion-photos/" + photoId + ".jpg",
       status: "PENDING", bytes: bytes, created_at: now, updated_at: now };
     sheet.appendRow(h.map(function (key) { return record[key] === undefined ? "" : record[key]; }));
     return result();

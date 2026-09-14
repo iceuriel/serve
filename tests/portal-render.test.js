@@ -696,6 +696,26 @@ const PRETTY = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][D.getDay()] +
   t('and none of section L threw',
     [].concat(L1.warns, L2.warns, L3.warns, L4.warns, L5.warns, L6.warns, L7.warns), []);
 
+  head('M. r48: notes the cleaner left, on the customer\'s own bookings');
+
+  const notesOn = (root, id) => {
+    const panel = all(root).filter(n => n.attrs && n.attrs['data-live-key'] === id)[0] || {};
+    return byClass(panel, 'tk-blk')
+      .filter(b => textOf(b, 'tk-lbl') === 'Notes from your service partner')
+      .map(b => byClass(b, 'tk-val').map(v => v._text));
+  };
+  const withNotes = model({ plan: null });
+  withNotes.bookings[0].partnerNotes = [{ roomLabel: 'Kitchen', note: 'Oven door sticks' },
+                                        { roomLabel: 'Bathroom 1', note: 'Fan is loud' }];
+  withNotes.bookings[1].partnerNotes = [{ roomLabel: 'Bedroom 1', note: 'Closet light is out' }];
+  const M1 = await boot(withNotes);
+  t('an upcoming booking shows them, room by room',
+    notesOn(M1.body, 'SRV-1'), [['Kitchen: Oven door sticks', 'Bathroom 1: Fan is loud']]);
+  t('a finished booking keeps them', notesOn(M1.body, 'SRV-0'), [['Bedroom 1: Closet light is out']]);
+  const M2 = await boot(model({ plan: null }));
+  t('no notes, no block', [notesOn(M2.body, 'SRV-1'), notesOn(M2.body, 'SRV-0')], [[], []]);
+  t('and section M did not throw', [].concat(M1.warns, M2.warns), []);
+
   console.log('\n' + (bad ? bad + ' FAILURES' : 'all portal-render checks passed'));
   process.exit(bad ? 1 : 0);
 })();
