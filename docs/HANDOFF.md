@@ -13,6 +13,58 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-14, Claude Code: one font on the front page; move-in starts on the move clean
+
+**COMMITTED (`c35d6ba`, `27af1be`), PUSHED, AND VERIFIED IN PRODUCTION.** Site
+only. Answers the preselect question left open in the entry below.
+
+**The ask.** (1) Move-in visitors should find Move In / Move Out preselected.
+(2) The front page should use one font — the one "Made to Serve your needs" is
+in — everywhere.
+
+**Worth knowing: that line was never the serif it was styled as.** It uses
+`var(--flow-serif)`, but the token was defined only on `.quote-section`, so in
+the hero it resolved to nothing and inherited the page's Inter. The font the
+founder picked is Inter.
+
+**What shipped.**
+- `script.js` — `SEGMENT_DEFAULT_SERVICE = { movein: 'move_out' }`, applied by
+  checking the radio and dispatching `change`, placed just above
+  `readPrefillParams`. Placement is load-bearing both ways: earlier, the change
+  handler's `syncAddonsToService()` reads the add-on consts before they exist
+  (placed beside the radio listeners, Chrome throws "Cannot access 'addonFridge'
+  before initialization" — checked); later, it would override a link's own
+  `&service=`.
+- `style.css` — Times New Roman removed from the hero headline, the booking
+  flow (`--flow-serif` deleted, every use now `--flow-sans`), "After you book"
+  (five rules) and the footer tagline. Kept: the `Serve` wordmark in nav and
+  footer (matches the logo art), `.ticket__brand`, `.serve-page-head h1`
+  (/pricing, /services). Inter runs ~14% wider, so `.hero__headline`
+  (1.75 / 2.1 / 2.625rem) and `.flow-title` (1.75 / 2.2rem) are 0.875x their
+  Times sizes — the lockup took a third line at 1280px otherwise.
+- Tests — segment-and-skins 2d (the real block against fakes; both
+  source-order guarantees); static-checks "Front page is set in one typeface"
+  (an allow-list of serif rules; fails on `--flow-serif`).
+
+**Checked.** 30/30. Nine deliberate breaks, each failing the intended assertion
+(incl. both misplacements, no change event, all segments, Times back on the
+headline, Georgia on After-you-book, the token restored). Rendered font
+inventory of the front page: Times New Roman on 2 elements (the two wordmarks),
+Inter on the rest, Arial only on the hamburger, a close "×" and hidden radios.
+The headline measured 320–1440px: it fits or wraps at exactly the widths it did
+in Times (it already took three lines at 1100, 1024, 900, 768 and ≤390px).
+Local Chrome: movein → move_out; `&service=deep` → first_clean; clicking First
+Clean still works; pro and direct → first_clean; Price and Reserve render;
+/pricing footer tagline is Inter. Production after the build: the three files
+hash-match; `/movein` in Chrome shows Inter at 42px, move_out checked, no page
+errors; `/` shows first_clean.
+
+**Not verified.** A real phone.
+
+**Tooling note.** Codex runs a local preview on 127.0.0.1:8792. A local server
+that binds a taken port on another address can let the browser reach the other
+agent's server instead — bind `127.0.0.1` explicitly and fail on EADDRINUSE.
+
 ## Current work — 2026-09-14, Claude Code: the move-in hero leads with a ZIP check
 
 **COMMITTED (`0f3dbc3`), PUSHED, AND LIVE — files verified in production.** Site
