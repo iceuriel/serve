@@ -15,7 +15,12 @@ except where a later section supersedes them.
 
 ## Current work — 2026-09-14, Claude Code: hero mark reads GREATER BOSTON
 
-**LOCAL EDITS ONLY — not committed or pushed.** Founder asked "GREATER" in
+**PUSHED (`3df0c2c`) AND VERIFIED IN PRODUCTION (2026-09-14).** Production
+`images/serve-logo-boston.svg` and `index.html` match the repo (ignoring CR).
+Caveat: `_headers` gives `/images/*` `max-age=604800`, so a browser that
+loaded the old mark in the last 7 days may keep showing BOSTON until its cache
+expires; new visitors get the new mark. A `?v=` on the img src would force it
+(the 7a test regex would need to allow it). Not checked: a real phone. Founder asked "GREATER" in
 front of "BOSTON" under Serve / HOME CLEANING, on every hero variant (all three
 use the one `images/serve-logo-boston.svg`).
 - `images/serve-logo-boston.svg` — third line "GREATER BOSTON" at font-size
