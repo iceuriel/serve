@@ -15,9 +15,13 @@ except where a later section supersedes them.
 
 ## Current work — 2026-09-14, Claude Code: r45, a plan after a move
 
-**STATUS: see "Deploy" below — it records what was pushed and what still needs
-the founder's paste.** `webhook.gs` is at r45; the Worker and `portal.js` ship by
-push.
+**PUSHED AND VERIFIED (site + Worker, `d660d0d`). WAITING ON THE FOUNDER'S PASTE
+OF `webhook.gs` r45** — until then nothing is visible to any customer. Checked in
+production after the push: `POST /api/quote` returns `recurring`
+(`{"weekly":205,"biweekly":323,"monthly":537}` for 3 bed / 2 bath / 2 levels
+in 02116) on the third 15-second poll; `portal.js` and `style.css` match the repo
+(hash, line endings normalised); `/api/health` ok, `/api/slots` ok,
+`/api/portal` with a bad token `not_found`, `/` 200.
 
 ### The ask
 
