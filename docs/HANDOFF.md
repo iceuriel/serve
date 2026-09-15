@@ -13,6 +13,73 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-14 (evening), Claude Code: load-time audit — PAUSED, NOTHING BUILT
+
+**INVESTIGATION ONLY. No code changed, no Apps Script paste, nothing pushed.**
+Founder asked whether more can be done to speed up portals, booking and the
+vendor page without adding vulnerabilities. Paused mid-audit when the founder
+had to leave. The uncommitted AGENTS.md / CLAUDE.md edits are the 2026-09-09
+continuity section, not this session's — left untouched.
+
+**Measured in production** (fake tokens only, home connection, 2026-09-15 ~00:10Z):
+- Static files ~0.1s each, brotli. Not the bottleneck.
+- Apps Script floor: bare `/exec` health 0.9–1.6s (+~0.2s redirect echo).
+  `/api/slots` 1.0–1.4s on EVERY call — the Worker's `max-age=60` only reaches
+  browsers; nothing caches at the edge. Bad-token `/api/portal` 1.7–2.1s,
+  `/api/vendor` 1.3–1.4s, `/api/job` 1.2–2.0s.
+- `/api/address`: cache hit 0.11–0.16s; cache MISS 1.6–2.2s, once 4.2s.
+- Warm cron: probably firing. The feed cache regenerated at 00:05:26Z and
+  00:20:26Z (26s after 5-minute marks) with no other traffic. A confirming
+  probe for ~00:30:26Z was scheduled; its result was not recorded.
+- Harness counts (read-budget harness, 6-booking account): portal GET 21 calls,
+  partner ticket 13, vendor 12, access save 13, booking 48 + Twilio + MailApp.
+
+**Findings, ranked — proposed, not built:**
+1. **Photo reads wait on the global script lock.** `routePost` takes
+   `waitLock(20000)` for every POST and `handleBookingPhoto` `waitLock(8000)`,
+   so every thumbnail site-wide loads one at a time and queues behind bookings
+   and saves; a photo-heavy page can push a concurrent booking toward the
+   Worker's 12s budget. Fix (r49): route `booking_photo` `action: read` before
+   the lock, in a shared-snapshot scope. The read paths in
+   `handleBookingPhoto` / `handleCompletionPhoto` write nothing (checked by
+   reading). Paste needed; no API change, so either deploy order is safe.
+2. **Photos re-download on every repaint** (tab switch, a live-refresh change,
+   reload after plan confirm) — each an Apps Script round trip. Fix
+   (`booking-photos.js`): in-memory blob cache per photo id (ids are
+   immutable), bounded, evicted on delete, nothing persisted; cap parallel
+   reads at ~3. Site only.
+3. **Address type-ahead misses await KV sequentially**: 2 gets + 2 counter puts
+   before Geoapify, 1 cache put after. Fix (`src/worker.js`): gets in parallel;
+   the two counter puts in parallel but still awaited BEFORE the provider call
+   (spend guard stays fail-closed); final cache put via `ctx.waitUntil`
+   (thread `ctx` into `handleAddressSuggest`, await fallback for tests).
+4. **The customer partner card opens the Ops workbook on every portal /
+   client-ticket open** (VENDORS, VENDOR_REVIEWS, VENDOR_PHOTOS + Ops timezone).
+   Fix (r49): cache the `buildClientVendorProfile` output in CacheService
+   ≤5 min by vendor_id, removed on `vendor_write`; guard with typeof (harnesses
+   have no CacheService). Trade-off: card edits / client_visible flips show up
+   to 5 min late.
+5. **Self-host Inter** on index / pricing / services: drops render-blocking
+   Google Fonts CSS (~0.3–0.5s first paint on phones) and the unused
+   Montserrat. Keep `@font-face` OUT of style.css — portals do not load Inter
+   today and would change look. Leave privacy / sms-terms (A2P pages) alone.
+
+Not worth it now: edge-caching `/api/slots` (already prefetched; low traffic
+means few hits); resizing gallery JPEGs (lazy or inside a closed details).
+
+**Need the founder's decision — trade-offs, not built:** (a) Apps Script-signed,
+short-lived photo read grants verified by the Worker (removes an Apps Script
+call per photo, but "the sheet authorizes every read" becomes "for N
+minutes"); (b) painting a last-known portal snapshot instantly (browser storage
+or an encrypted edge cache) — personal data at rest somewhere new; (c) sending
+the booking SMS / email after confirmation via a Worker follow-up (~1–2s off
+"Reserving…", but a failed follow-up loses the ops email and customer text
+unless a sweep is added).
+
+**Checked:** `node tests/run-all.js` 31/31 pass at the start (baseline only).
+**Next action:** implement 1–4 (5 if the founder wants it) with tests and
+deliberate breaks; paste r49 and verify the `/exec` version; then push.
+
 ## Current work — 2026-09-14, Claude Code: hero mark reads GREATER BOSTON
 
 **PUSHED (`3df0c2c`) AND VERIFIED IN PRODUCTION (2026-09-14).** Production
