@@ -431,6 +431,10 @@ cannot edit them. The bridge-only cleanup/purged operations never accept image
 references from browser requests. Public view models return only `id`, `roomKey`,
 and `createdAt`. Browser image requests use POST bodies; blob URLs are local to
 the page and are revoked when the view is replaced. No public R2 URL is enabled.
+Since 2026-09-15 `booking-photos.js` also keeps each photo it has read in a page
+variable, by purpose and photo id (bounded at 30 MB, oldest dropped first;
+removed on delete; never browser storage), so a repaint does not read again, and
+sends at most three reads at once.
 
 ### COMPLETION_PHOTOS — the cleaner's room photos (r47, simplified r48)
 
@@ -783,6 +787,14 @@ default_payout_rate · created_at · updated_at`
 **`client_visible` is the master switch.** `buildClientVendorProfile` returns
 null unless it is `TRUE`, so a half-filled vendor never reaches a customer and
 the ticket says "your service professional will be confirmed" instead.
+
+**The finished card is cached five minutes (r49).** `clientVendorCard` keeps
+the whitelist's output — never the row — in the Apps Script script cache, key
+`partner_card:<vendor_id>`, for the portal and the client ticket. A vendor
+portal save clears that company's card at once. **A hand edit to `VENDORS`,
+`VENDOR_REVIEWS` or `VENDOR_PHOTOS` — including flipping `client_visible` off
+— reaches customers within five minutes**; run `forgetPartnerCards()` from the
+editor to apply it now.
 
 **`capabilities` is not a service.** "Luxury", "pet-safe", "post-construction"
 describe what a company is good at. The three `SERVICE_CODES` are what a
@@ -1156,6 +1168,7 @@ often the sheet is asked, and it has three rules a future change must keep:
 | **A GET reads each tab at most once**, and its cost does not grow with the number of bookings. `readTable(ss, name)` shares a tab's values for the rest of the request. | This is the speed-up. | `tests/read-budget.test.js` §1–2 |
 | **A GET writes nothing.** | The shared snapshot is only true because nothing changes the sheet mid-request. A GET that starts writing must not also keep reading through `readTable`. | `read-budget` §3 — every GET route is checked for zero writes |
 | **A POST never shares a snapshot.** `readTable` reads fresh on every call inside `doPost`, and `sheetValues(sheet)` — what the write paths use — is fresh everywhere. | A POST reads, writes and reads again (book the new slot, then release the old one). | `read-budget` §4, including a check of the scope `doGet`/`doPost` actually open |
+| **r49: a photo read is the one POST that runs like a GET.** `doPost` routes `booking_photo` with `action` exactly `"read"` before the script lock, in a shared-snapshot scope. Begin, commit, delete and cleanup still take the lock. | Every POST waits for the lock, so thumbnails loaded one at a time site-wide, behind bookings. Safe only because the read branches write nothing. | `read-budget` §8 — every read kind: no lock, no writes, shared scope |
 
 Handles that are not data — the Ops workbook (`opsBook()`), each workbook's
 timezone (`sheetTimeZone()`) and the ticket secret — are looked up once per
@@ -1274,6 +1287,7 @@ held `direct ×1` and blank ×12, with no channel values anywhere.
 
 | Date | Change |
 |---|---|
+| 2026-09-15 | **Load-time fixes — webhook r49, the Worker and the site.** No column, tab or response change; the paste and the push can go in either order. Webhook: a `booking_photo` read runs before the script lock, in a shared-snapshot scope (new row in "How the webhook reads the sheets"); the customer's partner card is cached five minutes per company, cleared by a vendor portal save or `forgetPartnerCards()` (see VENDORS). Site: `booking-photos.js` remembers photos it has read for the life of the page and sends at most three reads at once. Worker: an `/api/address` miss reads its two counters together and writes both before the provider is called (still fail-closed), then saves the answer via `waitUntil`. `read-budget.test.js` §8–9, `address-suggest.test.js` A4 and the new `photo-cache.test.js` enforce it. See `HANDOFF.md` §2026-09-15. |
 | 2026-09-14 | **The cleaner ticket's rooms, simplified — webhook r48, the Worker and the site.** Supersedes r47's UI. New tab **`PARTNER_NOTES`** (auto-created; partner-token writes via `partner_note`). **`COMPLETION_PHOTOS`** drops `room_label`, `service_label`, `scheduled_date` and no longer requires `finished: true`. View models: partner ticket `scope[].note`; vendor portal `bookings[].report` replaces `completionHistory`; customer portal `bookings[].partnerNotes`. Site: each Scope room is a closed box with one Add photos control and an optional note; `completion-photos.css` removed. See `HANDOFF.md` §r48. |
 | 2026-09-14 | **A plan after a move — webhook r45, the Worker and the site.** No column or tab change. The portal model gains `movePlan`; two portal writes `plan_start` and `plan_change`; `/api/quote` also returns `recurring` (the engine's three per-visit prices). A move-in / move-out customer chooses a cadence priced by the engine for their home, books the first visit at an open time or earlier/later, and the box stays as their plan until they change it. `bookPlanVisit`, `visitAlreadyAt` and `moveVisit` were split out of r42/r43 unchanged. New section "A plan after a move" above. See `HANDOFF.md` §r45. |
 | 2026-09-13 | **One read per tab, per request — webhook r44, plus the site.** No column, tab or response change. The portal, tickets and vendor portal were slow because every helper re-read the tabs it needed; a request now reads each tab once (`readTable`, shared only inside `doGet`), opens Ops once, and builds bookings from the JOBS rows already in hand (`bookingFromRow`). Portal load 211 → 39 Sheets calls; vendor portal 79 → 19; a new booking 103 → 77. Old and new were run through the same 82-request sequence in two timezones — reads, saves, reschedule, cancel, plan confirmation and a booking — and every response, tab and log line came out identical. Site: /h, /j and /v paint a skeleton immediately and start their request from `<head>`; the portal fetches open times before the customer clicks; the booking form asks for times at the first touch of step 1 and keeps a second try if that fails. New contract in "How the webhook reads the sheets" above; `read-budget.test.js` and `early-load.test.js` enforce it. See `HANDOFF.md` §r44. |

@@ -187,6 +187,84 @@ const KEYED = { GEOAPIFY_KEY: 'test-key' };
   /* Geoapify's free tier is 3,000/day. A monthly cap above that is not a cap. */
   t('and it sits inside the free tier', capSrc <= 3000 * 30, true);
 
+  head('A4. On a miss: counters read together, guard written BEFORE the provider, answer saved after');
+  {
+    /* 2026-09-15. A miss used to make five storage calls one after another.
+       What must survive the speed-up: the provider is never called until both
+       counters are WRITTEN (a guard that cannot count must stop the spend),
+       and a failed save never costs the customer an answer already paid for. */
+    const events = [];
+    let inflight = 0, peak = 0;
+    const tick = () => new Promise(r => setTimeout(r, 5));
+    const slowKV = (opts = {}) => {
+      const m = new Map();
+      return {
+        _m: m,
+        get: async (k, type) => {
+          inflight++; peak = Math.max(peak, inflight);
+          await tick(); inflight--;
+          if (!m.has(k)) return null;
+          return type === 'json' ? JSON.parse(m.get(k)) : m.get(k);
+        },
+        put: async (k, v) => {
+          const kind = k.split(':')[0];
+          events.push('put-start ' + kind);
+          if (opts.failPut && opts.failPut(kind)) { await tick(); throw new Error('kv write refused'); }
+          if (opts.hold && kind === 'sug') await opts.hold; else await tick();
+          m.set(k, String(v)); events.push('put-done ' + kind);
+        },
+      };
+    };
+    const tremont = async () => {
+      events.push('provider');
+      return new Response(JSON.stringify({ results: [
+        { housenumber: '7', street: 'Tremont St', city: 'Boston', postcode: '02108' }] }), { status: 200 });
+    };
+    const call = (kv, ctx) => loadWorker(tremont).worker.fetch(
+      new Request('https://servecleaning.com/api/address?q=7+tremont+st&zip=02108',
+                  { headers: { 'CF-Connecting-IP': '203.0.113.7' } }),
+      Object.assign({ ASSETS: { fetch: async () => new Response('') }, PROPERTY_CACHE: kv }, KEYED), ctx);
+    const within = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r('timeout'), ms))]);
+
+    let release;
+    const hold = new Promise(r => { release = r; });
+    const kv = slowKV({ hold });
+    const waited = [];
+    const res = await within(call(kv, { waitUntil: p => waited.push(p) }), 1000);
+    const body = res === 'timeout' ? {} : JSON.parse(await res.text());
+    t('the response does not wait for the answer to be saved', res === 'timeout' ? 'timeout' : 'answered', 'answered');
+    t('and carries the provider answer', [body.source, (body.suggestions || []).length], ['provider', 1]);
+    t('the two counter reads run together', peak, 2);
+    const at = e => events.indexOf(e);
+    t('both counters are written before the provider is called',
+      at('put-done sugip') !== -1 && at('put-done sugspend') !== -1 && at('provider') !== -1 &&
+      at('provider') > at('put-done sugip') && at('provider') > at('put-done sugspend'), true);
+    t('the save is handed to waitUntil', waited.length, 1);
+    release();
+    await Promise.all(waited);
+    t('and lands once it finishes', kv._m.has('sug:02108:7 TREMONT ST'), true);
+
+    events.length = 0;
+    let stopped = false;
+    try { await call(slowKV({ failPut: kind => kind === 'sugspend' }), { waitUntil() {} }); }
+    catch (_) { stopped = true; }
+    await tick(); await tick();
+    t('a counter that cannot be written stops the request before the provider', [stopped, events.includes('provider')], [true, false]);
+
+    let saveFailed = 'no error';
+    try {
+      const failedSave = [];
+      const r1 = await call(slowKV({ failPut: kind => kind === 'sug' }), { waitUntil: p => failedSave.push(p) });
+      const b1 = JSON.parse(await r1.text());
+      await Promise.all(failedSave);
+      const r2 = await call(slowKV({ failPut: kind => kind === 'sug' }));
+      const b2 = JSON.parse(await r2.text());
+      t('a save that fails still answers, after the response and without a ctx',
+        [b1.suggestions.length, b2.suggestions.length], [1, 1]);
+    } catch (err) { saveFailed = String(err && err.message); }
+    t('and never surfaces as an error', saveFailed, 'no error');
+  }
+
   /* ------------------------------------------------------------------ */
   head('B. A third party\'s JSON, reduced to three fields');
 

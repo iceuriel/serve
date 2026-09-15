@@ -3,6 +3,53 @@
 (function () {
     'use strict';
     var active = new Set();
+    /* PHOTOS ALREADY READ, KEPT FOR THIS PAGE. A repaint (tab switch, live
+       refresh, reload after a save) used to download every photo again, each
+       one a trip through the booking server. A photo id's bytes never change,
+       so the blob is kept by this page, by id, and shown again. A variable,
+       never browser storage (no localStorage, no Cache API): it is gone when
+       the page closes. Bounded by size; a removed photo is forgotten at once. */
+    var CACHE_BYTES = 30000000, READ_PARALLEL = 3;
+    var cached = new Map(), cachedBytes = 0, pending = new Map();
+    var reading = 0, queue = [];
+    function cacheKey(data) { return data.purpose + ':' + data.photo_id; }
+    function forget(key) {
+        var blob = cached.get(key);
+        if (blob) { cachedBytes -= blob.size; cached.delete(key); }
+        pending.delete(key);
+    }
+    function remember(key, blob) {
+        if (!(blob instanceof Blob) || blob.size > CACHE_BYTES) return;
+        forget(key);
+        cached.set(key, blob); cachedBytes += blob.size;
+        while (cachedBytes > CACHE_BYTES) forget(cached.keys().next().value);  // oldest first
+    }
+    /* At most READ_PARALLEL reads at once; the rest wait their turn. */
+    function limited(task) {
+        return new Promise(function (resolve, reject) {
+            queue.push(function () {
+                reading++;
+                task().then(resolve, reject).then(function () { reading--; nextRead(); });
+            });
+            nextRead();
+        });
+    }
+    function nextRead() { while (reading < READ_PARALLEL && queue.length) queue.shift()(); }
+    function readPhoto(data) {
+        var key = cacheKey(data), hit = cached.get(key);
+        if (hit) { cached.delete(key); cached.set(key, hit); return Promise.resolve(hit); }
+        if (pending.has(key)) return pending.get(key);
+        var read = limited(function () { return request(data); }).then(function (blob) {
+            // Not kept if the photo was removed while this read was out.
+            if (pending.get(key) === read) { pending.delete(key); remember(key, blob); }
+            return blob;
+        }, function (err) {
+            if (pending.get(key) === read) pending.delete(key);
+            throw err;
+        });
+        pending.set(key, read);
+        return read;
+    }
     function node(tag, cls, text) {
         var n = document.createElement(tag);
         if (cls) n.className = cls;
@@ -93,6 +140,8 @@
             try { result = await request(auth('upload', photoId), blob); }
             catch (err) { if (err.message !== 'photo_unavailable' && err.name !== 'AbortError' && !(err instanceof TypeError)) throw err;
                 result = await request(auth('upload', photoId), blob); }
+            // The stored photo is these exact bytes, so showing it costs no read.
+            remember(cacheKey(auth('read', photoId)), blob);
             photos.push(result.photo); changed(); draw();
         }
         function draw() {
@@ -109,7 +158,7 @@
                     if (loaded || fetching || disposed) return;
                     fetching = true;
                     try {
-                        var blob = await request(auth('read', p.id));
+                        var blob = await readPhoto(auth('read', p.id));
                         if (disposed || !card.isConnected) return;
                         loaded = URL.createObjectURL(blob); urls.push(loaded);
                         var img = node('img'); img.src = loaded;
@@ -140,6 +189,7 @@
                     remove.addEventListener('click', async function () {
                         if (busy) return; loading(true); status.textContent = 'Removing…';
                         try { await request(auth('delete', p.id));
+                            forget(cacheKey(auth('delete', p.id)));
                             photos = photos.filter(function (x) { return x.id !== p.id; });
                             changed(); draw(); status.textContent = 'Photo removed';
                         } catch (err) { error(err); } finally { loading(false); }

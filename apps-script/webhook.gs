@@ -1,7 +1,23 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-14  ·  master  ·  r48 — room photos and notes on the cleaner ticket
+ * VERSION STAMP:  2026-09-15  ·  master  ·  r49 — photo reads skip the lock; partner card cached
+ *
+ * r49 = TWO THINGS THAT MADE PAGES WAIT, NEITHER CHANGING WHAT ANY PAGE GETS.
+ *      No request or response shape changes, so this paste and the site can
+ *      deploy in either order.
+ *
+ *      PHOTO READS DO NOT QUEUE (doPost). Every POST waits for the script
+ *      lock, so every thumbnail on the site loaded one at a time behind
+ *      bookings and saves. A booking_photo read writes nothing; it now runs
+ *      before the lock, in a shared-snapshot scope like a GET. Uploads,
+ *      commits, deletes and cleanup still take the lock.
+ *
+ *      THE PARTNER CARD IS CACHED FIVE MINUTES (clientVendorCard). The portal
+ *      and the client ticket opened the Ops workbook and read three tabs for
+ *      it on every open. A vendor portal save clears that company's card at
+ *      once; a hand edit to the Ops sheet shows within five minutes, or run
+ *      forgetPartnerCards() from the editor.
  *
  * r48 = THE CLEANER TICKET'S ROOMS, SIMPLIFIED. r47 put a finished-room
  *      checkbox, two camera buttons and a paragraph of retention copy under
@@ -1118,18 +1134,51 @@ const EVENTS_HEADERS = [
 
 /* r44. Every POST runs in a request scope WITHOUT shared snapshots: it may
    write and then read the same tab, and must see its own write. See
-   "ONE READ PER TAB, PER REQUEST". */
+   "ONE READ PER TAB, PER REQUEST".
+
+   r49. PHOTO READS DO NOT QUEUE. Every POST below waits up to 20s for the
+   script lock, so every thumbnail on every page used to load one at a time,
+   site-wide, behind bookings and saves — and a page full of photos could push
+   a booking arriving at the same moment toward the Worker's 12s budget. A
+   photo read writes nothing: it checks the credential and the sheet row and
+   hands back a storage key. So it is routed here, before the lock, and runs
+   the way a GET does, in a shared-snapshot scope. tests/read-budget.test.js
+   asserts it writes nothing and never touches the lock. Only a string
+   action of exactly "read" takes this path; begin, commit, delete and cleanup
+   still wait their turn. */
 function doPost(e) {
-  return withRequestScope(false, function () { return routePost(e); });
+  var data = parseBody(e);
+  if (isPhotoRead(data)) {
+    return withRequestScope(true, function () {
+      try { return handleBookingPhoto(leadsBook(), data); }
+      catch (err) {   /* JSON, as routePost answers; never the request itself in the log */
+        console.error("photo read failed: " + err);
+        return json({ ok: false, error: "photo_unavailable" });
+      }
+    });
+  }
+  return withRequestScope(false, function () { return routePost(e, data); });
 }
 
-function routePost(e) {
+function isPhotoRead(data) {
+  return !!data && (data.event_type || data.event) === "booking_photo" && data.action === "read";
+}
+
+/** Leads MASTER — the workbook this script is bound to. */
+function leadsBook() {
+  return SPREADSHEET_ID ? SpreadsheetApp.openById(SPREADSHEET_ID)
+                        : SpreadsheetApp.getActiveSpreadsheet();
+}
+
+/* `parsed` is the body doPost already parsed, so it is parsed (and a bad one
+   logged) once. Called with the event alone, it parses for itself. */
+function routePost(e, parsed) {
   const lock = LockService.getScriptLock();
   var writeLockHeld = false;
   try { lock.waitLock(20000); writeLockHeld = true; } catch (lockErr) { /* ordinary lead intake keeps its existing fallback */ }
 
   try {
-    const data = parseBody(e);
+    const data = parsed === undefined ? parseBody(e) : parsed;
     if (!data) return json({ status: "error", message: "Empty or unparseable body" });
 
     const eventType     = data.event_type || data.event || "unknown";
@@ -1422,7 +1471,7 @@ function routeGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-14 r48" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-15 r49" });
 }
 
 
@@ -2062,6 +2111,74 @@ function buildClientVendorProfile(vendor) {
   };
 }
 
+/* r49. THE PARTNER CARD, REMEMBERED FOR FIVE MINUTES.
+   Building the card opens the Ops workbook and reads VENDORS, VENDOR_REVIEWS
+   and VENDOR_PHOTOS — on every portal open and every client ticket, for a card
+   that changes a few times a year. The script cache now holds the FINISHED
+   card: the output of the whitelist above, never a VENDORS row, so the most a
+   cache entry can hand back is what a customer was already shown. Keyed by
+   company, never by customer. null is remembered too (no card to show).
+
+   FRESHNESS IS THE TRADE. A vendor portal save forgets that company's card at
+   once (handleVendorWrite). An edit typed into the Ops sheet itself — a
+   client_visible flip, a new review — reaches customers within five minutes;
+   run forgetPartnerCards() from the editor to show it now.
+
+   Never fatal. Without CacheService (the test harnesses) or with a cache that
+   refuses, the card is built fresh, exactly as it was before r49. */
+const PARTNER_CARD_TTL_S = 300;
+
+function partnerCardCache() {
+  try {
+    return typeof CacheService !== "undefined" && CacheService.getScriptCache
+      ? CacheService.getScriptCache() : null;
+  } catch (_) { return null; }
+}
+
+function partnerCardKey(vendorId) { return "partner_card:" + vendorId; }
+
+/** The customer's card for this company: buildClientVendorProfile, cached. */
+function clientVendorCard(ss, vendorId) {
+  var vid = String(vendorId || "").trim();
+  if (!vid) return null;
+  /* A cache key is capped at 250 characters; a vendor id is a few. */
+  var cache = vid.length <= 100 ? partnerCardCache() : null;
+  if (cache) {
+    try {
+      var hit = cache.get(partnerCardKey(vid));
+      if (hit !== null && hit !== undefined) return JSON.parse(hit);
+    } catch (_) { /* an unreadable entry is a miss */ }
+  }
+  var card = buildClientVendorProfile(getVendor(ss, vid));
+  if (cache) {
+    try { cache.put(partnerCardKey(vid), JSON.stringify(card), PARTNER_CARD_TTL_S); }
+    catch (_) { /* too large or refused: the next open builds it again */ }
+  }
+  return card;
+}
+
+function forgetPartnerCard(vendorId) {
+  var cache = partnerCardCache();
+  var vid = String(vendorId || "").trim();
+  if (!cache || !vid) return;
+  try { cache.remove(partnerCardKey(vid)); } catch (_) {}
+}
+
+/** RUN FROM THE EDITOR after editing VENDORS, VENDOR_REVIEWS or VENDOR_PHOTOS
+    by hand, to put the change on customers' cards now instead of within five
+    minutes. Reads VENDORS; writes nothing to any sheet. */
+function forgetPartnerCards() {
+  var cache = partnerCardCache();
+  if (!cache) return "no script cache here";
+  var table = readTable(opsBook(), VENDORS_TAB);
+  var col = table ? table.headers.indexOf("vendor_id") : -1;
+  if (col === -1) return "VENDORS has no vendor_id column";
+  var keys = table.rows.map(function (r) { return String(r[col]).trim(); })
+    .filter(Boolean).map(partnerCardKey);
+  if (keys.length) cache.removeAll(keys);
+  return keys.length + " partner card(s) forgotten";
+}
+
 /**
  * What the customer sees. Their booking, their home, their words.
  *
@@ -2075,7 +2192,7 @@ function buildClientTicketModel(ss, booking) {
   var rooms = deriveRooms(booking.beds, booking.baths);
   var instructions = getBookingInstructions(ss, booking.bookingId);
   var assignment = getAssignment(ss, booking);
-  var vendor = buildClientVendorProfile(getVendor(ss, assignment.vendorId));
+  var vendor = clientVendorCard(ss, assignment.vendorId);
 
   var sorted = sortInstructions(instructions);
 
@@ -4808,8 +4925,8 @@ function buildPortalModel(ss, contact) {
         try {
           var vid = String(getAssignment(ss, b).vendorId || "");
           if (vid) {
-            if (vendorMemo[vid] === undefined) vendorMemo[vid] = getVendor(ss, vid);
-            row.partner = buildClientVendorProfile(vendorMemo[vid]);
+            if (vendorMemo[vid] === undefined) vendorMemo[vid] = clientVendorCard(ss, vid);
+            row.partner = vendorMemo[vid];
           }
         } catch (vendErr) {
           console.error("portal vendor lookup failed for " + b.bookingId + ": " + vendErr);
@@ -5704,6 +5821,10 @@ function handleVendorWrite(data) {
   } catch (err) {
     console.error("handleVendorWrite failed: " + (err && err.stack ? err.stack : err));
     return json({ ok: false, error: "save_failed" });
+  } finally {
+    /* r49. After the write, so a card rebuilt from here on reads the new row.
+       Any kind, not only profile: forgetting costs one rebuild. */
+    forgetPartnerCard(vendorId);
   }
 }
 
@@ -8242,9 +8363,11 @@ function handleBookingPhoto(ss, data) {
   // alone must not let a caller invent successful uploads via the public /exec.
   var secret = PropertiesService.getScriptProperties().getProperty("PHOTO_BRIDGE_SECRET");
   if (!secret || String(data.bridge_token || "") !== secret) return json({ ok: false, error: "not_found" });
-  var lock = LockService.getScriptLock();
+  /* r49. A read takes no lock (see doPost). Strict equality, so nothing but
+     the plain string "read" can skip it; the read branches below write nothing. */
+  var lock = data.action === "read" ? null : LockService.getScriptLock();
   try {
-    lock.waitLock(8000);
+    if (lock) lock.waitLock(8000);
     if (data.purpose === "completion") return handleCompletionPhoto(ss, data);
     if (data.action === "cleanup" || data.action === "purged") return cleanupBookingPhotos(ss, data);
     var jobId = String(data.job_id || "");
@@ -8327,7 +8450,7 @@ function handleBookingPhoto(ss, data) {
   } catch (_) {
     return json({ ok: false, error: "photo_unavailable" });
   } finally {
-    lock.releaseLock();
+    if (lock) lock.releaseLock();
   }
 }
 
@@ -8353,7 +8476,8 @@ function completionPhotoPublic(r) {
     createdAt: String(r.created_at), purpose: "completion" };
 }
 
-// Called only after Worker bridge authentication and acquisition of the lock.
+// Called only after Worker bridge authentication and, for begin/commit, the
+// lock. A read (r49) holds no lock, so the read path must never write.
 function handleCompletionPhoto(ss, data) {
   var action = String(data.action || ""), kind = String(data.auth_kind || "");
   var id = String(data.job_id || ""), roomKey = String(data.room_key || ""), tok = String(data.t || "");

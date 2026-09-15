@@ -6,12 +6,81 @@ assistant with no access to this repo. Self-contained on purpose.
 **Companion doc:** `/docs/SCHEMA.md` — authoritative for every column's meaning
 and who writes it. This file is the narrative; that file is the contract.
 
-**Latest session: 2026-09-14.** Jump to
+**Latest session: 2026-09-15.** Jump to
 [what changed on 2026-09-08 / 09](#session-2026-09-08--09) for the current
 state. The sections below it describe earlier builds and remain accurate
 except where a later section supersedes them.
 
 ---
+
+## Current work — 2026-09-15, Claude Code: load-time fixes 1–4 (r49 + site + Worker)
+
+**COMMITTED AND PUSHED; r49 NOT YET PASTED.** The founder said "do 1-4" from
+the audit below (not 5, not the a/b/c trade-offs, which remain open). No
+request or response shape changed, so the paste and the push are safe in
+either order. Until r49 is pasted, fixes 1 and 4 are not live; 2 and 3 go live
+with the push.
+
+**Founder action:** paste `apps-script/webhook.gs` into Leads MASTER → Deploy →
+Manage deployments → new version. Then `curl -sL <exec URL>` must answer
+`"version":"2026-09-15 r49"`. Saving in the editor is not deploying.
+
+**What changed.**
+1. `apps-script/webhook.gs` r49, **photo reads skip the lock**. `doPost` sends
+   `booking_photo` with `action === "read"` (strict: a non-string that only
+   stringifies to "read" still takes the lock) straight to
+   `handleBookingPhoto`, before the 20s script lock, in a shared-snapshot
+   scope like a GET. `handleBookingPhoto` takes its 8s lock for every other
+   action. A workbook that won't open answers `photo_unavailable` JSON.
+   New helpers `isPhotoRead`, `leadsBook`; `routePost(e, parsed)` takes the
+   already-parsed body.
+2. `booking-photos.js`, **photos stay in page memory**, keyed by purpose and
+   photo id. Capped at 30 MB (oldest dropped first), forgotten on delete,
+   seeded from the bytes just uploaded, never put in browser storage. Two
+   views of the same photo share one read, a failed read is retried, and at
+   most 3 reads are out at once.
+3. `src/worker.js` `/api/address`, **on a cache miss**: the IP and monthly
+   counter gets now run in parallel. Both counter puts run in parallel but are
+   still awaited before Geoapify, so a counter that can't be written stops the
+   call (still fail-closed). The answer's cache put goes through
+   `ctx.waitUntil`, or is awaited when there's no ctx, and a failed put is
+   logged instead of throwing. One small behaviour change: a request refused
+   by the monthly cap no longer increments the per-IP counter; nothing is
+   billed on that path.
+4. r49, **partner card cached 5 min**. `clientVendorCard` caches
+   `buildClientVendorProfile`'s output (never the row; null is cached too)
+   under `partner_card:<vendor_id>` in the script cache. It is used by the
+   portal and the client ticket. Any `vendor_write` that passes the token
+   check clears it afterwards. `forgetPartnerCards()` (run from the editor)
+   clears every company. No CacheService, or a cache that throws, means
+   everything is built fresh, as before.
+   **Accepted trade-off:** a hand edit in Ops (including a `client_visible`
+   flip to FALSE) can take up to 5 min to show. Also, if a
+   VENDOR_REVIEWS/PHOTOS read fails during a rebuild, the card is cached
+   without reviews or photos for up to 5 min.
+
+**Checked.** `node tests/run-all.js`: all 32 pass (31 + new
+`photo-cache.test.js`). New assertions: `read-budget` §8 (every photo read
+kind: no lock, no writes, shared scope; refusals take no lock; delete, other
+POSTs and an array action still lock; workbook failure answers JSON) and §9
+(cache hit reads no vendor tab and doesn't open Ops; client ticket shares the
+card; vendor save clears it; forged save doesn't; hand-edit trade-off;
+`forgetPartnerCards`; a broken cache or no cache still works).
+`address-suggest` A4 (counter gets in parallel, both puts before the
+provider, put failure stops the provider, save via waitUntil, failed save
+still answers). `photo-cache.test.js` A–G. **Deliberate breaks, each failed
+its test and was restored byte for byte:** photo-read diversion removed; lock
+always taken; a write added to the read path; card cache disabled; eviction
+removed; the workbook-failure try removed; sequential gets; puts not awaited;
+no waitUntil; save error not caught; no photo cache; no parallel limit; no
+dedupe; no forget on delete; no upload seed; no eviction; failed read kept.
+**Not checked:** `wrangler deploy --dry-run` (no local wrangler; imports are
+unchanged), a real phone, a real signed link, and production timing
+before/after.
+
+**Next:** founder pastes r49; verify `/exec`. Then, optionally, re-measure a
+photo-heavy portal. Fix 5 (self-host Inter) and the a/b/c trade-offs still
+need the founder's decision.
 
 ## Current work — 2026-09-14 (evening), Claude Code: load-time audit — PAUSED, NOTHING BUILT
 

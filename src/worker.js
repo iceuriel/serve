@@ -140,7 +140,7 @@ export default {
     if (url.pathname === "/api/slots")  return handleSlots(request, env);
     if (url.pathname === "/api/job")    return handleJob(request, env);
     if (url.pathname === "/api/photos") return handlePhotos(request, env);
-    if (url.pathname === "/api/address")  return handleAddressSuggest(request, env);
+    if (url.pathname === "/api/address")  return handleAddressSuggest(request, env, ctx);
     if (url.pathname === "/api/portal")   return handlePortal(request, env);
     if (url.pathname === "/api/vendor")   return handleVendor(request, env);
     if (url.pathname === "/api/health")   return handleHealth(env);
@@ -663,7 +663,7 @@ function splitUnit(q) {
   return { addr: raw, unit: "" };
 }
 
-async function handleAddressSuggest(request, env) {
+async function handleAddressSuggest(request, env, ctx) {
   if (request.method !== "GET" && request.method !== "HEAD") {
     return json({ suggestions: [], error: "method_not_allowed" }, 405);
   }
@@ -710,23 +710,32 @@ async function handleAddressSuggest(request, env) {
     return json({ suggestions: [], unit, reason: "no_provider" });
   }
 
+  /* 2026-09-15. A cache miss used to make its storage calls one after another
+     (read, write, read, write) before the provider, and one more after it.
+     The two counter reads now go together, then the two counter writes. BOTH
+     WRITES ARE STILL AWAITED BEFORE THE PROVIDER IS CALLED, so a guard that
+     cannot record a call still stops it — the spend limit fails closed. Only
+     saving the answer, once it is paid for, happens after the response. */
   if (kv) {
     const ip = request.headers.get("CF-Connecting-IP") || "unknown";
-    const ipKey = "sugip:" + (await shortHash(ip)) + ":" + new Date().toISOString().slice(0, 13);
-    const seen = Number(await kv.get(ipKey)) || 0;
+    const now = new Date().toISOString();
+    const ipKey = "sugip:" + (await shortHash(ip)) + ":" + now.slice(0, 13);
+    const monthKey = "sugspend:" + now.slice(0, 7);
+    const [seenRaw, usedRaw] = await Promise.all([kv.get(ipKey), kv.get(monthKey)]);
+    const seen = Number(seenRaw) || 0;
+    const used = Number(usedRaw) || 0;
     if (seen >= SUGGEST_IP_PER_HOUR) {
       console.warn("address_suggest rate_limited zip=" + (zip || "-"));
       return json({ suggestions: [], unit, reason: "rate_limited" });
     }
-    await kv.put(ipKey, String(seen + 1), { expirationTtl: 3600 });
-
-    const monthKey = "sugspend:" + new Date().toISOString().slice(0, 7);
-    const used = Number(await kv.get(monthKey)) || 0;
     if (used >= SUGGEST_MONTHLY_CAP) {
       console.warn("address_suggest monthly_cap_reached used=" + used);
       return json({ suggestions: [], unit, reason: "cap_reached" });
     }
-    await kv.put(monthKey, String(used + 1), { expirationTtl: 60 * 60 * 24 * 40 });
+    await Promise.all([
+      kv.put(ipKey, String(seen + 1), { expirationTtl: 3600 }),
+      kv.put(monthKey, String(used + 1), { expirationTtl: 60 * 60 * 24 * 40 }),
+    ]);
   }
 
   const suggestions = await fetchSuggestions(env, searchFor, zip);
@@ -734,9 +743,14 @@ async function handleAddressSuggest(request, env) {
               " n=" + suggestions.length);
 
   if (kv) {
-    await kv.put(key, JSON.stringify(suggestions), {
+    /* The answer is already paid for, so failing to save it must not cost the
+       customer their suggestions. After the response when the runtime allows
+       it; awaited otherwise (the test harnesses pass no ctx). */
+    const save = kv.put(key, JSON.stringify(suggestions), {
       expirationTtl: suggestions.length ? SUGGEST_TTL_S : SUGGEST_EMPTY_TTL_S,
-    });
+    }).catch(() => console.warn("address_suggest cache_put_failed zip=" + (zip || "-")));
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(save);
+    else await save;
   }
   return json({ suggestions, unit, source: "provider" });
 }

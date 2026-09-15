@@ -15,6 +15,8 @@
 
      2. A GET WRITES NOTHING. The shared snapshot is only safe because of it.
         A GET that starts writing must fail here before a stale read ships.
+        r49: the same holds for a photo read, which runs before the lock
+        (section 8). Section 9 is the partner card cache.
 
      3. A POST NEVER SHARES A SNAPSHOT. A POST reads, writes and may read the
         same tab again, and must see its own write. No POST today happens to
@@ -469,6 +471,161 @@ head('7. Reading less did not change what is read');
   t('a date cell reads as the day typed in the workbook\'s timezone',
     tzPortal.bookings && tzPortal.bookings[0].date === '2026-10-18',
     tzPortal.bookings && tzPortal.bookings[0].date);
+}
+
+/* ------------------------------------------------------------------ */
+head('8. r49: a photo read skips the lock, shares snapshots, and writes nothing');
+{
+  /* Every POST waits for the script lock, so photos used to load one at a
+     time behind bookings. A read now runs before it — which is safe ONLY
+     because a read writes nothing. If a read path ever starts writing, the
+     no-writes checks here fail before it ships. */
+  const H = build();
+  const A = account(H, 3);
+  const SECRET = 'read-budget-bridge';
+  H.box.PropertiesService.getScriptProperties().setProperty('PHOTO_BRIDGE_SECRET', SECRET);
+  const locks = [];
+  H.box.LockService.getScriptLock = () => ({
+    waitLock: ms => locks.push('wait:' + ms), releaseLock: () => locks.push('release'),
+  });
+
+  const PID = '11111111-2222-4333-8444-555555555555';
+  const CPID = '66666666-7777-4888-9999-aaaaaaaaaaaa';
+  H.tabs.BOOKING_PHOTOS._rows.push([PID, A.firstId, 'KITCHEN', 'booking-photos/' + PID + '.jpg',
+    'READY', 10, '2026-09-01', '', '']);
+  H.tabs.COMPLETION_PHOTOS = H.makeSheet('COMPLETION_PHOTOS', ['photo_id', 'job_id', 'vendor_id',
+    'room_key', 'object_key', 'status', 'bytes', 'created_at', 'updated_at']);
+  H.tabs.COMPLETION_PHOTOS._rows.push([CPID, A.firstId, 'VEN-0001', 'KITCHEN',
+    'completion-photos/' + CPID + '.jpg', 'READY', 10, '2026-09-01', '']);
+
+  const tok = {
+    portal: H.box.portalToken('CON-0001'),
+    client: H.box.ticketToken(A.firstId, 'client'),
+    partner: H.box.ticketToken(A.firstId, 'partner'),
+    vendor: H.box.vendorToken('VEN-0001'),
+  };
+  const photo = over => H.post(Object.assign({ event_type: 'booking_photo', bridge_token: SECRET,
+    action: 'read', job_id: A.firstId, room_key: 'KITCHEN', photo_id: PID, purpose: 'instruction' }, over));
+  const run = fn => { locks.length = 0; H.scopeSeen.length = 0; const m = H.measure(fn);
+    return Object.assign(m, { locks: locks.slice(), scopes: H.scopeSeen.slice() }); };
+
+  [['a customer (portal) read', { auth_kind: 'portal', contact_id: 'CON-0001', t: tok.portal }, 'booking-photos/' + PID],
+   ['a client ticket read', { auth_kind: 'client', t: tok.client }, 'booking-photos/' + PID],
+   ['a partner ticket read', { auth_kind: 'partner', t: tok.partner }, 'booking-photos/' + PID],
+   ['a vendor read of a cleaner photo', { purpose: 'completion', auth_kind: 'vendor', vendor_id: 'VEN-0001',
+     t: tok.vendor, photo_id: CPID }, 'completion-photos/' + CPID],
+   ['a partner read of a cleaner photo', { purpose: 'completion', auth_kind: 'partner', t: tok.partner,
+     photo_id: CPID }, 'completion-photos/' + CPID],
+  ].forEach(([label, cred, key]) => {
+    const m = run(() => photo(cred));
+    t(label + ': answers with its storage key', m.out.ok === true && m.out.object_key === key + '.jpg', m.out);
+    t(label + ': never waits for the lock', m.locks.length === 0, m.locks);
+    t(label + ': makes no sheet writes', m.writes.length === 0, m.writes);
+    t(label + ': reads inside a shared scope', m.scopes.length > 0 && m.scopes.every(x => x === 'shared'), m.scopes);
+  });
+
+  const refused = run(() => photo({ auth_kind: 'portal', contact_id: 'CON-0001', t: 'wrong' }));
+  t('a read with a bad token is still refused', refused.out.ok === false && refused.out.error === 'not_found', refused.out);
+  t('a read with no bridge secret is refused', photo({ bridge_token: 'nope', auth_kind: 'client', t: tok.client }).ok === false);
+  t('and a refusal takes no lock either', refused.locks.length === 0, refused.locks);
+  t('no scope is left open after a photo read', H.evalIn('REQUEST_SCOPE') === null);
+
+  /* Only the plain string "read" skips the lock. */
+  const odd = run(() => photo({ auth_kind: 'portal', contact_id: 'CON-0001', t: tok.portal, action: ['read'] }));
+  t('an action that only stringifies to "read" waits for the lock',
+    odd.locks.includes('wait:20000') && odd.locks.includes('wait:8000'), odd.locks);
+  t('and reads fresh, like any other POST', odd.scopes.every(x => x === 'fresh'), odd.scopes);
+
+  const note = run(() => H.post({ event_type: 'portal_write', contact_id: 'CON-0001', t: tok.portal,
+    kind: 'access', property_id: 'PROP-0001', field: 'parking', choice: 'GARAGE' }));
+  t('every other POST still waits for the lock', note.locks.includes('wait:20000'), note.locks);
+
+  const del = run(() => photo({ auth_kind: 'portal', contact_id: 'CON-0001', t: tok.portal, action: 'delete' }));
+  t('a photo delete still waits for the lock', del.out.ok === true && del.locks.includes('wait:8000'), { out: del.out, locks: del.locks });
+  t('and is released', del.locks.filter(x => x === 'release').length >= 1, del.locks);
+  t('a deleted photo can no longer be read', photo({ auth_kind: 'portal', contact_id: 'CON-0001', t: tok.portal }).ok === false);
+
+  const S = H.box.SpreadsheetApp, keep = { openById: S.openById, getActiveSpreadsheet: S.getActiveSpreadsheet };
+  S.openById = S.getActiveSpreadsheet = () => { throw new Error('workbook unavailable'); };
+  let down;
+  try { down = photo({ auth_kind: 'client', t: tok.client }); } catch (err) { down = 'threw: ' + err.message; }
+  Object.assign(S, keep);
+  t('a workbook that will not open answers JSON, not a thrown error',
+    down && down.ok === false && down.error === 'photo_unavailable', down);
+}
+
+/* ------------------------------------------------------------------ */
+head('9. r49: the partner card is cached by company, and a vendor save clears it');
+{
+  const H = build();
+  const A = account(H, 3);
+  const store = new Map(), cacheOps = [];
+  H.box.CacheService = { getScriptCache: () => ({
+    get: k => { cacheOps.push('get'); return store.has(k) ? store.get(k) : null; },
+    put: (k, v, ttl) => { cacheOps.push('put:' + ttl); store.set(k, v); },
+    remove: k => { cacheOps.push('remove'); store.delete(k); },
+    removeAll: ks => { cacheOps.push('removeAll'); ks.forEach(k => store.delete(k)); },
+  }) };
+  const vendorReads = m => ['VENDORS', 'VENDOR_REVIEWS', 'VENDOR_PHOTOS']
+    .reduce((n, tab) => n + (m.readsByTab[tab] || 0), 0);
+  const cardOf = out => (out.bookings.find(b => b.partner) || {}).partner;
+
+  const first = H.measure(() => A.portal());
+  const card = cardOf(first.out);
+  t('the first open builds the card from the Ops workbook',
+    vendorReads(first) > 0 && first.opsOpens === 1 && card && card.displayName === 'Beacon Home Care',
+    { reads: first.readsByTab, card });
+  const raw = store.get('partner_card:VEN-0001');
+  t('and keeps it, keyed by company, for five minutes', raw !== undefined && cacheOps.includes('put:300'), cacheOps);
+  t('what is kept is exactly the card a customer is shown', raw === JSON.stringify(card), raw);
+  t('never the VENDORS row behind it', !/"status"|vendor_id|VEN-0001|"active"/.test(raw), raw);
+
+  const second = H.measure(() => A.portal());
+  t('a second portal open reads no vendor tab', vendorReads(second) === 0, second.readsByTab);
+  t('and does not open the Ops workbook', second.opsOpens === 0, second.opsOpens);
+  t('and shows the same card', JSON.stringify(cardOf(second.out)) === JSON.stringify(card));
+  const ticket = H.measure(() => A.client(A.firstId));
+  t('a client ticket uses the same cached card',
+    vendorReads(ticket) === 0 && JSON.stringify(ticket.out.partner) === JSON.stringify(card),
+    { reads: ticket.readsByTab, partner: ticket.out.partner });
+
+  /* THE ACCEPTED TRADE: a hand edit to the sheet waits for the cache. */
+  const nameCol = H.tabs.VENDORS._rows[0].indexOf('display_name');
+  H.tabs.VENDORS._rows[1][nameCol] = 'Beacon Edited By Hand';
+  t('a hand edit in the Ops sheet waits for the cache (up to five minutes)',
+    cardOf(A.portal()).displayName === 'Beacon Home Care');
+  const forgot = H.evalIn('forgetPartnerCards()');
+  t('forgetPartnerCards() clears every company in VENDORS', /^1 partner card/.test(forgot), forgot);
+  t('and the next open shows the edit', cardOf(A.portal()).displayName === 'Beacon Edited By Hand');
+
+  const saved = H.post({ event_type: 'vendor_write', vendor_id: 'VEN-0001', t: H.box.vendorToken('VEN-0001'),
+    kind: 'profile', field: 'display_name', value: 'Beacon Saved In Portal' });
+  t('a vendor portal save succeeds', saved.ok === true, saved);
+  t('and clears that company\'s card at once', !store.has('partner_card:VEN-0001'));
+  t('so the next open shows the save without waiting', cardOf(A.portal()).displayName === 'Beacon Saved In Portal');
+
+  const forged = H.post({ event_type: 'vendor_write', vendor_id: 'VEN-0001', t: 'wrong',
+    kind: 'profile', field: 'display_name', value: 'Forged' });
+  t('a forged vendor save is refused, and clears nothing', forged.ok === false && store.has('partner_card:VEN-0001'), forged);
+
+  /* Unavailable or broken cache: exactly the pre-r49 behaviour. */
+  const R = build();
+  const RA = account(R, 2);
+  R.box.CacheService = { getScriptCache: () => ({
+    get: () => { throw new Error('down'); }, put: () => { throw new Error('down'); },
+    remove: () => { throw new Error('down'); },
+  }) };
+  const refused = RA.portal();
+  t('a cache that throws costs speed, never the card',
+    refused.ok === true && cardOf(refused).displayName === 'Beacon Home Care', refused.error);
+  const refusedSave = R.post({ event_type: 'vendor_write', vendor_id: 'VEN-0001', t: R.box.vendorToken('VEN-0001'),
+    kind: 'profile', field: 'display_name', value: 'Still Saves' });
+  t('nor a vendor save', refusedSave.ok === true, refusedSave);
+  const N = build();
+  const NA = account(N, 2);
+  NA.portal();
+  const again = N.measure(() => NA.portal());
+  t('with no CacheService at all, every open builds the card fresh', (again.readsByTab.VENDORS || 0) === 1, again.readsByTab);
 }
 
 console.log('\n' + (bad ? 'FAILURES: ' + bad : 'all read-budget checks passed'));
