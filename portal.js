@@ -75,36 +75,101 @@
         return fetch(url).then(function (r) { return r.json(); });
     }
 
-    firstLoad(LOAD)
-        .then(function (d) {
-            /* view === portal, not merely ok. An older deployment has no
-               portal route, so doGet falls through to the HEALTH CHECK, which
-               answers ok:true — and this page would render that as an empty
-               account rather than saying anything was wrong. The ticket hit
-               the same ordering problem on 2026-09-08. */
-            if (!d || d.ok !== true || d.view !== 'portal') {
-                fail('We could not open that link. It may be mistyped, or it ' +
-                     'may have been replaced.');
-                return;
-            }
-            model = d;
-            start();
-            warmSlots(d);
-            if (typeof ServeLive !== 'undefined') ServeLive.watch({
-                url: LOAD,
-                view: 'portal', root: bodyEl, initial: d,
-                onData: function (next) { model = next; paint(); }
-            });
-        })
-        .catch(function (err) {
-            console.warn('portal load failed', err);
-            fail('We could not load your account just now. Please try again, ' +
-                 'or call us on the number below.');
-        });
+    /* ========================================================
+       ONE RETRY, AND ONLY THE TRUTH ABOUT WHAT FAILED  —  r50
+       ========================================================
+       The founder reported opening a portal from a text, closing it, and
+       being told the link "may have been replaced" — intermittently, on a
+       link that was fine. It was never the link. Every one of these ended
+       here, because this page used to print that one sentence for FOUR
+       different outcomes: the link really is unknown; the Worker gave up on a
+       slow Apps Script (an 8s budget against a cold start that routinely
+       takes longer — see UPSTREAM_TIMEOUT_MS.page); the sheet read threw
+       upstream; and an answer that is not this view. Three of those are the
+       round trip failing, and a customer told their credential is dead has no
+       reason to try it again.
 
-    function fail(msg) {
+       ServeLive already got this right for the REFRESH — 20s, backoff, and it
+       declares a link closed only on an explicit not_found. This is the same
+       judgement applied to the first load, which is the one that matters most
+       because nothing is on screen behind it.
+
+       ONE RETRY, NOT THREE. Each attempt can cost the Worker's full 15s, and
+       a third try would leave somebody staring at a skeleton for 45s before
+       any bad news. One covers the cold start and the blip, which is what
+       these actually are. */
+    var RETRY_MS = 800;
+
+    /* Did the server ANSWER, or did the trip fail? "not_found" is an answer:
+       this id and this token open nothing, and asking again says the same.
+       Anything else — a fetch that threw, the Worker's 502 after a timeout,
+       an upstream lookup_failed, a view this page does not know — is a broken
+       round trip, and the second attempt usually works. */
+    function answered(d) {
+        if (!d) return false;
+        if (d.ok === true && d.view === 'portal') return true;
+        return d.error === 'not_found' || d.error === 'expired';
+    }
+
+    function load(url, retried) {
+        var attempt = retried
+            ? fetch(url).then(function (r) { return r.json(); })
+            : firstLoad(url);
+        return attempt
+            .catch(function (err) { console.warn('portal load failed', err); return null; })
+            .then(function (d) {
+                if (answered(d) || retried) return d;
+                return new Promise(function (go) { setTimeout(go, RETRY_MS); })
+                    .then(function () { return load(url, true); });
+            });
+    }
+
+    load(LOAD).then(function (d) {
+        /* Twice, and still no answer. Say what is true — the link is fine, we
+           could not reach the account — and offer the retry here rather than
+           sending them back to find the text message again. */
+        if (!answered(d)) {
+            fail(d
+                ? 'We could not load your account just now. Please try again, ' +
+                  'or call us on the number below.'
+                : 'We could not reach Serve just now. Please check your ' +
+                  'connection and try again, or call us on the number below.',
+                true);
+            return;
+        }
+        /* view === portal, not merely ok. An older deployment has no portal
+           route, so doGet falls through to the HEALTH CHECK, which answers
+           ok:true — and this page would render that as an empty account
+           rather than saying anything was wrong. The ticket hit the same
+           ordering problem on 2026-09-08. */
+        if (d.ok !== true || d.view !== 'portal') {
+            fail('We could not open that link. It may be mistyped, or it ' +
+                 'may have been replaced.');
+            return;
+        }
+        model = d;
+        start();
+        warmSlots(d);
+        if (typeof ServeLive !== 'undefined') ServeLive.watch({
+            url: LOAD,
+            view: 'portal', root: bodyEl, initial: d,
+            onData: function (next) { model = next; paint(); }
+        });
+    });
+
+    function fail(msg, retry) {
         stateEl.textContent = msg;
+        if (retry) add(stateEl, retryButton());
         footEl.hidden = false;
+    }
+
+    /* A plain reload: the link in the address bar is the credential, and it is
+       already correct. Nothing to rebuild, nothing to remember. */
+    function retryButton() {
+        var b = el('button', 'btn btn--ghost tk-retry', 'Try again');
+        b.type = 'button';
+        b.addEventListener('click', function () { location.reload(); });
+        return b;
     }
 
     /* --- tiny DOM helpers: text only, by construction --- */

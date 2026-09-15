@@ -93,7 +93,22 @@ const CAN_PRICE = (() => {
    default. These caps stop a hung upstream holding a customer's browser. */
 /* Deliberately shorter than the browser's own 15s budget, so the customer gets
    this Worker's explanatory 502 rather than their fetch aborting blind. */
-const UPSTREAM_TIMEOUT_MS = { submit: 12000, slots: 8000 };
+/* `page` IS THE ODD ONE OUT, AND ON PURPOSE.  r50
+   The 2026-09-13 note argued that raising a visitor-facing budget "would not
+   remove the wait, only move it into the customer's browser and make them
+   watch it". That is right for `slots`, where a failed feed degrades into the
+   earlier/later radios and the booking still completes. It is WRONG for the
+   three signed-link reads: nothing on /h, /j or /v exists until this one
+   request returns, so giving up early does not save the customer a wait — it
+   converts their wait into "we could not open that link", which reads as a
+   dead credential for a link that is perfectly good.
+   A cold Apps Script container routinely answers between 8s and 12s (the warm
+   ping makes that rarer, never impossible), and a warm customer portal is ~39
+   Sheets calls on top of a 1-2s floor. 8s sat right in the middle of the
+   normal range, which is what made the failure INTERMITTENT rather than
+   total. 15s clears it, the page shows a skeleton the whole time, and the
+   client retries once past that. */
+const UPSTREAM_TIMEOUT_MS = { submit: 12000, slots: 8000, page: 15000 };
 
 /* THE WARM PING'S BUDGET IS DELIBERATELY THE OPPOSITE OF THE ONES ABOVE. Those
    are short because a customer is waiting behind them. Nobody is waiting behind
@@ -291,7 +306,7 @@ async function handleJob(request, env) {
     "&t="    + encodeURIComponent(tok) +
     "&view=" + vw;
 
-  const upstream = await relay(target, { method: "GET" }, UPSTREAM_TIMEOUT_MS.slots);
+  const upstream = await relay(target, { method: "GET" }, UPSTREAM_TIMEOUT_MS.page);
   if (!upstream.ok) {
     console.error("job relay failed: " + upstream.error);
     return json({ ok: false, error: "upstream_unreachable" }, 502);
@@ -401,7 +416,7 @@ async function handlePortal(request, env) {
 
   const up = await relay(
     env.WEBHOOK_URL + "?portal=" + encodeURIComponent(id) + "&t=" + encodeURIComponent(tok),
-    { method: "GET" }, UPSTREAM_TIMEOUT_MS.slots);
+    { method: "GET" }, UPSTREAM_TIMEOUT_MS.page);
   if (!up.ok) {
     console.error("portal relay failed: " + up.error);
     return json({ ok: false, error: "upstream_unreachable" }, 502);
@@ -466,7 +481,7 @@ async function handleVendor(request, env) {
 
   const up = await relay(
     env.WEBHOOK_URL + "?vendor=" + encodeURIComponent(id) + "&t=" + encodeURIComponent(tok),
-    { method: "GET" }, UPSTREAM_TIMEOUT_MS.slots);
+    { method: "GET" }, UPSTREAM_TIMEOUT_MS.page);
   if (!up.ok) {
     console.error("vendor relay failed: " + up.error);
     return json({ ok: false, error: "upstream_unreachable" }, 502);
@@ -1192,7 +1207,7 @@ async function handleCheckout(request, env) {
     : env.WEBHOOK_URL + "?job=" + encodeURIComponent(jobId) +
       "&t=" + encodeURIComponent(tok) + "&view=client";
 
-  const up = await relay(lookup, { method: "GET" }, UPSTREAM_TIMEOUT_MS.slots);
+  const up = await relay(lookup, { method: "GET" }, UPSTREAM_TIMEOUT_MS.page);
   if (!up.ok) {
     console.error("checkout portal read failed: " + up.error);
     return json({ ok: false, error: "upstream_unreachable" }, 502);

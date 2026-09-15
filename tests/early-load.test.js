@@ -37,7 +37,7 @@ const t = (label, cond, extra) => {
   if (!cond) bad++;
 };
 const head = (m) => console.log('\n=== ' + m + ' ===');
-const settle = async () => { for (let i = 0; i < 5; i++) await new Promise(r => setImmediate(r)); };
+const settle = async (n) => { for (let i = 0; i < (n || 5); i++) await new Promise(r => setImmediate(r)); };
 
 /* The smallest DOM the three page scripts touch on their failure path. */
 function node(tag) {
@@ -54,19 +54,28 @@ function node(tag) {
   };
 }
 
+/* `notFound` is the only message allowed to blame the link. `offline` is a
+   request that never reached us, `unreachable` one that reached the Worker and
+   came back a failure — see "the four outcomes" in portal.js. */
 const PAGES = [
   { html: 'h.html', js: 'portal.js', state: 'p-state', api: '/api/portal',
-    search: '?id=CON-0007&t=0123456789abcdef0123',
-    notFound: /could not open that link/, offline: /could not load your account just now/ },
+    search: '?id=CON-0007&t=0123456789abcdef0123', good: { ok: true, view: 'portal' },
+    notFound: /could not open that link/, offline: /could not reach Serve just now/,
+    unreachable: /could not (load your account just now|reach Serve just now)/ },
   { html: 'j.html', js: 'ticket.js', state: 't-state', api: '/api/job',
     search: '?id=SRV-20261001-ABCDEF&t=0123456789abcdef0123&view=partner',
-    notFound: /could not find that ticket/, offline: /could not load this ticket just now/ },
+    good: { ok: true, view: 'partner' },
+    notFound: /could not find that ticket/, offline: /could not reach Serve just now/,
+    unreachable: /could not (load this ticket just now|reach Serve just now)/ },
   { html: 'j.html', js: 'ticket.js', state: 't-state', api: '/api/job', label: 'j.html (client view, no view= in the link)',
     search: '?id=SRV-20261001-ABCDEF&t=0123456789abcdef0123',
-    notFound: /could not find that ticket/, offline: /could not load this ticket just now/ },
+    good: { ok: true, view: 'client' },
+    notFound: /could not find that ticket/, offline: /could not reach Serve just now/,
+    unreachable: /could not (load this ticket just now|reach Serve just now)/ },
   { html: 'v.html', js: 'vendor.js', state: 'v-state', api: '/api/vendor',
-    search: '?id=VEN-0001&t=0123456789abcdef0123',
-    notFound: /could not open that link/, offline: /could not load your account just now/ },
+    search: '?id=VEN-0001&t=0123456789abcdef0123', good: { ok: true, view: 'vendor' },
+    notFound: /could not open that link/, offline: /could not reach Serve just now/,
+    unreachable: /could not (load your account just now|reach Serve just now)/ },
 ];
 
 function inlineScript(html) {
@@ -86,12 +95,17 @@ async function open(page, opts) {
     URLSearchParams,
     document: { getElementById(id) { return (els[id] = els[id] || node('div')); }, createElement: node },
     sessionStorage: { getItem() { return null; }, setItem() {}, removeItem() {} },
-    setTimeout, clearTimeout,
+    /* The retry waits 800ms. Nothing here is testing the clock, so a fake
+       timer fires it on the next tick and the suite stays fast. */
+    setTimeout: (fn) => { Promise.resolve().then(fn); return 0; },
+    clearTimeout,
     fetch(url) {
       fetches.push(String(url));
-      return opts.offline
-        ? Promise.reject(new Error('offline'))
-        : Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: false, error: 'not_found' }) });
+      if (opts.offline) return Promise.reject(new Error('offline'));
+      const r = opts.replies ? opts.replies[Math.min(fetches.length - 1, opts.replies.length - 1)] : null;
+      if (r === 'throw') return Promise.reject(new Error('offline'));
+      const body = r || { ok: false, error: 'not_found' };
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
     },
   };
   box.window = box;
@@ -100,8 +114,10 @@ async function open(page, opts) {
   const earlyUrl = box.ServeFirstLoad ? box.ServeFirstLoad.url : null;
   if (opts.tamper && box.ServeFirstLoad) box.ServeFirstLoad.url += '&different=1';
   vm.runInContext(read(page.js), box);
-  await settle();
-  return { fetches, earlyUrl, box, state: (els[page.state] || node('div'))._text };
+  await settle(20);
+  const stateEl = els[page.state] || node('div');
+  return { fetches, earlyUrl, box, state: stateEl._text,
+           buttons: stateEl.children.filter((c) => c.tagName === 'button') };
 }
 
 (async function () {
@@ -140,11 +156,58 @@ async function open(page, opts) {
       N.fetches.length === 1 && page.notFound.test(N.state), { fetches: N.fetches, state: N.state });
 
     const O = await open(page, { offline: true });
-    t(name + ': a failed early request shows the page\'s own "try again" message',
-      O.fetches.length === 1 && page.offline.test(O.state), { fetches: O.fetches, state: O.state });
+    t(name + ': a failed early request is retried once, then shows the "try again" message',
+      O.fetches.length === 2 && page.unreachable.test(O.state), { fetches: O.fetches, state: O.state });
 
     const I = await open(page, { search: '?id=ONLY-AN-ID' });
     t(name + ': a link with no token starts nothing early', I.earlyUrl === null && I.fetches.length === 0, I.fetches);
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* r50 — the "inconsistent dead link". A portal opened from a text, closed
+     and opened again would intermittently say the link "may have been
+     replaced". It never was: the pages printed that one sentence for a
+     timeout, an upstream error and an unknown view as well as for a genuine
+     not_found, and the Worker's 8s budget sat right in the middle of a cold
+     Apps Script's normal range. Two rules are proved here. */
+  head('2b. A failed trip is retried once, and only a real not_found blames the link');
+  for (const page of PAGES) {
+    const name = page.label || page.html;
+
+    /* THE RULE THAT MATTERS: a link is called bad only when the server says
+       so. Each of these is a failure of the round trip, not a verdict. */
+    const TRANSIENT = [
+      ['the Worker\'s 502 after an Apps Script timeout', { ok: false, error: 'upstream_unreachable' }],
+      ['an upstream sheet read that threw',              { ok: false, error: 'lookup_failed' }],
+      ['a health-check answer from an older deployment', { ok: true, service: 'serve-booking-webhook' }],
+      ['a request that threw',                           'throw'],
+    ];
+    for (const [label, reply] of TRANSIENT) {
+      const R = await open(page, { replies: [reply] });
+      t(name + ': ' + label + ' is retried, and never called a bad link',
+        R.fetches.length === 2 && !page.notFound.test(R.state) && page.unreachable.test(R.state),
+        { fetches: R.fetches.length, state: R.state });
+      t(name + ': ' + label + ' leaves a "Try again" button',
+        R.buttons.length === 1 && /Try again/.test(R.buttons[0]._text), R.buttons.length);
+    }
+
+    /* And the other half: an answer is an answer. Retrying a not_found would
+       double every genuinely dead link's wait for nothing. */
+    const N = await open(page, { replies: [{ ok: false, error: 'not_found' }] });
+    t(name + ': a real not_found is NOT retried and does blame the link',
+      N.fetches.length === 1 && page.notFound.test(N.state), { fetches: N.fetches.length, state: N.state });
+    t(name + ': and offers no "Try again" — there is nothing to try again for',
+      N.buttons.length === 0, N.buttons.length);
+
+    /* THE RETRY'S ANSWER IS THE ONE THAT COUNTS — a retry that merely repeated
+       the first attempt's verdict would be theatre. Proved with a second
+       answer that differs from the first; a *successful* second answer would
+       run the page's whole renderer, which this stub DOM cannot stand up. */
+    const S = await open(page, {
+      replies: [{ ok: false, error: 'upstream_unreachable' }, { ok: false, error: 'not_found' }] });
+    t(name + ': the retry\'s answer replaces the first attempt\'s failure',
+      S.fetches.length === 2 && page.notFound.test(S.state) && S.buttons.length === 0,
+      { fetches: S.fetches.length, state: S.state });
   }
 
   /* ------------------------------------------------------------------ */
@@ -168,7 +231,7 @@ async function open(page, opts) {
   ['portal.js', 'ticket.js', 'vendor.js'].forEach((file) => {
     const js = read(file);
     t(file + ': fail() writes over the whole state element, skeleton included',
-      /function fail\(msg\) \{\s*stateEl\.textContent = msg;/.test(js));
+      /function fail\(msg[^)]*\) \{\s*stateEl\.textContent = msg;/.test(js));
   });
   t('portal.js and vendor.js hide it once the page has painted',
     /function start\(\) \{\s*stateEl\.hidden = true;/.test(read('portal.js')) &&

@@ -13,7 +13,109 @@ except where a later section supersedes them.
 
 ---
 
-## Current work — 2026-09-15, Claude Code: load-time fixes 1–4 (r49 + site + Worker)
+## Current work — 2026-09-15, Claude Code: the portal that would not open twice
+
+**Working-tree edits — NOT committed, NOT pushed, NOT live. NO APPS SCRIPT
+PASTE — `webhook.gs` is
+untouched and stays at r49**, so there is no script-before-site ordering to
+respect here. This is `src/worker.js`, `portal.js`, `ticket.js`, `vendor.js`,
+`style.css` and two test files; it deploys by pushing. (r49 itself is still
+unpasted — see the section below. That is a separate, still-open action.)
+
+### The complaint
+
+The founder opened a test customer portal from the SMS, closed it, opened it
+again, and was told **"We could not open that link. It may be mistyped, or it
+may have been replaced"** — intermittently, on a link that was fine.
+
+### What it actually was — two bugs stacked
+
+**1. The link was never the problem.** `portal.js` printed that one sentence
+for FOUR different outcomes:
+
+| What happened | What the page said |
+|---|---|
+| The id/token genuinely open nothing (`not_found`) | correct |
+| The Worker gave up on a slow Apps Script (502 `upstream_unreachable`) | **wrong** |
+| The sheet read threw upstream (`lookup_failed`) | **wrong** |
+| An answer that is not this page's view (an old deployment's health check) | **wrong** |
+
+Three of the four are the round trip failing, not a verdict on the credential
+— and a customer told their link is dead has no reason to try it again.
+`ticket.js` and `vendor.js` had the identical flaw.
+
+**2. The 8s budget sat in the middle of the normal range, which is what made
+it feel random.** `/api/portal`, `/api/job` and `/api/vendor` GETs shared
+`UPSTREAM_TIMEOUT_MS.slots` = 8000. A cold Apps Script container routinely
+answers between 8s and 12s (the 5-minute warm ping makes that rarer, never
+impossible), and a warm customer portal is ~39 Sheets calls on top of the
+measured 1–2s floor. Sometimes under, sometimes over — hence "inconsistent".
+
+Measured today against production, warm, with a bad token (reaches Apps Script,
+reads no sheets): **1.36s, 1.41s, 1.53s, 1.55s, 2.04s.** That is the floor
+*before* the 39 reads a real portal does.
+
+**The 2026-09-13 note said visitor-facing timeouts were left alone on purpose,
+because raising one "would not remove the wait, only move it into the
+customer's browser".** That reasoning is right for `/api/slots` — a failed feed
+degrades into the earlier/later radios and the booking still completes. It is
+wrong for the three signed-link reads: nothing is on the page until that one
+request returns, so giving up early does not save the customer a wait, it
+converts the wait into a dead-credential message. The asymmetry is now written
+into the constant's comment so it does not get "tidied up".
+
+### What changed
+
+- **`UPSTREAM_TIMEOUT_MS.page = 15000`**, used by the `/api/portal`,
+  `/api/job` and `/api/vendor` GET relays and by the checkout's portal lookup.
+  `slots` (8s) is unchanged and still used by the availability feed and the
+  address type-ahead, both of which have somewhere to fall back to. 15s is
+  under `ServeLive`'s own 20s abort, so the Worker's explanatory 502 still
+  arrives before the browser gives up blind.
+- **One retry, in all three page scripts.** A failed trip is retried once after
+  800ms before anything is said. Not three: each attempt can cost the full 15s,
+  and a third would leave somebody on a skeleton for 45s before any news. One
+  covers the cold start and the blip, which is what these actually are.
+- **`answered(d)` decides what a link is called.** Only an explicit `not_found`
+  (or `expired`) gets the "mistyped, or replaced" sentence. Everything else
+  gets "we could not load your account just now" — or "could not reach Serve,
+  check your connection" when the fetch itself threw — plus a **Try again**
+  button that reloads (the address bar already holds the credential).
+- **`ticket.js` now requires a KNOWN view**, `client` or `partner`, not merely
+  `ok:true`. An older deployment's health check answers `ok:true` and the
+  ticket would have rendered it as an empty job. `portal.js` has guarded this
+  since 2026-09-08; the ticket never did.
+- This is the same judgement `ServeLive` already applied to the *refresh* (20s,
+  backoff, closes the link only on an explicit `not_found`), finally applied to
+  the *first* load — the one that matters most, because nothing is on screen
+  behind it.
+
+### What was verified
+
+- **`node tests/run-all.js` — all 32 files pass.**
+- **The new assertions were mutation-tested, and the failure output is
+  literally the reported symptom.** Making `answered()` return true for every
+  reply (the pre-fix behaviour) turns 7 checks red, printing
+  `{"fetches":1,"state":"We could not open that link. It may be mistyped…"}`
+  for a 502, an upstream error and a health-check answer. Removing the retry
+  turns 6 red; removing the Try again button, 4. On the Worker side, putting
+  `/api/portal` back on `.slots` fails `"/api/portal reads on the signed-link
+  budget"`, and shortening `page` to 8000 fails two more.
+- **Production latency measured** (the five samples above).
+- **NOT verified: a real signed link on the fixed code.** Needs the push and a
+  live portal link. The test harness proves the *decisions*; it does not prove
+  the page renders in a browser.
+
+### Next action
+
+Push, confirm Workers Builds registered a check run for the commit
+(`gh api repos/iceuriel/serve/commits/<sha>/check-runs` — see the r49 section
+below for why this is not assumed), then open a real portal link, close it,
+and open it again several times.
+
+---
+
+## Earlier — 2026-09-15, Claude Code: load-time fixes 1–4 (r49 + site + Worker)
 
 **SITE + WORKER LIVE AND VERIFIED (2026-09-15 ~14:15Z); r49 NOT YET PASTED.**
 `468baf8` reached GitHub at 14:00:11Z, but Workers Builds never registered a

@@ -67,38 +67,83 @@
         return fetch(url).then(function (r) { return r.json(); });
     }
 
-    firstLoad(API + '?id=' + encodeURIComponent(id) +
-                    '&t=' + encodeURIComponent(token) +
-                    '&view=' + view)
-        .then(function (d) {
-            if (!d || d.ok !== true) {
-                /* Deliberately the same message for a bad token and a missing
-                   job. Telling them apart would let someone confirm a job
-                   exists by guessing its id. */
-                if (d && d.error === 'expired') {
-                    fail('This job is finished, so this link has closed. ' +
-                         'Anything you need is with Uriel.');
-                } else {
-                    fail('We could not find that ticket. The link may be ' +
-                         'mistyped, or it may have been replaced.');
-                }
-                return;
-            }
-            render(d);
-            if (typeof ServeLive !== 'undefined') ServeLive.watch({
-                url: API + '?id=' + encodeURIComponent(id) + '&t=' + encodeURIComponent(token) + '&view=' + view,
-                view: view, root: bodyEl, initial: d, onData: render
-            });
-        })
-        .catch(function (err) {
-            console.warn('ticket load failed', err);
-            fail('We could not load this ticket just now. Please try again, ' +
-                 'or call us on the number below.');
-        });
+    var LOAD = API + '?id=' + encodeURIComponent(id) +
+                     '&t=' + encodeURIComponent(token) +
+                     '&view=' + view;
 
-    function fail(msg) {
+    /* ONE RETRY, AND ONLY THE TRUTH ABOUT WHAT FAILED.  r50
+       The reasoning is written out once, in portal.js. It matters most on a
+       cleaner's ticket: they are standing outside a house, on a phone, and
+       "we could not find that ticket" sends them to call rather than to
+       tap again. */
+    var RETRY_MS = 800;
+
+    /* A KNOWN VIEW, not merely ok. An older deployment with no ticket route
+       falls through to the HEALTH CHECK, which answers ok:true — and this
+       page would render that as an empty ticket rather than saying anything
+       was wrong. That is the 2026-09-08 ordering bug; portal.js has guarded
+       it since, and this is the same guard on the ticket. */
+    function answered(d) {
+        if (!d) return false;
+        if (d.ok === true) return d.view === 'client' || d.view === 'partner';
+        return d.error === 'not_found' || d.error === 'expired';
+    }
+
+    function load(url, retried) {
+        var attempt = retried
+            ? fetch(url).then(function (r) { return r.json(); })
+            : firstLoad(url);
+        return attempt
+            .catch(function (err) { console.warn('ticket load failed', err); return null; })
+            .then(function (d) {
+                if (answered(d) || retried) return d;
+                return new Promise(function (go) { setTimeout(go, RETRY_MS); })
+                    .then(function () { return load(url, true); });
+            });
+    }
+
+    load(LOAD).then(function (d) {
+        if (!answered(d)) {
+            fail(d
+                ? 'We could not load this ticket just now. Please try again, ' +
+                  'or call us on the number below.'
+                : 'We could not reach Serve just now. Please check your ' +
+                  'connection and try again, or call us on the number below.',
+                true);
+            return;
+        }
+        if (d.ok !== true) {
+            /* Deliberately the same message for a bad token and a missing
+               job. Telling them apart would let someone confirm a job
+               exists by guessing its id. */
+            if (d.error === 'expired') {
+                fail('This job is finished, so this link has closed. ' +
+                     'Anything you need is with Uriel.');
+            } else {
+                fail('We could not find that ticket. The link may be ' +
+                     'mistyped, or it may have been replaced.');
+            }
+            return;
+        }
+        render(d);
+        if (typeof ServeLive !== 'undefined') ServeLive.watch({
+            url: LOAD,
+            view: view, root: bodyEl, initial: d, onData: render
+        });
+    });
+
+    function fail(msg, retry) {
         stateEl.textContent = msg;
+        if (retry) add(stateEl, retryButton());
         footEl.hidden = false;
+    }
+
+    /* A plain reload: the link in the address bar is the credential. */
+    function retryButton() {
+        var b = el('button', 'btn btn--ghost tk-retry', 'Try again');
+        b.type = 'button';
+        b.addEventListener('click', function () { location.reload(); });
+        return b;
     }
 
     /* --- tiny DOM helpers: text only, by construction --- */

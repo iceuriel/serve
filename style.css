@@ -2333,6 +2333,14 @@ a {
     padding: 1.5rem 0;
 }
 
+/* Shown only when the trip to the server failed, never when the link itself is
+   unknown — there is nothing to try again for a link that does not exist. */
+.tk-retry {
+    display: inline-block;
+    margin-top: 1rem;
+    font-size: 0.95rem;
+}
+
 /* The date and the time are the first thing anyone opens a ticket to find, so
    they lead — but one line should not shout over the whole page. The date used
    to be the smallest text on the ticket at 0.7rem while the time ran at

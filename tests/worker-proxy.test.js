@@ -1024,6 +1024,53 @@ console.log('\n=== 7. the failure UI exists and is reachable ===');
     typeof health.can_price === 'boolean', health.can_price);
 }
 
+console.log('\n=== UPSTREAM BUDGETS — a slow server is not a dead link (r50) ===');
+{
+  /* The three signed-link reads used to share the availability feed's 8s
+     budget. A failed FEED degrades: the booking form drops to the earlier/
+     later radios and the customer still books. A failed signed-link read does
+     not degrade — nothing is on the page until it returns — so giving up early
+     converts a slow Apps Script into "we could not open that link", on a link
+     that is perfectly good. That is the bug the founder reported: a portal
+     that opened, then would not open again. Cold Apps Script answers run past
+     8s often enough to make it feel random. */
+  const ms = (name) =>
+    Number((new RegExp('UPSTREAM_TIMEOUT_MS\\s*=\\s*\\{[^}]*\\b' + name + ':\\s*(\\d+)')
+      .exec(SRC) || [, NaN])[1]);
+  const PAGE = ms('page'), SLOTS = ms('slots'), SUBMIT = ms('submit');
+
+  t('all three budgets were found (a renamed one would make every check below vacuous)',
+    [PAGE, SLOTS, SUBMIT].every(Number.isFinite), { PAGE, SLOTS, SUBMIT });
+  t('the signed-link budget is longer than the feed\'s', PAGE > SLOTS, { PAGE, SLOTS });
+  t('and long enough for a cold Apps Script (>= 12s)', PAGE >= 12000, PAGE);
+  /* ServeLive aborts its own refresh at 20s. Staying under that keeps the
+     Worker's explanatory 502 arriving BEFORE the browser gives up blind. */
+  t('but still under the browser\'s own 20s abort', PAGE < 20000, PAGE);
+
+  /* Which routes actually got it. Read off the source, because the constant
+     being right is worthless if a route still passes `.slots`. */
+  const budgetAt = (marker) => {
+    const at = SRC.indexOf(marker);
+    if (at === -1) return 'MARKER NOT FOUND';
+    const after = SRC.slice(at, at + 600);
+    return (/UPSTREAM_TIMEOUT_MS\.(\w+)/.exec(after) || [, 'none'])[1];
+  };
+  [['"?portal=" + encodeURIComponent(id)', '/api/portal'],
+   ['"?vendor=" + encodeURIComponent(id)', '/api/vendor'],
+   ['"?job="  + encodeURIComponent(id)',   '/api/job'],
+  ].forEach(([marker, route]) => {
+    t(route + ' reads on the signed-link budget', budgetAt(marker) === 'page', budgetAt(marker));
+  });
+
+  /* The feed keeps the short one ON PURPOSE — it has somewhere to fall back
+     to, and a customer typing an address should not wait 15s for a type-ahead. */
+  t('the availability feed still uses the short budget',
+    budgetAt('env.AVAILABILITY_URL, { method: "GET" }') === 'slots',
+    budgetAt('env.AVAILABILITY_URL, { method: "GET" }'));
+  t('address type-ahead still uses the short budget',
+    budgetAt('geocode/autocomplete') === 'slots', budgetAt('geocode/autocomplete'));
+}
+
 console.log('\n=== CRON TRIGGERS — warm the upstreams, never delete by accident ===');
 {
   /* The cron strings are read from the WORKER'S OWN CONSTANTS rather than
