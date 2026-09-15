@@ -15,7 +15,12 @@ except where a later section supersedes them.
 
 ## Current work — 2026-09-15, Claude Code: load-time fixes 1–4 (r49 + site + Worker)
 
-**COMMITTED AND PUSHED; r49 NOT YET PASTED.** The founder said "do 1-4" from
+**COMMITTED AND PUSHED; r49 NOT YET PASTED.** `468baf8` reached GitHub at
+14:00:11Z, but Workers Builds never registered a build for it: no check run
+after 12 minutes, where the previous push had one within 47s. Production
+still served the old `booking-photos.js`, and `/exec` still answered r48. This
+docs commit was pushed to re-trigger the build; see the verification line
+below for the result. The founder said "do 1-4" from
 the audit below (not 5, not the a/b/c trade-offs, which remain open). No
 request or response shape changed, so the paste and the push are safe in
 either order. Until r49 is pasted, fixes 1 and 4 are not live; 2 and 3 go live
