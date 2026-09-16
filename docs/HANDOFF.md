@@ -15,7 +15,10 @@ except where a later section supersedes them.
 
 ## Current work — 2026-09-15, Claude Code: the portal that would not open twice
 
-**Working-tree edits — NOT committed, NOT pushed, NOT live. NO APPS SCRIPT
+**LIVE AND VERIFIED (2026-09-15 23:25Z), pushed as `4411703`.** Workers Builds
+registered a check run this time and succeeded at 23:25:19Z. `portal.js`,
+`ticket.js` and `vendor.js` on production match the repo byte-for-byte
+(ignoring CR), and `.tk-retry` is in the live stylesheet. **NO APPS SCRIPT
 PASTE — `webhook.gs` is
 untouched and stays at r49**, so there is no script-before-site ordering to
 respect here. This is `src/worker.js`, `portal.js`, `ticket.js`, `vendor.js`,
@@ -101,17 +104,74 @@ into the constant's comment so it does not get "tidied up".
   turns 6 red; removing the Try again button, 4. On the Worker side, putting
   `/api/portal` back on `.slots` fails `"/api/portal reads on the signed-link
   budget"`, and shortening `page` to 8000 fails two more.
-- **Production latency measured** (the five samples above).
-- **NOT verified: a real signed link on the fixed code.** Needs the push and a
-  live portal link. The test harness proves the *decisions*; it does not prove
-  the page renders in a browser.
+- **THE BUG WAS CAUGHT IN THE ACT IN PRODUCTION, AFTER THE DEPLOY.** Probing
+  `/api/portal` with a bad token (reaches Apps Script, reads no sheets):
+
+  | | | |
+  |---|---|---|
+  | `502 15.10s upstream_unreachable` | `502 15.12s` | first after a quiet gap |
+  | `200 1.54s not_found` | `200 1.71s`, `200 1.70s` | every one after |
+
+  **The first request after a gap exceeds 15s; every one after it is ~1.5s.**
+  That is the founder's symptom exactly: whichever open lands on a cold
+  container fails, and nothing about the link differs between them.
+
+### The measured distribution, and what it says about the two halves
+
+**~30 samples of `/api/portal` with a bad token** (reaches Apps Script,
+computes one HMAC, reads no sheets — so this is *pure round trip*, before the
+~39 Sheets calls a real portal does):
+
+| Band | Count | What the fix does with it |
+|---|---|---|
+| 1.3 – 3.1s | ~26 | nothing needed |
+| 11.87s | 1 | **the raised budget saves it** — would have failed at 8s |
+| > 15s | 3 | **the retry saves it** |
+
+**Both halves earn their keep, and an earlier draft of this entry was wrong to
+say otherwise.** It claimed "the raised budget is not what fixes this — the
+retry is". The 11.87s sample is the counterexample: under the old 8s budget it
+was the dead-link message, under 15s it is a page that loads a little slowly
+and says nothing. The raise covers the 8–15s band; the retry covers past it.
+
+**The retry was observed converting a failure into a load, twice.** Every
+timeout in the samples was immediately followed by a fast success — `15.1s
+timeout → 2.94s ok`, and `15.1s timeout → 1.54s ok`. That is exactly the
+sequence a browser now performs on its own after 800ms.
+
+**Do not raise `page` past 15s.** `ServeLive` aborts at 20s, and a single 20s
+wait is worse for a customer than 15s plus a retry.
+
+### It is not idleness — Apps Script runs SEVERAL containers
+
+The decisive pair, seconds apart after the same quiet gap:
+
+    probe1: 200   1.57s      <- a warm container
+    probe2: 200  11.87s      <- a different, cold one
+
+Fast *then* slow. A pure idle-eviction story predicts the opposite order. Each
+request is routed to whichever container it gets, warm or cold, **which is why
+this felt random rather than time-based**: closing the tab and reopening rolls
+the dice again.
+
+**This also settles what the `*/5 * * * *` warm ping can and cannot do.** It
+keeps *a* container alive — probe1 is likely its work — but it cannot warm the
+one the next request happens to land on. Cold starts get rarer, never
+impossible. Warming was never going to fix this on its own, and the retry is
+the right primary defence regardless of whether the cron is firing.
+
+**Still unconfirmed (carried over from 2026-09-13):** whether the cron is
+actually registered on the deployed Worker. Lower priority than it looked, for
+the reason above. A clean test needs ~12 minutes of true silence then one
+probe; two attempts at it were killed by local memory pressure before
+producing anything, so the gap before the pair above was uncontrolled.
 
 ### Next action
 
-Push, confirm Workers Builds registered a check run for the commit
-(`gh api repos/iceuriel/serve/commits/<sha>/check-runs` — see the r49 section
-below for why this is not assumed), then open a real portal link, close it,
-and open it again several times.
+**Open a real portal link, close it, wait several minutes, reopen** — the one
+check the test harness cannot do. The wording now diagnoses itself: "could not
+load your account just now" is a slow server, "may have been replaced" is a
+genuinely bad link. Then settle the warm-ping question above.
 
 ---
 
