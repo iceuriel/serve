@@ -483,9 +483,13 @@ const PRICING = {
        Both of those used to be shown at the full ticket with no discount at
        all, and on the no-stack path that produced a cliff rather than a
        premium: one radio answer ("over a year since a professional clean")
-       took a 4BR from $269 to $698, a 2.59x jump, where the same answer on a
-       3BR moved it 1.30x. The condition multiplier and the total loss of the
-       discount landed on the same click.
+       took a 4BR in Allston from $264 to $680, a 2.58x jump, where the same
+       answer on a 3BR moved it 1.30x. The condition multiplier and the total
+       loss of the discount landed on the same click.
+
+       Those dollar figures are REAL Allston quotes, geo factor and parking
+       included. Computing them from Node without passing `geo` gives
+       neutral-geo numbers about 3% adrift — see serveGeo() below.
 
        WHY 15 AND NOT 50. The half-price first clean is sold BELOW the
        contractor's own cost — at MARGIN.deep it is -34% on the labour — and is
@@ -496,7 +500,7 @@ const PRICING = {
        both comfortably above cost.
 
        IT SOFTENS THE CLIFF RATHER THAN REMOVING IT, and the residual is worth
-       knowing before anyone calls this fixed: 3BR heavy $322 -> 4BR heavy $594
+       knowing before anyone calls this fixed: 3BR heavy $314 -> 4BR heavy $578
        is still 1.84x for one bedroom, down from 2.17x. A hard threshold at
        4BR+heavy necessarily leaves a step there; closing it means tapering the
        no-stack rule or dropping it, which is a pricing decision and not this

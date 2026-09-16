@@ -22,12 +22,12 @@ deliberately not recorded here; the row is findable by ZIP, size and date.)
 
 ### What the founder saw, and why
 
-A 4BR/2BA in Allston quoted **$698 with no discount at all**. Working as
+A 4BR/2BA in Allston quoted **$680 with no discount at all**. Working as
 written: `pricing-engine.js` R5, the 4BR+ no-stack rule, removes the whole 50%
 when a first clean is `heavy` **and** 4BR+. The customer never picks "heavy" —
 it is derived, and answering *"over a year / never"* to the last-professional-
 clean question produces `heavy` on its own, pets or not. So one radio button
-took the price from **$269 to $698, a 2.59x jump**, where the same answer on a
+took the price from **$264 to $680, a 2.58x jump**, where the same answer on a
 3BR moved it 1.30x. The condition multiplier and the total loss of the discount
 landed on the same click.
 
@@ -43,13 +43,27 @@ clean, and a no-stack 4BR+ heavy first clean.
 
 | home | before | after |
 |---|---|---|
-| 4BR/2BA Allston heavy first clean | $698 | **$594** |
-| 4BR/2BA Allston move-out | $626 | **$533** |
+| 4BR/2BA Allston heavy first clean | $680 | **$578** |
+| 4BR/2BA Allston move-out | $611 | **$520** |
 | published table, first clean | — | $127–$594 |
 | published table, move in/out | — | $250–$692 |
 
+**Verified against production**: `POST /api/quote` for that home answers
+`{"price":578}`, and the 4BR standard answers `264`.
+
+> **MEASUREMENT TRAP, and it bit this session.** The Allston figures were first
+> computed as $698 / $594 by calling `computeQuote` from Node **without passing
+> `geo`**. `serveGeo()`'s internal lookup reads a global that only exists when
+> the browser loads `serve-geo-data.js` as its own `<script>`, so under Node it
+> silently falls back to NEUTRAL_GEO — losing Allston's 0.92 factor and its $15
+> P1 parking, about 3%. **Any price computed off-browser must pass
+> `serveGeo(zip, lookupGeo)` explicitly**, exactly as `priceFrom()` in
+> src/worker.js does and says. The published table ranges above are genuinely
+> neutral-geo (`SERVE_RANGE_GEO`) and are correct as shown. The commit message
+> for r52 carries the uncorrected pair; the ratios in it are right.
+
 **THE CLIFF IS SOFTENED, NOT REMOVED,** and the founder should know the
-residual number: 3BR heavy $322 → 4BR heavy $594 is still **1.84x for one
+residual number: 3BR heavy $314 → 4BR heavy $578 is still **1.84x for one
 bedroom** (it was 2.17x). Any fix that keeps a hard threshold at 4BR+heavy
 keeps a step there; removing the step means tapering the rule or dropping it.
 
