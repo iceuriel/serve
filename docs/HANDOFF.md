@@ -13,7 +13,108 @@ except where a later section supersedes them.
 
 ---
 
-## Current work — 2026-09-15, Claude Code: payment state, and what a live key still needs
+## Current work — 2026-09-16, Claude Code: two bugs the tests could not have caught
+
+**LIVE.** Apps Script **r51**, Worker/site at **`4b381dc`**. The payment
+write-back now works end to end on the test key: the founder resent a failed
+`checkout.session.completed` and got **200**. Everything below was found by the
+founder testing the real path, not by the suite — worth reading before trusting
+a green run on this subsystem again.
+
+**STILL ON `sk_test_`.** The live key swap has not been done.
+
+### What broke, in the order it was found
+
+**1. The capture did nothing.** The founder authorized, saw the portal say
+authorized, captured in the Stripe dashboard — and nothing changed. Then the
+notice vanished on reload and the booking read unauthorized again.
+
+**The "authorized" they saw was the `?pay=done` RETURN BANNER, not the sheet.**
+That banner is driven by a URL parameter and appears whether or not anything
+was ever written; it disappears on any reload without the param. The Payment
+*line* underneath had said "Not yet authorized" the whole time. Anyone
+debugging this subsystem should read the line and the sheet, never the banner.
+
+**The cause: METADATA DOES NOT PROPAGATE FROM A CHECKOUT SESSION TO THE
+PAYMENTINTENT IT CREATES.** Separate objects, separate metadata bags, Stripe
+copies nothing. `/api/checkout` set only `metadata[job_id]`, which lives on the
+session, so of five subscribed events exactly ONE could find its booking:
+
+| Event | Object | Job id |
+|---|---|---|
+| `checkout.session.completed` | session | ✅ |
+| `payment_intent.amount_capturable_updated` | PaymentIntent | ❌ |
+| **`payment_intent.succeeded`** — *the capture* | PaymentIntent | ❌ |
+| `payment_intent.canceled` | PaymentIntent | ❌ |
+| `charge.refunded` | inherits from the PI | ❌ |
+
+Fixed by also setting `payment_intent_data[metadata][job_id]`. **Both are
+needed; setting one does not set the other.**
+
+**WHY THE SUITE MISSED IT, AND THIS IS THE REAL LESSON.** The tests hand-built
+PaymentIntent events *carrying* metadata and asserted the handler reads it.
+That proved the handler right about a message Stripe was never going to send.
+Every fixture was written from the same misunderstanding as the code, so the
+suite could only ever confirm it. **A suite is no more honest than its
+fixtures, and a mutation test does not help — it mutates the code, not the
+assumption both sides share.** The new section 2b drives `/api/checkout`, reads
+the metadata back out of the form actually sent to Stripe, and builds the
+webhook events from *that* — the two halves asserted against each other rather
+than separately. Deleting the fix turns 5 assertions red and prints the
+production symptom verbatim: `{"ok":true,"ignored":"no_job_id"}`.
+
+**2. The authorization never reached the sheet either.** Stripe's Event
+deliveries showed `500 ERR` on both `checkout.session.completed` attempts. The
+500 was correct behaviour — a failed write asks Stripe to retry — but nothing
+said *why*, and the causes need opposite fixes.
+
+Fixed in two steps. The Worker now puts the reason in the **response body**,
+which **Stripe's Event deliveries tab displays per attempt** — turning the
+founder's own dashboard into the diagnostic, with no Cloudflare log access, no
+`wrangler login`, and no tail running at the right moment. Resending then
+answered `{"error":"write_failed","reason":"not_found"}`, which narrowed it to
+one line: `handlePaymentEvent` was refusing the Worker on the bridge secret.
+
+**r51 then made that failure mode much less likely and much more legible:**
+- **The bridge secret is TRIMMED on both sides.** Script Properties is a web
+  form; a pasted secret very easily carries a trailing space or newline, Google
+  stores it verbatim, and an exact comparison then fails forever against a
+  Cloudflare secret that is character-for-character identical on screen.
+  Internal whitespace is still a different secret and still refused.
+- **A refusal logs which it was** — "not set" versus "mismatch", with LENGTHS
+  only, never values or prefixes. What the caller is told is unchanged and
+  still identical for both cases.
+
+### What is proven, and what is NOT
+
+**Proven in production:** `/api/health` reports `can_record_payments: true`;
+an unsigned POST to `/api/stripe-webhook` is `400`; `/exec` answers r51; a
+resent `checkout.session.completed` returns **200**.
+
+**NOT proven, and it needs a FRESH BOOKING:** the capture path. The
+PaymentIntents from every test before `7045796` have empty metadata bags, so
+**resending those events can never work** no matter how often it is retried.
+Only a booking made after the fix exercises
+`payment_intent.succeeded` → `paid`. **Also unproven:** cancel → hold release,
+and anything at all on a live key.
+
+**A 200 is not by itself proof the cell changed** — `applied: false` (a stale
+event, an unknown job) also answers 200. Read `payment_status` on the row.
+
+### Two smaller things found along the way
+
+- **A restricted Stripe key (`rk_…`) was reported as LIVE in test mode.**
+  `stripe_mode` matched only `sk_test_`. Both key kinds carry the mode in the
+  same place; `stripeMode()` now reads both, and anything unrecognised still
+  reads LIVE rather than being assumed harmless.
+- **A single `/exec` probe can lie.** Google intermittently answers with an
+  HTML "Sorry, unable to open the file at this time" page. One probe returned
+  that; the next two returned r51. Probe more than once before concluding a
+  deployment is wrong.
+
+---
+
+## Earlier — 2026-09-15, Claude Code: payment state, and what a live key still needs
 
 **LIVE AND VERIFIED (2026-09-16 03:57Z), pushed as `f57f2cc`.** Apps Script
 **r50 was pasted by the founder BEFORE the push**, which is the required order
