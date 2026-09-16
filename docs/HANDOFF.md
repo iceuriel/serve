@@ -15,20 +15,42 @@ except where a later section supersedes them.
 
 ## Current work — 2026-09-15, Claude Code: payment state, and what a live key still needs
 
-**NOT DEPLOYED. NOT LIVE. Local working-tree changes, NOT COMMITTED, and the
-Apps Script is NOT pasted.** Touched: `src/worker.js`, `apps-script/webhook.gs`,
-`portal.js`, `ticket.js`, `wrangler.jsonc`, `docs/SCHEMA.md`, this file, and
-three test files (`tests/stripe-payments.test.js` is new). `AGENTS.md`,
-`CLAUDE.md` and the two `images/` files were already modified/untracked on
-arrival and are **not this agent's** — left alone.
-This is the build that has to land *before* the Stripe
-key is switched from `sk_test_` to `sk_live_`, and the founder has four setup
-steps that only they can do. See "What the founder has to do" below.
+**LIVE AND VERIFIED (2026-09-16 03:57Z), pushed as `f57f2cc`.** Apps Script
+**r50 was pasted by the founder BEFORE the push**, which is the required order
+for a change spanning both — the reverse gives a Worker relaying
+`payment_event` to a script that has never heard of it. Workers Builds
+registered a check run on `f57f2cc` and succeeded at 03:57:19Z.
 
-**Ordering, and it is the kind that has caused an outage here before:** this
-change spans `webhook.gs` **and** the site/Worker, so **paste r50 FIRST, then
-push.** The reverse order gives a Worker relaying `payment_event` to a script
-that has never heard of it.
+**STILL ON THE TEST KEY. `stripe_mode: "test"`.** The live key swap is the
+founder's last step and has not been done. No real money has moved.
+
+**What was verified against production after the deploy:**
+
+| Check | Result |
+|---|---|
+| `/api/health` | `can_record_payments: true` beside `can_charge: true`, `stripe_mode: "test"` |
+| `POST /api/stripe-webhook`, unsigned | **`400 bad_signature`** — the route exists and refuses an unsigned caller. It was `404` before this push. |
+| `payment_event` with a deliberately WRONG bridge token | `{"ok":false,"error":"not_found"}` — r50's handler is live and the secret check fires. Nothing written. |
+| `portal.js`, `ticket.js` on production | byte-identical to the repo (ignoring CR) |
+| Apps Script `/exec` | `"version":"2026-09-15 r50"` |
+
+**Cloudflare secrets `STRIPE_WEBHOOK_SECRET` and `PAYMENT_BRIDGE_SECRET` are
+bound** (both visible in the health binding list). **Whether
+`PAYMENT_BRIDGE_SECRET` MATCHES the Apps Script Script Property of the same
+name is NOT verifiable from outside** — both are write-only. A mismatch shows
+up as a test payment that authorizes fine while the portal never flips to
+"Card authorized", with `payment write-back failed` in the Worker log and
+`500`s in Stripe's Event deliveries tab. It is recoverable: fix the secret and
+hit **Resend** on the event, because a failed write returns 500 specifically so
+Stripe keeps retrying for three days.
+
+**A PROCESS NOTE WORTH KEEPING.** This work sat finished-and-tested but
+UNPUSHED while the founder configured Stripe against it, and set two Cloudflare
+secrets in the meantime — which redeployed the Worker **with the code from the
+last git push**, so the secrets were bound to a Worker that had no route to use
+them. The founder found it by curling `/api/health` and seeing no
+`can_record_payments`. Built, committed, and deployed are three separate
+events; do not describe a verification step for code that is not pushed.
 
 ### The stale note this corrects
 
@@ -151,7 +173,7 @@ starts moving real money.**
    `payment_intent.amount_capturable_updated`, `payment_intent.succeeded`,
    `payment_intent.canceled`, `charge.refunded`. Copy the signing secret
    (`whsec_…`) into the Cloudflare secret `STRIPE_WEBHOOK_SECRET`.
-6. **Test the whole path on the TEST key first**, then swap
+6. **DONE — steps 1–5 are complete and deployed.** Test the whole path on the TEST key first, then swap
    `STRIPE_SECRET_KEY` to `sk_live_…` last. Confirm `/api/health` reports
    `stripe_mode: "LIVE"` **and** `can_record_payments: true` together.
 
