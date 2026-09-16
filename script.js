@@ -1990,10 +1990,26 @@ const SERVE_SIZES = [
     { key: '3br2ba', label: '3BR / 2BA', beds: 3, baths: 2 },
 ];
 
+/* THE DISCOUNT SUBTITLES ARE COMPUTED, NOT TYPED — 2026-09-16.
+   `50% off` used to be a literal here and a second literal in the <th> of
+   pricing.html, which is two places for one number to go stale. Both now come
+   from the factors the calculator actually charges on, so a page can never
+   advertise a percentage the engine does not apply. */
+function servePct(factor) {
+    return Math.round((1 - factor) * 100) + '% off';
+}
+
 const SERVE_SERVICES = [
-    { key: 'deep',      label: 'First Clean',   sub: '50% off' },
+    { key: 'deep',      label: 'First Clean',
+      sub: (typeof PRICING === 'object' && PRICING.FIRST_CLEAN_FACTOR != null)
+             ? servePct(PRICING.FIRST_CLEAN_FACTOR) : '50% off' },
     { key: 'recurring', label: 'Recurring',     sub: 'per visit' },
-    { key: 'moveinout', label: 'Move In / Out', sub: 'empty home' },
+    /* Move cleans carry a real discount as of 2026-09-16 and used to say only
+       "empty home". A discounted price shown with no indication that it is
+       discounted is a discount nobody is persuaded by. */
+    { key: 'moveinout', label: 'Move In / Out',
+      sub: (typeof PRICING === 'object' && PRICING.SECONDARY_FACTOR != null)
+             ? servePct(PRICING.SECONDARY_FACTOR) : 'empty home' },
 ];
 
 /**
@@ -2032,8 +2048,14 @@ function serveRangeText(range) {
 function servePriceCellHtml(size, service) {
     const range = serveRange(size.beds, size.baths, service.key);
     /* data-label carries the column header down to narrow screens, where the
-       table collapses to stacked cards and the <thead> is hidden. */
-    const label = ' data-label="' + service.label + '"';
+       table collapses to stacked cards and the <thead> is hidden.
+
+       IT CARRIES THE SUBTITLE TOO, as of 2026-09-16. Below 640px the header
+       row is `display: none`, so a discount announced only in the <th> is
+       invisible on a phone — which is where most of this traffic reads the
+       table. "MOVE IN / OUT — 15% OFF" is the whole point of the column. */
+    const label = ' data-label="' + service.label +
+        (service.sub ? ' — ' + service.sub : '') + '"';
     if (!range) return '<td class="serve-cell serve-cell--empty"' + label + '>—</td>';
     const spoken = serveRangeText(range).replace('–', ' to ');
     return '<td class="serve-cell"' + label + '>' +
@@ -2045,6 +2067,21 @@ function servePriceCellHtml(size, service) {
         '<span class="serve-cell__go" aria-hidden="true">Get my price →</span>' +
         '</button></td>';
 }
+
+/* The table's own column headers — /pricing, 2026-09-16.
+   Rendered from SERVE_SERVICES so the discount percentages in the <th> cannot
+   drift from the ones the calculator charges. The markup keeps a hardcoded
+   header row as a no-JS fallback; this replaces it when the engine is present.
+   The feature column keeps its class, which is what the CSS highlights. */
+(function renderPriceTableHead() {
+    const head = document.querySelector('[data-serve-price-head]');
+    if (!head || typeof PRICING !== 'object') return;
+    head.innerHTML = '<th scope="col">Home</th>' +
+        SERVE_SERVICES.map(svc =>
+            '<th scope="col"' + (svc.key === 'recurring' ? ' class="serve-col--feature"' : '') + '>' +
+            svc.label + (svc.sub ? ' <span>' + svc.sub + '</span>' : '') +
+            '</th>').join('');
+})();
 
 /* Full 5 x 3 table — /pricing */
 (function renderFullPriceTable() {

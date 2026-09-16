@@ -112,37 +112,88 @@ put into the partner payout copy. **All 34 test files pass.**
 
 ### Remaining work / next action
 
-1. **Deploy.** Apps Script **r52 first**, then push the site — the standing
-   order. Both interleavings were reasoned through and neither is an outage
-   here (`payoutRateFor` reads `service`/`condition`/`bedrooms`, which the
-   current live site already sends), but keep the order anyway.
+1. **PASTE APPS SCRIPT r53.** This is the one outstanding action. The site is
+   already live with the new pricing (`b83684c`, Workers Builds **completed
+   success**), so until the paste happens:
+   - a half-price first clean stamps `payout_rate` **0.85, not 0.98** — and the
+     stamp is permanent by design, so any first clean booked in this window
+     carries the wrong share and needs `partner_payout` set by hand;
+   - the confirmation-screen fix is not in effect.
 
-   **r52 is the stamp this session created** — webhook.gs was at r51 when the
-   session started. Verify the paste landed by probing `/exec`, which now
-   answers `"2026-09-16 r52"`. **Probe more than once**: Google intermittently
-   serves an HTML "unable to open the file" page, and a single probe can lie.
-   The stamp at the top of the file and the string `doGet` returns are asserted
-   to agree by three separate tests, so they cannot drift apart — but nothing
-   asserts that a revision was bumped at all, which was missed once in this
-   session and caught by the founder.
-2. **The confirmation-screen bug below is unfixed** and needs the founder to
-   read Apps Script → Executions first.
-3. **Stale structured data, pre-existing.** `pricing.html:52` JSON-LD claims a
-   first clean runs "$117 to $347"; the engine now publishes $127–$594. It was
-   already stale before this change and nothing asserts it. Not touched —
-   published price claims are the founder's call.
-4. The `/pricing` table shows the 15%-discounted move price under a header that
-   says only "empty home", so the discount is invisible there. The calculator
-   does show the struck anchor. Advertising it on the table is a marketing
-   decision, not made.
+   Neither is an outage. Verify the paste by probing `/exec`, which answers
+   `"2026-09-16 r53"`. **Probe more than once** — Google intermittently serves
+   an HTML "unable to open the file" page and a single probe can lie.
+
+   **r52 and r53 were both created this session** (webhook.gs was at r51 on
+   arrival). The stamp and the string `doGet` returns are asserted to agree by
+   three separate tests, so they cannot drift apart — but nothing asserts that
+   a revision was bumped *at all*, which was missed once here and caught by the
+   founder, not by the suite.
+2. **Confirm the confirmation-screen diagnosis** in Apps Script → Executions —
+   the fix shipped in r53 without that evidence, so it is worth a look.
+3. **Two published price claims that no longer match the engine**, both
+   pre-existing and both the founder's call, so neither was touched:
+   `pricing.html:52` JSON-LD says a first clean runs "$117 to $347" against the
+   engine's $127–$594, and the site-wide "$50 off visits 2–4" below.
+4. ~~The `/pricing` table hides the move discount.~~ **Done — see below.**
+
+### The 15% is now visible where the 50% always was
+
+The move price was already discounted in the table while the column header said
+only "empty home" — a discounted price shown with no sign that it is discounted
+persuades nobody.
+
+| surface | before | after |
+|---|---|---|
+| `/pricing` column header | `Move In / Out — empty home` | `Move In / Out — 15% off` |
+| mobile card label (<640px) | `MOVE IN / OUT` | `MOVE IN / OUT — 15% OFF` |
+| `services.html` + `index.html` move card badge | `Empty homes` (quiet) | `15% off` |
+| booking-form price block | full price, no anchor | struck anchor + `— 15% off` badge |
+
+**THE PERCENTAGES ARE COMPUTED, NEVER TYPED.** `servePct()` derives both from
+`FIRST_CLEAN_FACTOR` and `SECONDARY_FACTOR`, and the `<th>` row is now
+*rendered* from `SERVE_SERVICES` (`[data-serve-price-head]`) rather than
+hardcoded — it previously held `50% off` as a literal in a second place. The
+row left in `pricing.html` is the **no-JS fallback and must be kept in step by
+hand**; a test asserts it against the factors, so drift fails rather than ships.
+
+**The mobile path was the one that mattered.** Under 640px the `<thead>` is
+`display: none` and each cell falls back to `data-label`, so a discount
+announced only in the header is invisible on a phone. `data-label` now carries
+the subtitle too.
+
+`pricing-and-services.test.js` drives the renderer with the header element
+present — without it the function returns early and every assertion on its
+output would pass vacuously.
+
+### FOUND ALONG THE WAY, NOT FIXED: "$50 off visits 2–4" is promised and never applied
+
+Five customer-facing places promise it, and **nothing in the code implements
+it**. `recurringPriceFor` prices a recurring visit at steady state with no
+deduction anywhere.
+
+| where | what it says |
+|---|---|
+| `index.html:1190`, `services.html:103` | recurring card badge `$50 off visits 2–4` |
+| `index.html:508` | booking-form `freq-note` |
+| `pricing.html:188`, `:229` | body copy and the FAQ |
+| `pricing.html:84` | **inside JSON-LD structured data**, so Google can surface it |
+
+It predates this session — the only change made was to stop the 4BR no-stack
+branch offering it *as a substitute* for the discount it was withholding; those
+homes get a real 15% now instead of a promise about later visits.
+
+**Either it gets built or the copy comes down.** Both are founder decisions
+(one is a price, the other a published claim), so neither was made. No test
+pins the current wording — that would only freeze the problem in place.
 
 ---
 
-## Unfixed bug — 2026-09-16: the confirmation screen said "couldn't confirm" on a booking that fully succeeded
+## Fixed in r53 — 2026-09-16: the confirmation screen said "couldn't confirm" on a booking that fully succeeded
 
-**DIAGNOSED FROM THE CODE, NOT PROVEN.** Same test booking. The customer saw
-the yellow failure panel; the row was written, the SMS and the portal link
-arrived, everything logged fine.
+**FIXED IN CODE, NOT YET PROVEN IN PRODUCTION.** Same test booking. The
+customer saw the yellow failure panel; the row was written, the SMS and the
+portal link arrived, everything logged fine.
 
 **Why the server succeeding is consistent with the browser being told it
 failed:** the SMS (`webhook.gs:1388`) and the email (`:1396`) are sent BEFORE
@@ -162,19 +213,36 @@ released at `:1418`.
 a slow upstream, but on a reservation it queues behind the exact execution it
 is retrying. Nothing about the friend's computer mattered; it is timing.
 
-**Evidence needed before fixing:** Apps Script → Executions should show **two**
-executions for that booking, the first long and the second long and almost
-entirely idle. Not yet checked.
+**Evidence still worth collecting:** Apps Script → Executions should show
+**two** executions for that booking, the first long and the second long and
+almost entirely idle. **Not checked** — the fix was made from the code, so this
+would confirm the diagnosis rather than guide it.
 
-**Proposed fix (not applied):** release the lock after `createRecurringPlan`
-(~`:1380`) and before `sendBookingSms`. The lock exists to serialize *sheet*
-writes; Twilio and Gmail touch no sheet. Attempt 1 would still overrun and 502,
-but attempt 2 would then take the lock as soon as the sheet work is done, hit
-`alreadyWritten` (`:1300`) and return `{status:"ok",duplicate:true}` in about a
-second — which the client already treats as confirmed.
+**THE FIX (r53).** The reservation path now releases the lock as soon as the
+**sheet** work is done — after `createRecurringPlan`, before `sendBookingSms` —
+through a new idempotent `releaseWriteLock()` that the `finally` also calls.
+Attempt 1 still overruns and still 502s; Twilio and Gmail are genuinely slow
+and that is unchanged. But attempt 2 now takes the lock immediately, hits
+`alreadyWritten` and returns `{status:"ok",duplicate:true}` in about a second,
+which the browser already treats as confirmed.
 
-**The suite cannot catch this one** — Apps Script's lock and the 12s Worker
-budget do not exist in the harness. Same shape as the metadata bug below.
+**The safety condition, and the thing most likely to be broken later:** the
+lock serializes SHEET WRITES, and every one of them is above the release.
+Neither sender nor anything they call touches a spreadsheet — checked function
+by function, not assumed. **Anything added after the release that writes a
+sheet races another booking.**
+
+**`tests/reservation-lock-release.test.js` (new)** instruments the harness's
+`LockService`, `UrlFetchApp` and `MailApp` to record a sequence, then asserts
+the order is `lock_acquired → sheet writes → lock_released → sms → email`, that
+no sheet write follows the release, and that the release happens exactly once.
+Removing the early release reproduces the pre-r53 order verbatim
+(`…sms, email, lock_released`) and turns it red; adding a stray `appendRow`
+after the release turns section 3 red. Both were run.
+
+**The timing itself is still untestable here** — Apps Script's lock and the 12s
+Worker budget do not exist in the harness, which is why the test pins the
+*order* instead. Same shape as the metadata bug below.
 
 ---
 

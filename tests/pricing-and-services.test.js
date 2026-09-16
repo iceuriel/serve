@@ -66,6 +66,11 @@ function runModule(opts) {
   opts = opts || {};
   const els = {
     priceRows:   makeEl(),
+    /* 2026-09-16: the table's header row is rendered from SERVE_SERVICES too,
+       so the discount percentages in it cannot drift from the factors. Present
+       here so renderPriceTableHead actually RUNS — without the element it
+       returns early and the assertions on its output would be vacuous. */
+    priceHead:   makeEl(),
     teaserRows:  makeEl(),
     headline:    makeEl(),
     scopeRows:   makeEl(),
@@ -79,6 +84,7 @@ function runModule(opts) {
 
   const SINGLE = {
     '[data-serve-price-rows]':      els.priceRows,
+    '[data-serve-price-head]':      els.priceHead,
     '[data-serve-teaser-rows]':     els.teaserRows,
     '[data-serve-headline-range]':  els.headline,
     '[data-serve-scope-rows]':      els.scopeRows,
@@ -142,6 +148,41 @@ const teaserHtml = run.els.teaserRows.innerHTML;
 
 t('the /pricing table body rendered', priceHtml.length > 0);
 t('the homepage teaser body rendered', teaserHtml.length > 0);
+
+/* 2026-09-16 — THE HEADER ROW IS RENDERED, AND ITS DISCOUNTS ARE COMPUTED.
+   Move cleans used to say "empty home" and advertised no discount at all while
+   the cells beneath them already showed a discounted price. Asserted against
+   the engine's own factors, so moving one cannot leave a stale promise on the
+   page. Percentages appear in TWO places — the <th> for desktop and each
+   cell's data-label for the sub-640px card layout, where the header row is
+   display:none — and the second is the one most traffic actually reads. */
+{
+  const headHtml = run.els.priceHead.innerHTML;
+  const pct = (f) => Math.round((1 - f) * 100) + '% off';
+  /* run.mod.PRICING, not PRICING — the constant named PRICING in this file is
+     the pricing.html SOURCE TEXT. The engine's object comes out of the module
+     under test, so these percentages are the ones the calculator charges. */
+  const first  = pct(run.mod.PRICING.FIRST_CLEAN_FACTOR);
+  const second = pct(run.mod.PRICING.SECONDARY_FACTOR);
+
+  t('the /pricing header row rendered', headHtml.length > 0, headHtml.slice(0, 80));
+  t('it still leads with the home column', /^<th scope="col">Home<\/th>/.test(headHtml));
+  t('First Clean names the factor percentage',
+    headHtml.indexOf('First Clean <span>' + first + '</span>') !== -1, headHtml);
+  t('Move In / Out names the secondary percentage rather than "empty home"',
+    headHtml.indexOf('Move In / Out <span>' + second + '</span>') !== -1 &&
+    headHtml.indexOf('empty home') === -1, headHtml);
+  t('the recurring column keeps the class the CSS highlights',
+    /class="serve-col--feature"[^>]*>Recurring/.test(headHtml), headHtml);
+
+  t('and every move-clean CELL carries the discount in data-label, for the '
+    + 'phone layout where the header row is hidden',
+    priceHtml.indexOf('data-label="Move In / Out — ' + second + '"') !== -1,
+    (priceHtml.match(/data-label="Move[^"]*"/) || [null])[0]);
+  t('the first-clean cells carry theirs too',
+    priceHtml.indexOf('data-label="First Clean — ' + first + '"') !== -1,
+    (priceHtml.match(/data-label="First Clean[^"]*"/) || [null])[0]);
+}
 
 /* Five sizes x three services. */
 t('/pricing renders 5 rows', (priceHtml.match(/<tr>/g) || []).length === 5);

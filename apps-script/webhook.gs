@@ -1,7 +1,46 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-16  ·  master  ·  r52 — a 50% discount is not funded by a 15% margin
+ * VERSION STAMP:  2026-09-16  ·  master  ·  r53 — the retry no longer queues behind itself
+ *
+ * r53 = WHY A BOOKING THAT FULLY SUCCEEDED SAID "WE COULDN'T CONFIRM".
+ *
+ *      LIVE SYMPTOM. A founder test booking showed the yellow failure panel
+ *      while the booking had entirely succeeded: JOBS row written, customer
+ *      text delivered, portal link delivered, everything logged.
+ *
+ *      The Twilio call and the Gmail send ran INSIDE the script lock, and the
+ *      response is only returned after both. So attempt 1 overran the Worker's
+ *      12s submit budget and the browser got the Worker's own 502, while this
+ *      function kept running and finished the booking. The browser's retry,
+ *      1.2s later, then BLOCKED ON waitLock() behind attempt 1's still-running
+ *      execution — it could not answer sooner than attempt 1 finished, burned
+ *      its own 12s, and got a second 502. Two failures, one good booking, and
+ *      a customer told to email us.
+ *
+ *      THE RETRY WAS STRUCTURALLY UNABLE TO HELP. It is the documented fix for
+ *      a slow upstream, but on a reservation it queued behind the very
+ *      execution it was retrying.
+ *
+ *      FIX: the reservation path releases the lock as soon as the SHEET work
+ *      is done, before the SMS and the email. Attempt 1 still overruns and
+ *      still gets a 502 — Twilio and Gmail are genuinely slow. But attempt 2
+ *      now takes the lock immediately, hits the alreadyWritten() dedupe and
+ *      answers {status:"ok", duplicate:true} in about a second, which the
+ *      browser already treats as confirmed.
+ *
+ *      The lock serializes SHEET WRITES, and every one of them is above the
+ *      release. Neither sender nor anything they call touches a spreadsheet —
+ *      checked function by function. ANYTHING ADDED AFTER THE RELEASE THAT
+ *      WRITES A SHEET MUST GO ABOVE IT, or it races another booking;
+ *      tests/reservation-lock-release.test.js fails if one appears, and pins
+ *      the release/SMS/email order that is the fix.
+ *
+ *      NOT PROVEN IN PRODUCTION. The mechanism is read off this code and the
+ *      Worker's budget. Apps Script -> Executions for that booking should show
+ *      two executions, the first long and the second long and nearly idle.
+ *      No response shape changes, so this paste and the site deploy in either
+ *      order.
  *
  * r52 = THE HALF-PRICE FIRST CLEAN PAYS THE PARTNER A DIFFERENT SHARE.
  *
@@ -1289,6 +1328,19 @@ function routePost(e, parsed) {
   var writeLockHeld = false;
   try { lock.waitLock(20000); writeLockHeld = true; } catch (lockErr) { /* ordinary lead intake keeps its existing fallback */ }
 
+  /* RELEASED EXACTLY ONCE, WHETHER EARLY OR IN THE FINALLY — r53.
+     The reservation path lets go of the lock as soon as the SHEET work is
+     done, well before this function returns, because what follows it is a
+     Twilio call and a Gmail send that touch no sheet. See the call site below
+     for the live bug that forced it. The finally still runs for every other
+     path and for any throw, and calling this twice is a no-op. */
+  var lockReleased = false;
+  function releaseWriteLock() {
+    if (lockReleased) return;
+    lockReleased = true;
+    try { lock.releaseLock(); } catch (releaseErr) { /* nothing to do */ }
+  }
+
   try {
     const data = parsed === undefined ? parseBody(e) : parsed;
     if (!data) return json({ status: "error", message: "Empty or unparseable body" });
@@ -1423,6 +1475,59 @@ function routePost(e, parsed) {
       console.error("recurring plan not recorded (booking stands): " + planErr);
     }
     console.log("recurring plan " + record.job_id + ": " + planResult);
+
+    /* ============================================================
+       THE LOCK COMES OFF HERE — r53, AND THIS IS A BUG FIX.
+       ============================================================
+
+       THE LIVE SYMPTOM (2026-09-16). A founder test booking showed the yellow
+       "we couldn't confirm your booking" panel while the booking had in fact
+       completely succeeded: the JOBS row was written, the customer's text
+       arrived, the portal link arrived, everything logged.
+
+       WHY THE SERVER SUCCEEDING AND THE BROWSER BEING TOLD IT FAILED ARE
+       CONSISTENT. Everything below this line — the Twilio call and the Gmail
+       send — used to run INSIDE this lock, and the response is only returned
+       after both. So:
+
+         1. Attempt 1 overran the Worker's 12s submit budget
+            (UPSTREAM_TIMEOUT_MS.submit in src/worker.js). The Worker answered
+            its own 502 and the browser saw a failure. This function kept
+            running and finished the booking, text included.
+
+         2. The browser retried 1.2s later (RESERVE_RETRY_DELAY_MS in
+            script.js) — and that attempt BLOCKED ON waitLock() ABOVE, behind
+            attempt 1's still-running execution. It could not answer sooner
+            than attempt 1 finished, so it burned its own 12s waiting and got
+            a second 502. Two failures, one successful booking, and a
+            paying customer told to email us.
+
+       THE RETRY WAS STRUCTURALLY UNABLE TO HELP. It is the documented fix for
+       a slow upstream, but on a reservation it queued behind the exact
+       execution it was retrying.
+
+       SO THE LOCK IS RELEASED AS SOON AS THE SHEET WORK IS DONE. Attempt 1
+       still overruns and still gets a 502 — Twilio and Gmail are genuinely
+       slow and this does not change that. But attempt 2 now takes the lock
+       immediately, hits the alreadyWritten() dedupe above, and answers
+       {status:"ok", duplicate:true} in about a second. Which the browser
+       already treats as confirmed. The customer sees the confirmation screen.
+
+       WHAT THIS LOCK IS FOR, AND WHY LETTING GO HERE IS SAFE: it serializes
+       SHEET WRITES. Every one of them is above — the LEADS upsert, PROPERTIES,
+       the JOBS row, the availability slot, the vendor stamp, the recurring
+       plan. Neither sendBookingSms nor sendReservationEmail nor anything they
+       call touches a spreadsheet; that was checked function by function, not
+       assumed. ANYTHING ADDED BELOW THAT WRITES TO A SHEET MUST GO ABOVE THIS
+       LINE INSTEAD, or it races another booking.
+
+       NOT PROVEN IN PRODUCTION. The mechanism is read off the code and the
+       Worker's budget; the Apps Script Executions log for that booking should
+       show two executions, the first long and the second long and almost
+       entirely idle. The suite cannot catch any of this — neither the lock nor
+       the 12s budget exists in the harness. */
+    releaseWriteLock();
+
     /* r26. The customer's own text, after the row exists and after the dedupe,
        so a retried submission cannot text anybody twice. Returns a reason
        rather than throwing; "no consent" and "twilio not configured" are
@@ -1459,7 +1564,8 @@ function routePost(e, parsed) {
     console.error("doPost failed: " + (err && err.stack ? err.stack : err));
     return json({ status: "error", message: String(err) });
   } finally {
-    try { lock.releaseLock(); } catch (releaseErr) { /* nothing to do */ }
+    /* A no-op when the reservation path already let go above. */
+    releaseWriteLock();
   }
 }
 
@@ -1593,7 +1699,7 @@ function routeGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-16 r52" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-16 r53" });
 }
 
 

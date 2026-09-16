@@ -297,5 +297,87 @@ t('and its copy names no percentage',
   !/%|percent|\bshare\b|\bsplit\b/i.test(payoutCopy),
   (payoutCopy.match(/.*(%|percent|share|split).*/gi) || []).slice(0, 2));
 
+/* ------------------------------------------------------------
+   6. THE PUBLISHED PAGES ADVERTISE THE PERCENTAGE THE ENGINE APPLIES.
+
+   A page promising "15% off" while the engine charges something else is worse
+   than a page promising nothing: the customer sees a number, gets a different
+   one in the calculator, and the site looks broken or dishonest. The <th> in
+   pricing.html is a HAND-MAINTAINED no-JS fallback — script.js re-renders it
+   from SERVE_SERVICES — so it is exactly the kind of literal that rots.
+   ------------------------------------------------------------ */
+console.log('\n=== 6. the pages promise what the engine charges ===');
+{
+  const read = (f) => fs.readFileSync(path.join(REPO_ROOT, f), 'utf8');
+  const pct  = (f) => Math.round((1 - f) * 100);
+  const first = pct(PRICING.FIRST_CLEAN_FACTOR);      // 50
+  const secondary = pct(PRICING.SECONDARY_FACTOR);    // 15
+
+  const PRICING_HTML  = read('pricing.html');
+  const SERVICES_HTML = read('services.html');
+  const INDEX_HTML    = read('index.html');
+  const SCRIPT_JS     = read('script.js');
+
+  /* The no-JS fallback row. Asserted against the factor, not against "15". */
+  const headRow = (PRICING_HTML.match(/<tr data-serve-price-head>[\s\S]*?<\/tr>/) || [''])[0];
+  t('the /pricing header row is the one script.js re-renders',
+    headRow.length > 0);
+  t('its First Clean column names the FIRST_CLEAN_FACTOR percentage',
+    new RegExp('First Clean <span>' + first + '% off</span>').test(headRow),
+    headRow.match(/First Clean <span>[^<]*</) || null);
+  t('its Move In / Out column names the SECONDARY_FACTOR percentage — it said '
+    + '"empty home" before 2026-09-16 and advertised no discount at all',
+    new RegExp('Move In / Out <span>' + secondary + '% off</span>').test(headRow),
+    headRow.match(/Move In \/ Out <span>[^<]*</) || null);
+
+  /* The service cards on both pages. The First Clean card has always led with
+     its discount; the move card led with "Empty homes". */
+  for (const [name, html] of [['services.html', SERVICES_HTML], ['index.html', INDEX_HTML]]) {
+    /* Anchored on the CARD TITLE, not on the bare phrase — index.html says
+       "Move In / Move Out Clean" in the service radio 800 lines earlier, and
+       searching for the phrase finds that one instead. */
+    const at = html.search(/serve-card__title">Move In \/ Move Out</);
+    const moveCard = at === -1 ? '' : html.slice(Math.max(0, at - 500), at);
+    t(name + ' move card carries the ' + secondary + '% badge',
+      new RegExp('serve-card__badge">' + secondary + '% off<').test(moveCard),
+      moveCard.match(/serve-card__badge[^>]*>[^<]*</) || null);
+  }
+
+  /* Computed, not typed — in the one place both the <th> and the mobile
+     data-label are generated from. */
+  t('script.js derives both subtitles from the factors rather than literals',
+    /servePct\(PRICING\.FIRST_CLEAN_FACTOR\)/.test(SCRIPT_JS) &&
+    /servePct\(PRICING\.SECONDARY_FACTOR\)/.test(SCRIPT_JS));
+
+  /* Below 640px the <thead> is display:none, so a discount announced only in
+     the header is invisible on a phone. */
+  t('the mobile data-label carries the subtitle, since the header row is hidden '
+    + 'under 640px', /data-label="'\s*\+\s*service\.label\s*\+[\s\S]{0,120}service\.sub/.test(SCRIPT_JS));
+  t('and the CSS really does hide that header row',
+    /@media \(max-width: 639px\)[\s\S]{0,600}\.serve-table thead \{\s*display: none/
+      .test(read('style.css')));
+
+  /* THE NO-STACK BRANCH NO LONGER OFFERS "$50 off visits 2-4" AS A SUBSTITUTE
+     for the discount it was withholding. Those homes now get a real 15% off
+     the visit in front of them instead of a promise about later ones.
+
+     NOTE, and it is NOT asserted here because it is the founder's call: that
+     $50 offer is still made site-wide in five places — a badge on the
+     recurring card in index.html and services.html, the freq-note in the
+     booking form, and twice on /pricing including inside JSON-LD structured
+     data — and NOTHING IN THE CODE IMPLEMENTS IT. recurringPriceFor prices a
+     recurring visit at steady state with no deduction. Either it gets built or
+     the copy comes down; a test that pinned today's wording would just freeze
+     the problem in place. See HANDOFF. */
+  /* Scoped to the RENDERED note, not the whole file — the comment above that
+     branch still names the retired promise on purpose, to record why it went. */
+  const priceNote = (SCRIPT_JS.match(/<p class="price-note">[\s\S]*?<\/p>/) || [''])[0];
+  t('the no-stack branch renders a price-note at all', priceNote.length > 0);
+  t('and it no longer promises $50 off later visits',
+    !/\$50/.test(priceNote), priceNote.slice(0, 120));
+  t('it names a real percentage instead, computed from the factor',
+    /discountPercent/.test(priceNote), priceNote.slice(0, 160));
+}
+
 console.log('\n' + (bad ? bad + ' FAILED' : 'all passed'));
 process.exit(bad ? 1 : 0);

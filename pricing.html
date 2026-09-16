@@ -152,11 +152,15 @@
                 <table class="serve-table">
                     <caption class="serve-sr">Cleaning price ranges by home size and service type</caption>
                     <thead>
-                        <tr>
+                        <!-- Re-rendered by script.js from SERVE_SERVICES, so the
+                             discount percentages here cannot drift from the ones
+                             the calculator charges. This row is the no-JS
+                             fallback and must stay in step by hand. -->
+                        <tr data-serve-price-head>
                             <th scope="col">Home</th>
                             <th scope="col">First Clean <span>50% off</span></th>
                             <th scope="col" class="serve-col--feature">Recurring <span>per visit</span></th>
-                            <th scope="col">Move In / Out <span>empty home</span></th>
+                            <th scope="col">Move In / Out <span>15% off</span></th>
                         </tr>
                     </thead>
                     <tbody data-serve-price-rows><!-- rendered by script.js --></tbody>
@@ -166,7 +170,9 @@
             <p class="serve-table-note">
                 First Clean and Move In / Out ranges run from a lightly lived-in home to
                 one needing heavy-duty attention. Recurring runs from weekly (cheapest
-                per visit) to monthly.
+                per visit) to monthly. <strong>Both discounts are already applied
+                above</strong> &mdash; the calculator shows you the full price alongside
+                what you actually pay.
             </p>
 
             <!-- The recurring-vs-one-time comparison is the core of the plan
