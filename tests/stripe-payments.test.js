@@ -271,6 +271,88 @@ console.log('\n=== 2. WHAT EACH EVENT MEANS FOR A BOOKING ===');
     orphan.status === 200 && orphan.writes.length === 0, orphan.body);
 }
 
+console.log('\n=== 2b. THE ROUND TRIP — what /api/checkout ASKS FOR is what the events CARRY ===');
+{
+  /* THE BUG THIS SECTION EXISTS FOR, found in production 2026-09-16.
+     Section 2 above hand-builds PaymentIntent events carrying metadata and
+     proves the handler reads it. That proved the handler right about a message
+     Stripe was never going to send: /api/checkout set `metadata[job_id]` on
+     the CHECKOUT SESSION, and metadata does NOT propagate from a session to
+     the PaymentIntent it creates. Four of the five subscribed events carry a
+     PaymentIntent or a charge, so four of five arrived with no job id —
+     INCLUDING payment_intent.succeeded, which is the capture. The founder
+     captured, the money moved, and the portal never found out.
+
+     So this asserts the two halves against each other instead of separately. */
+  const { worker, fetches } = loadWorker(async (target) => {
+    if (String(target).includes('api.stripe.com')) {
+      return new Response(JSON.stringify(
+        { id: 'cs_1', url: 'https://checkout.stripe.com/c/pay/cs_1' }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ ok: true, view: 'portal', bookings: [
+      { bookingId: 'SRV-1', price: 239, serviceLabel: 'First clean',
+        date: '2026-10-01', paid: false, completed: '' }] }), { status: 200 });
+  });
+
+  await worker.fetch(new Request('https://servecleaning.com/api/checkout', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ job_id: 'SRV-1', contact_id: 'CON-1',
+                           t: 'a-token-long-enough-to-pass' }) }), PENV);
+
+  const form = new URLSearchParams(
+    fetches.find(f => f.target.includes('api.stripe.com')).init.body);
+
+  t('the SESSION carries the job id', form.get('metadata[job_id]') === 'SRV-1');
+  /* The one that was missing. */
+  t('and so does the PAYMENTINTENT the session creates',
+    form.get('payment_intent_data[metadata][job_id]') === 'SRV-1',
+    form.get('payment_intent_data[metadata][job_id]'));
+  t('the contact id is set in both places too',
+    form.get('metadata[contact_id]') === 'CON-1' &&
+    form.get('payment_intent_data[metadata][contact_id]') === 'CON-1',
+    form.get('payment_intent_data[metadata][contact_id]'));
+
+  /* NOW FEED THE WEBHOOK AN EVENT SHAPED THE WAY STRIPE ACTUALLY SENDS IT —
+     a PaymentIntent whose metadata is whatever /api/checkout asked for, and
+     NOT what it set on the session. If those two ever drift apart again, the
+     capture stops reaching the sheet and this goes red. */
+  const piMetadata = {};
+  for (const [k, v] of form.entries()) {
+    const m = k.match(/^payment_intent_data\[metadata\]\[(.+)\]$/);
+    if (m) piMetadata[m[1]] = v;
+  }
+
+  for (const type of ['payment_intent.succeeded',
+                      'payment_intent.amount_capturable_updated',
+                      'payment_intent.canceled']) {
+    const r = await deliver({ type, data: { object: {
+      object: 'payment_intent', id: 'pi_real', amount: 23900,
+      metadata: piMetadata } } });
+    t(type + ' finds its booking',
+      r.wrote && r.wrote.job_id === 'SRV-1', r.body);
+  }
+
+  /* A refunded charge inherits the PaymentIntent's metadata, so it rides on
+     the same fix. */
+  const refund = await deliver({ type: 'charge.refunded', data: { object: {
+    object: 'charge', id: 'ch_real', payment_intent: 'pi_real',
+    amount: 23900, metadata: piMetadata } } });
+  t('charge.refunded finds it too', refund.wrote && refund.wrote.job_id === 'SRV-1', refund.body);
+
+  /* And the session event, which was the only one that ever worked. */
+  const sessMeta = {};
+  for (const [k, v] of form.entries()) {
+    const m = k.match(/^metadata\[(.+)\]$/);
+    if (m) sessMeta[m[1]] = v;
+  }
+  const sess = await deliver({ type: 'checkout.session.completed', data: { object: {
+    object: 'checkout.session', id: 'cs_1', payment_intent: 'pi_real',
+    amount_total: 23900, metadata: sessMeta } } });
+  t('checkout.session.completed finds it', sess.wrote && sess.wrote.job_id === 'SRV-1', sess.body);
+
+  t('ALL FIVE subscribed events can reach a booking', true);
+}
+
 console.log('\n=== 3. THE BRIDGE CALL ITSELF ===');
 {
   const r = await deliver({ type: 'payment_intent.succeeded',

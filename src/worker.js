@@ -1346,11 +1346,40 @@ async function handleCheckout(request, env) {
   form.set("success_url", origin + back + "?pay=done");
   form.set("cancel_url",  origin + back + "?pay=cancelled");
   /* Reconciliation handles, both opaque ids rather than anything about a
-     person. This is what a Stripe webhook will key on when it writes the
-     payment back to the row. */
+     person. This is what the Stripe webhook keys on when it writes the payment
+     back to the row.
+
+     IT MUST BE SET TWICE, AND THE SECOND ONE IS THE ONE THAT MATTERS.
+     METADATA DOES NOT PROPAGATE FROM A CHECKOUT SESSION TO THE PAYMENTINTENT
+     IT CREATES. They are separate objects with separate metadata bags, and
+     Stripe copies nothing between them.
+
+     Setting only `metadata[…]` meant exactly one of the five subscribed events
+     could find its booking:
+
+       checkout.session.completed              object = the SESSION      -> found it
+       payment_intent.amount_capturable_updated object = the PAYMENTINTENT -> NO job id
+       payment_intent.succeeded                 object = the PAYMENTINTENT -> NO job id
+       payment_intent.canceled                  object = the PAYMENTINTENT -> NO job id
+       charge.refunded                          charge inherits from the PI -> NO job id
+
+     `payment_intent.succeeded` IS THE CAPTURE — the event that means money
+     actually moved. So the founder captured in the dashboard, the event
+     arrived with an empty metadata bag, the Worker correctly logged "carries
+     no job_id, ignored", and the portal never learned the customer had paid.
+     Found 2026-09-16 by the founder testing the real path end to end.
+
+     The tests did not catch this because they hand-built PaymentIntent events
+     WITH metadata and asserted the handler reads it — proving the handler
+     right about a message Stripe was never going to send. A suite can only be
+     as honest as its fixtures. */
   form.set("client_reference_id", jobId);
   form.set("metadata[job_id]", jobId);
-  if (contactId) form.set("metadata[contact_id]", contactId);
+  form.set("payment_intent_data[metadata][job_id]", jobId);
+  if (contactId) {
+    form.set("metadata[contact_id]", contactId);
+    form.set("payment_intent_data[metadata][contact_id]", contactId);
+  }
 
   let res, text;
   try {
