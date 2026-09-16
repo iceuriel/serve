@@ -1632,7 +1632,24 @@ async function handleStripeWebhook(request, env) {
        notice. */
     console.error("payment write-back failed, asking Stripe to retry: " +
                   jobId + " " + settled + " — " + wrote.error);
-    return json({ ok: false, error: "write_failed" }, 500);
+    /* THE REASON RIDES IN THE RESPONSE BODY, and that is deliberate.
+       Stripe's Event deliveries tab shows the body of every attempt, so this
+       turns the founder's own dashboard into the diagnostic — no Cloudflare
+       log access, no wrangler login, no tail running at the right moment.
+       It matters because the causes need opposite fixes and look identical
+       from outside:
+
+         not_found              the bridge secret here does not match the Apps
+                                Script Script Property of the same name
+         timeout after 15000ms  Apps Script was cold or holding its lock
+         no_column              JOBS has no payment_status header
+         HTTP 4xx/5xx           the /exec deployment itself is unhappy
+
+       SAFE TO EXPOSE: every one of these is a short machine string about OUR
+       plumbing. No customer data, no amount, no id beyond the job. And the
+       only caller who can ever see it has already proved it is Stripe by
+       signing the request — an unsigned caller is refused long before here. */
+    return json({ ok: false, error: "write_failed", reason: wrote.error }, 500);
   }
 
   /* Job, state and amount. Never a name, an address or a card. */

@@ -396,6 +396,34 @@ console.log('\n=== 4. A FAILED WRITE MUST BE RETRIED, NOT SWALLOWED ===');
     { upstream: async () => new Response('{"ok":false,"error":"not_found"}', { status: 200 }) });
   t('an upstream refusal returns 500 too', refused.status === 500, refused.status);
 
+  /* THE REASON MUST REACH STRIPE'S EVENT DELIVERIES TAB. The causes of a
+     failed write need opposite fixes and are indistinguishable from outside;
+     Stripe shows the response body of every attempt, so putting the reason
+     there is what makes the founder's own dashboard a diagnostic. */
+  t('and the 500 NAMES the cause, for the dashboard to show',
+    refused.body.reason === 'not_found', refused.body);
+  /* An unreachable upstream and a refusal need OPPOSITE fixes — one is the
+     bridge secret, the other is Apps Script being cold or locked — so the two
+     reasons must not read alike. `relay` reports a thrown fetch as the error
+     itself and a blown budget as "timeout after Nms"; both are distinct from
+     an upstream that answered and said no. */
+  t('an unreachable sheet reads differently from a refusal',
+    dead.body.reason && dead.body.reason !== refused.body.reason,
+    { dead: dead.body.reason, refused: refused.body.reason });
+  t('and names the transport failure rather than inventing a verdict',
+    /ETIMEDOUT/.test(String(dead.body.reason)), dead.body.reason);
+
+  const httpErr = await deliver(event,
+    { upstream: async () => new Response('nope', { status: 503 }) });
+  t('an unhappy /exec deployment reads as an HTTP status',
+    /HTTP 503/.test(String(httpErr.body.reason)), httpErr.body.reason);
+
+  /* Everything in that field is a short machine string about our own
+     plumbing — never a customer, an amount, or a credential. */
+  t('the reason carries nothing about a person or a secret',
+    !/@|bridge-secret-value|whsec_|sk_test_/.test(
+      String(refused.body.reason) + String(dead.body.reason)), true);
+
   const garbage = await deliver(event,
     { upstream: async () => new Response('<html>Google says no</html>', { status: 200 }) });
   t('and so does an unreadable answer', garbage.status === 500, garbage.status);
