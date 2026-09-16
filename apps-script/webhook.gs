@@ -1,7 +1,30 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-15  ·  master  ·  r50 — payment state is written down at last
+ * VERSION STAMP:  2026-09-16  ·  master  ·  r51 — the bridge secret survives a paste
+ *
+ * r51 = WHY THE r50 WRITE-BACK REFUSED EVERY REAL PAYMENT.
+ *
+ *      Live symptom: Stripe's Event deliveries showed 500s on
+ *      checkout.session.completed, payment_status never moved off blank, and
+ *      the portal kept asking a customer who had already authorized to pay.
+ *      The Worker was relaying correctly; THIS function was refusing it.
+ *
+ *      TWO FIXES, BOTH IN handlePaymentEvent, NEITHER CHANGING ANY RESPONSE.
+ *
+ *      1. The bridge secret is TRIMMED on both sides. Script Properties is a
+ *         web form and a pasted secret very easily carries a trailing space or
+ *         newline, which Google stores verbatim — so an exact comparison fails
+ *         forever against a Cloudflare secret that looks identical on screen.
+ *         A shared secret loses no entropy by ignoring surrounding whitespace.
+ *
+ *      2. A refusal now SAYS WHY IN THE LOG — "not set" versus "mismatch",
+ *         with lengths only, never values or prefixes. The answer returned to
+ *         the caller is unchanged and still identical for both cases: anyone
+ *         probing this endpoint must learn nothing about which it was.
+ *
+ *      Nothing else moves. No column, no view model, no response shape, so
+ *      this paste and the site deploy in either order.
  *
  * r50 = THE SHEET FINALLY LEARNS WHAT HAPPENED TO A CARD.
  *
@@ -1526,7 +1549,7 @@ function routeGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-15 r50" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-16 r51" });
 }
 
 
@@ -4562,10 +4585,34 @@ function paymentNote(booking) {
  * Worker must not retry it.
  */
 function handlePaymentEvent(ss, data) {
-  var secret = PropertiesService.getScriptProperties().getProperty("PAYMENT_BRIDGE_SECRET");
-  /* Same answer for "no secret configured" and "wrong secret". A caller
-     probing this endpoint learns nothing about which it was. */
-  if (!secret || String(data.bridge_token || "") !== secret) {
+  /* TRIMMED ON BOTH SIDES, r51, AND THIS IS NOT COSMETIC. The Script
+     Properties editor is a web form: a secret pasted into it very easily
+     arrives with a trailing space or newline, and Google stores it verbatim.
+     An exact comparison then fails forever against a Cloudflare secret that
+     looks character-for-character identical on screen. A shared secret loses
+     no entropy by having its surrounding whitespace ignored, and this cost the
+     founder a live debugging session on 2026-09-16.
+
+     THE ANSWER OUTWARD IS STILL IDENTICAL for a missing secret and a wrong
+     one — a caller probing this endpoint must learn nothing about which it
+     was. Only the LOG distinguishes them, because from inside they need
+     completely different fixes and previously looked the same here too. */
+  var secret = String(
+    PropertiesService.getScriptProperties().getProperty("PAYMENT_BRIDGE_SECRET") || "").trim();
+  var offered = String(data.bridge_token || "").trim();
+  if (!secret) {
+    console.error("payment_event refused: PAYMENT_BRIDGE_SECRET is not set in " +
+                  "Script Properties. Payment state cannot be recorded.");
+    return json({ ok: false, error: "not_found" });
+  }
+  if (offered !== secret) {
+    /* Lengths only. Never the values, never a prefix — a fragment of a shared
+       secret beside its name is a real head start. Equal lengths that still
+       mismatch means a different string; different lengths usually means one
+       side was pasted short or carries a stray character. */
+    console.error("payment_event refused: bridge token mismatch (offered " +
+                  offered.length + " chars, expected " + secret.length + "). " +
+                  "The Cloudflare secret and this Script Property differ.");
     return json({ ok: false, error: "not_found" });
   }
 

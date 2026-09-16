@@ -721,6 +721,50 @@ console.log('\n=== 8. THE RANK GUARD — a late event must not undo a capture ==
     const nope = B.send({ job_id: 'SRV-1', state: 'paid' });
     t('an UNCONFIGURED bridge refuses rather than accepting anyone',
       nope.ok === false && B.statusOf('SRV-1').status === '', nope);
+    t('and says so in the log, where only we can see it',
+      B.logs.some(l => /not set/.test(l)), B.logs.slice(-2));
+    t('but tells the CALLER nothing but not_found',
+      nope.error === 'not_found' && nope.reason === undefined, nope);
+  }
+
+  /* r51. THE BUG THAT COST A LIVE DEBUGGING SESSION on 2026-09-16.
+     Script Properties is a web form. A secret pasted into it arrives with a
+     trailing space or newline more often than not, Google stores it verbatim,
+     and an exact comparison then fails forever against a Cloudflare secret
+     that is character-for-character identical on screen. The symptom was 500s
+     in Stripe and a payment_status that never moved. */
+  {
+    const B = build(ROWS, { PAYMENT_BRIDGE_SECRET: 'bridge-secret-value\n' });
+    t('a secret stored with a trailing newline still matches',
+      B.send({ job_id: 'SRV-1', state: 'authorized' }).applied === true);
+  }
+  {
+    const B = build(ROWS, { PAYMENT_BRIDGE_SECRET: '  bridge-secret-value  ' });
+    t('and one stored with surrounding spaces matches too',
+      B.send({ job_id: 'SRV-1', state: 'authorized' }).applied === true);
+  }
+  {
+    const B = build(ROWS);
+    t('a token OFFERED with stray whitespace matches as well',
+      B.send({ job_id: 'SRV-1', state: 'authorized',
+               bridge_token: ' bridge-secret-value\n' }).applied === true);
+  }
+  {
+    /* Trimming must not become "close enough". Whitespace INSIDE the secret is
+       a different string and stays refused. */
+    const B = build(ROWS, { PAYMENT_BRIDGE_SECRET: 'bridge secret value' });
+    const nope = B.send({ job_id: 'SRV-1', state: 'paid' });
+    t('but internal whitespace is still a DIFFERENT secret',
+      nope.ok === false && B.statusOf('SRV-1').status === '', nope);
+    t('and a mismatch is logged with LENGTHS, never the values',
+      B.logs.some(l => /mismatch/.test(l)) &&
+      !B.logs.some(l => /bridge-secret-value/.test(l)), B.logs.slice(-2));
+  }
+  {
+    const B = build(ROWS);
+    t('a wholly wrong token of the SAME length is still refused',
+      B.send({ job_id: 'SRV-1', state: 'paid',
+               bridge_token: 'X'.repeat('bridge-secret-value'.length) }).ok === false);
   }
 
   /* ---- bad input ---- */
