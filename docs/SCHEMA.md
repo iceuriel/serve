@@ -134,15 +134,74 @@ rediscovered.
 column, and nothing built for payments touches it. **The customer never pays
 the partner**, and the joint-employer position depends on that staying true.
 
+### `discount_applied` in `quote_meta` — values changed 2026-09-16
+
+Comes straight from the pricing engine's `discountLabel` as of 2026-09-16.
+**It used to read `None` on every move clean and every large heavy home**,
+because script.js assembled it from a hardcoded `'First clean 50% off'` plus a
+boolean. Those tickets now carry a real 15% discount, so the four values are:
+
+| value | discount |
+|---|---|
+| `First clean 50% off` | 50% |
+| `Move clean 15% off` | 15% |
+| `Large heavy home 15% off` | 15% |
+| *(`None` no longer produced)* | — |
+
+`None` still appears on rows written before 2026-09-16. **Reporting that sums
+discounts must not treat a pre-2026-09-16 `None` as "no discount applied"** for
+a move clean — at that time it meant no discount *existed* for that service.
+
+`original_price` is the undiscounted anchor on every path now. It was `null` for
+move cleans and no-stack homes before this date, and script.js fell back to the
+shown price — so on those older rows `original_price` equals the price paid.
+
 ### `payout_rate` in `quote_meta` — added 2026-09-11 (webhook.gs r24)
 
 The share of this booking that goes to the partner company. `0.85` means the
 partner is paid 85% of the ticket and Serve keeps 15%.
 
+**There are TWO rates as of 2026-09-16, and which one is stamped depends on the
+home.** A **half-price first clean** is stamped `0.98`; **everything else** is
+stamped `0.85`.
+
+| booking | discount | `payout_rate` | Serve keeps |
+|---|---|---|---|
+| first clean, under 4BR **or** not heavy | 50% | **0.98** | 2% |
+| first clean, 4BR+ **and** heavy (no-stack) | 15% | 0.85 | 15% |
+| move in / move out | 15% | 0.85 | 15% |
+| recurring visit | none | 0.85 | 15% |
+
+**Why:** Serve's cut is 15% and the first-clean discount is 50%, so a 50%
+discount cannot be funded out of the margin. At the ordinary `0.85` the partner
+would be paid 85% of a *halved* ticket — 42.5% of the job's real price, for work
+the pricing model costs at 67% of it — and the cleaning company would absorb
+almost the whole discount. At `0.98` Serve is near break-even on that visit by
+design; the **recurring** visits are where the 15% earns, and one of them
+repays the whole first-visit shortfall. That is why `bookPlanVisit` stamps
+`currentPayoutRate()` directly and deliberately does **not** call
+`payoutRateFor()`.
+
 **Stamped by the server at booking, never accepted from the payload.** `doPost`
-assigns it from `currentPayoutRate()` before the record is built, so a browser
+assigns it from `payoutRateFor(data)` before the record is built, so a browser
 sending its own `payout_rate` is overwritten rather than obeyed. A test asserts
 exactly that.
+
+**And the CHOICE between the two rates is re-derived, not read from the
+payload.** `payoutRateFor()` recomputes the discount from `service`,
+`condition` and `bedrooms`, ignoring the `discount_applied` string the site
+sends for the sheet's benefit — a crafted payload claiming a half-price first
+clean must not be able to talk Serve out of its margin on a move clean.
+
+> **THIS RULE IS WRITTEN TWICE.** `pricing-engine.js` decides the discount for
+> the customer (R5 + `discountApplies`); `payoutRateFor()` decides it for the
+> partner. Apps Script cannot `require()` the engine, so the two are genuine
+> copies. If they drift, nothing fails loudly — the customer is charged half
+> price while the partner is paid 85% of that half, and a partner is quietly
+> underpaid on a class of job with no error and no log line.
+> `tests/payout-discount-parity.test.js` drives both over 240 homes and fails
+> naming the exact home that disagrees. **Change one copy and you must change
+> the other.**
 
 **It is read back instead of the live setting, and that is the whole point.**
 Every partner surface derives its payout from the rate stamped on *that*
@@ -151,11 +210,16 @@ the same rule `quote_sig` enforces on the customer's side, for the same reason:
 a number somebody agreed to must not move under them afterwards.
 
 **The source of truth is a sheet cell**, not this column and not the code:
-`SETTINGS` in the **Ops** workbook, column A `key` = `payout_rate`, column B
-`value` = `0.85`. Editing it changes every booking made afterwards, with no
-deploy. Missing tab, missing row, empty cell or unreadable workbook all fall
-back to `DEFAULT_PAYOUT_RATE` in webhook.gs — a booking must never fail because
-a settings lookup did.
+`SETTINGS` in the **Ops** workbook, column A `key`, column B `value` — two rows
+now, `payout_rate` = `0.85` and `payout_rate_first_clean` = `0.98`. Editing
+either changes every booking made afterwards, with no deploy. Missing tab,
+missing row, empty cell or unreadable workbook all fall back to
+`DEFAULT_PAYOUT_RATE` / `DEFAULT_PAYOUT_RATE_FIRST_CLEAN` in webhook.gs — a
+booking must never fail because a settings lookup did. **Whether either row is
+actually present in the Ops `SETTINGS` tab has not been checked** — if
+`payout_rate_first_clean` is absent it runs on the `0.98` code default, which is
+a supported state rather than a pending task. Add the row only to change the
+number.
 
 **Anything outside `(0, 1]` is refused, not clamped**, and the default is used
 with a loud log. `85` typed where `0.85` was meant is far likelier than an

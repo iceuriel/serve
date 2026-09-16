@@ -536,10 +536,25 @@ t('and the client is never shown the payout', !/payout/i.test(clientJson));
 
   /* The rate the sheet is trusted to hold, and the range it is refused outside. */
   t('the setting is refused outside (0,1] rather than clamped',
-    /n <= 0 \|\| n > 1/.test(SRC) && /using " \+ DEFAULT_PAYOUT_RATE/.test(SRC));
+    /n <= 0 \|\| n > 1/.test(SRC) && /— using " \+ fallback/.test(SRC));
   t('a percent sign is accepted, because somebody will type one',
     /%\\s\*\$/.test(SRC) && /n \/ 100/.test(SRC));
   t('the default is 85%', /const DEFAULT_PAYOUT_RATE = 0\.85;/.test(SRC));
+
+  /* 2026-09-16. The half-price first clean pays a different share, because a
+     50% discount cannot come out of a 15% margin. Both keys read through the
+     same validator, so the range check above covers this one too. */
+  t('the half-price first clean has its own default, and it is 98%',
+    /const DEFAULT_PAYOUT_RATE_FIRST_CLEAN = 0\.98;/.test(SRC));
+  t('and its own SETTINGS key, so it is tunable without a deploy',
+    /"payout_rate_first_clean"/.test(SRC));
+  t('the rate is chosen by payoutRateFor, not taken from the payload',
+    /data\.payout_rate = payoutRateFor\(data\)/.test(SRC) &&
+    !/data\.payout_rate = currentPayoutRate\(\)/.test(SRC));
+  /* The recurring visit is where the 15% earns the first clean back. If this
+     ever routes through payoutRateFor, that repayment silently stops. */
+  t('a recurring visit still stamps the ORDINARY share',
+    /payout_rate: currentPayoutRate\(\)/.test(SRC));
 }
 
 /* r23 — A SHEET CELL DOES NOT ALWAYS HOLD WHAT SOMEBODY TYPED.

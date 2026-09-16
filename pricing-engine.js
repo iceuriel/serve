@@ -273,6 +273,33 @@ const PRICING = {
 
     FIRST_CLEAN_FACTOR: 0.5,     // first clean = deep price x 0.5
 
+    /* THE 15% THAT APPLIES WHERE THE HALF-PRICE FIRST CLEAN CANNOT — a move
+       clean, and a 4BR+ heavy first clean caught by the no-stack rule below.
+       Added 2026-09-16.
+
+       Both of those used to be shown at the full ticket with no discount at
+       all, and on the no-stack path that produced a cliff rather than a
+       premium: one radio answer ("over a year since a professional clean")
+       took a 4BR from $269 to $698, a 2.59x jump, where the same answer on a
+       3BR moved it 1.30x. The condition multiplier and the total loss of the
+       discount landed on the same click.
+
+       WHY 15 AND NOT 50. The half-price first clean is sold BELOW the
+       contractor's own cost — at MARGIN.deep it is -34% on the labour — and is
+       recouped from the recurring visits that follow it. That trade is only
+       worth making where a recurring plan is the likely outcome. A move clean
+       has no second visit by definition, and a 4BR that has not been cleaned
+       in a year is the most expensive possible version of the bet. 15% keeps
+       both comfortably above cost.
+
+       IT SOFTENS THE CLIFF RATHER THAN REMOVING IT, and the residual is worth
+       knowing before anyone calls this fixed: 3BR heavy $322 -> 4BR heavy $594
+       is still 1.84x for one bedroom, down from 2.17x. A hard threshold at
+       4BR+heavy necessarily leaves a step there; closing it means tapering the
+       no-stack rule or dropping it, which is a pricing decision and not this
+       constant's job. */
+    SECONDARY_FACTOR: 0.85,
+
     /* x standard, condition 1.0 — recurring never takes a condition factor */
     FREQ: {
         weekly:   priceMultiplier('weekly'),
@@ -509,14 +536,23 @@ function computeQuote(input) {
         ? moveOutPrice + flatFees + levelFee
         : deepPrice + addons + flatFees + levelFee;
 
-    let oneTime, deepAnchor = null, discountApplies = false;
-    if (service === 'move_out' || noStack) {
-        oneTime = fullTicket;                                  // no discount on either path
-    } else {
-        deepAnchor      = Math.ceil(fullTicket);                // what it would cost
-        discountApplies = true;
-        oneTime         = deepAnchor * PRICING.FIRST_CLEAN_FACTOR;
-    }
+    /* EVERY PATH IS DISCOUNTED NOW — at 50% or at 15%, never at nothing. The
+       anchor is therefore always set, and `deepAnchorDisplay` is no longer a
+       way to ask "was there a discount". Read `discountFactor` for that.
+
+       `discountApplies` still means specifically THE HALF-PRICE FIRST CLEAN,
+       unchanged, because that is the flag the partner payout keys off — see
+       payoutRateFor() in apps-script/webhook.gs. A 15% ticket pays the
+       ordinary share; only the half-price one is passed through. Widening this
+       flag to mean "any discount" would quietly hand a move clean the
+       passthrough rate. */
+    const deepAnchor     = Math.ceil(fullTicket);               // what it would cost
+    const discountApplies = !(service === 'move_out' || noStack);
+    const discountFactor = discountApplies
+        ? PRICING.FIRST_CLEAN_FACTOR
+        : PRICING.SECONDARY_FACTOR;
+    const oneTime = deepAnchor * discountFactor;
+    const pct     = Math.round((1 - discountFactor) * 100);
 
     // R3 / R7 — recurring steady-state ALWAYS at condition 1.0, + flat fees
     const freqSteady = {};
@@ -532,7 +568,23 @@ function computeQuote(input) {
     return {
         tier, zipFee, standard, smallUnit, noStack, discountApplies, addons,
         displayPrice: Math.ceil(oneTime),                       // R11 — whole dollars, round up
-        deepAnchorDisplay: deepAnchor != null ? Math.ceil(deepAnchor) : null,
+        deepAnchorDisplay: deepAnchor,
+
+        /* WHAT KIND OF DISCOUNT, for the badge and for the sheet. Derived here
+           rather than rebuilt at each call site: the label and the arithmetic
+           must not be able to disagree, which is exactly what happened while
+           script.js hardcoded "First clean 50% off" beside a factor it read
+           from this object.
+
+           THE PERCENTAGE IN THE LABEL IS COMPUTED, NOT TYPED, for that same
+           reason — a hardcoded "15% off" here would start lying the moment
+           SECONDARY_FACTOR moved, and it would lie in the sheet, where the
+           number is read months later to work out what a booking earned. */
+        discountFactor,
+        discountPercent: pct,
+        discountLabel: discountApplies       ? 'First clean ' + pct + '% off'
+                     : service === 'move_out' ? 'Move clean ' + pct + '% off'
+                     : 'Large heavy home ' + pct + '% off',
         freqSteady, steadySelected,
         /* For the sheet and for tests. Never render any of these. */
         fullBaths, halfBaths, levels: levelCount, levelFee,

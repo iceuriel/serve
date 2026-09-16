@@ -6,14 +6,179 @@ assistant with no access to this repo. Self-contained on purpose.
 **Companion doc:** `/docs/SCHEMA.md` — authoritative for every column's meaning
 and who writes it. This file is the narrative; that file is the contract.
 
-**Latest session: 2026-09-15.** Jump to
+**Latest session: 2026-09-16.** Jump to
 [what changed on 2026-09-08 / 09](#session-2026-09-08--09) for the current
 state. The sections below it describe earlier builds and remain accurate
 except where a later section supersedes them.
 
 ---
 
-## Current work — 2026-09-16, Claude Code: two bugs the tests could not have caught
+## Current work — 2026-09-16, Claude Code: the discount cliff, and who funds a discount
+
+**NOT DEPLOYED. Local edits only, nothing committed, nothing pasted.** Found by
+a founder test booking — a 4BR/2BA in Allston — plus a second symptom from the
+same booking that is DIAGNOSED BUT NOT FIXED, see the next section. (Names are
+deliberately not recorded here; the row is findable by ZIP, size and date.)
+
+### What the founder saw, and why
+
+A 4BR/2BA in Allston quoted **$698 with no discount at all**. Working as
+written: `pricing-engine.js` R5, the 4BR+ no-stack rule, removes the whole 50%
+when a first clean is `heavy` **and** 4BR+. The customer never picks "heavy" —
+it is derived, and answering *"over a year / never"* to the last-professional-
+clean question produces `heavy` on its own, pets or not. So one radio button
+took the price from **$269 to $698, a 2.59x jump**, where the same answer on a
+3BR moved it 1.30x. The condition multiplier and the total loss of the discount
+landed on the same click.
+
+**Verify on his row:** JOBS `condition` (#7) should read `heavy`, and
+`quote_meta.discount_applied` should read `None`. Not checked — no sheet access
+was used this session.
+
+### What changed (founder-approved, 2026-09-16)
+
+**1. Every path is discounted now — 50% or 15%, never nothing.** New
+`PRICING.SECONDARY_FACTOR = 0.85` applies where the half price cannot: a move
+clean, and a no-stack 4BR+ heavy first clean.
+
+| home | before | after |
+|---|---|---|
+| 4BR/2BA Allston heavy first clean | $698 | **$594** |
+| 4BR/2BA Allston move-out | $626 | **$533** |
+| published table, first clean | — | $127–$594 |
+| published table, move in/out | — | $250–$692 |
+
+**THE CLIFF IS SOFTENED, NOT REMOVED,** and the founder should know the
+residual number: 3BR heavy $322 → 4BR heavy $594 is still **1.84x for one
+bedroom** (it was 2.17x). Any fix that keeps a hard threshold at 4BR+heavy
+keeps a step there; removing the step means tapering the rule or dropping it.
+
+**2. The half-price first clean pays the partner a different share — 0.98.**
+This is the part worth reading, because it is arithmetic and not a preference:
+
+> **Serve's cut is 15%. The first-clean discount is 50%. A 50% discount cannot
+> be funded out of a 15% margin.** At the ordinary 0.85 the partner is paid 85%
+> of a *halved* ticket = 42.5% of the job's real price, for work the pricing
+> model costs at 67% of it. The cleaning company absorbs almost the entire
+> discount.
+
+At 0.98 Serve keeps 2% of the discounted first visit (≈ −$6 to −$8 after the
+card fee) and **earns it back on the first recurring visit** — 15% of a $155–227
+biweekly is $23–34. Recoup is one visit. The 15% tickets are untouched at 0.85,
+because a 15% discount *can* come out of a 15% margin and still leave the
+partner above cost.
+
+`bookPlanVisit` deliberately still calls `currentPayoutRate()` and **must not**
+be routed through `payoutRateFor()` — the recurring visits are the repayment.
+A test pins that.
+
+**3. Partners still cannot see a share, only a dollar amount.** Verified rather
+than assumed: both partner view models were already whitelists exposing
+`payout` and never `payoutRate` or `price`, and the ticket copy names no
+percentage. Now **locked by assertions** so it cannot regress — a partner
+learning they are on 0.85 while another is on 0.98 turns every dispatch into a
+negotiation. **No partner-facing copy was added**, on the founder's explicit
+instruction.
+
+### Files
+
+| file | change |
+|---|---|
+| `pricing-engine.js` | `SECONDARY_FACTOR`; anchor always set; new `discountFactor` / `discountPercent` / `discountLabel` |
+| `script.js` | all three price branches show a struck anchor; `discount_applied` from the engine |
+| `apps-script/webhook.gs` | `DEFAULT_PAYOUT_RATE_FIRST_CLEAN`, `payoutRateFor()`, `readPayoutRate(key, fallback)`, per-key cache |
+| `tests/payout-discount-parity.test.js` | **new** |
+| `tests/webhook-atomicity.test.js`, `tests/webhook-routing.test.js` | updated for two rates |
+| `docs/SCHEMA.md` | `payout_rate` two-rate table, `discount_applied` new values |
+
+### THE RULE IS NOW WRITTEN TWICE, ON PURPOSE
+
+`pricing-engine.js` decides the discount for the customer; `payoutRateFor()` in
+webhook.gs decides it for the partner. Apps Script cannot `require()` the
+engine, so these are genuine copies of one rule in two languages. **If they
+drift, nothing fails loudly** — the customer is charged half price while the
+partner is paid 85% of that half, and a real company is quietly underpaid with
+no error and no log line.
+
+`tests/payout-discount-parity.test.js` drives **both halves** over a 240-home
+grid and asserts them against each other, which is the lesson from the Stripe
+metadata bug below: fixtures written from the same assumption as the code can
+only ever confirm it. Nothing in it hardcodes which homes are half price.
+
+**Four deliberate mutations were run and all four went red**, each naming the
+offending thing: webhook threshold 4→5; engine `discountApplies` widened to
+include no-stack; `payoutRate` added to the partner ticket model; a percentage
+put into the partner payout copy. **All 34 test files pass.**
+
+### Remaining work / next action
+
+1. **Deploy.** Apps Script **r52 first**, then push the site — the standing
+   order. Both interleavings were reasoned through and neither is an outage
+   here (`payoutRateFor` reads `service`/`condition`/`bedrooms`, which the
+   current live site already sends), but keep the order anyway.
+
+   **r52 is the stamp this session created** — webhook.gs was at r51 when the
+   session started. Verify the paste landed by probing `/exec`, which now
+   answers `"2026-09-16 r52"`. **Probe more than once**: Google intermittently
+   serves an HTML "unable to open the file" page, and a single probe can lie.
+   The stamp at the top of the file and the string `doGet` returns are asserted
+   to agree by three separate tests, so they cannot drift apart — but nothing
+   asserts that a revision was bumped at all, which was missed once in this
+   session and caught by the founder.
+2. **The confirmation-screen bug below is unfixed** and needs the founder to
+   read Apps Script → Executions first.
+3. **Stale structured data, pre-existing.** `pricing.html:52` JSON-LD claims a
+   first clean runs "$117 to $347"; the engine now publishes $127–$594. It was
+   already stale before this change and nothing asserts it. Not touched —
+   published price claims are the founder's call.
+4. The `/pricing` table shows the 15%-discounted move price under a header that
+   says only "empty home", so the discount is invisible there. The calculator
+   does show the struck anchor. Advertising it on the table is a marketing
+   decision, not made.
+
+---
+
+## Unfixed bug — 2026-09-16: the confirmation screen said "couldn't confirm" on a booking that fully succeeded
+
+**DIAGNOSED FROM THE CODE, NOT PROVEN.** Same test booking. The customer saw
+the yellow failure panel; the row was written, the SMS and the portal link
+arrived, everything logged fine.
+
+**Why the server succeeding is consistent with the browser being told it
+failed:** the SMS (`webhook.gs:1388`) and the email (`:1396`) are sent BEFORE
+the response is returned (`:1401`), and all of it — every sheet write, the
+Twilio call, the Gmail send — runs inside the script lock taken at `:1248` and
+released at `:1418`.
+
+1. Attempt 1 overran the Worker's 12s submit budget (`src/worker.js:111`) →
+   Worker answered its own 502 → browser saw a failure. Apps Script kept
+   running and finished the booking, text included.
+2. Attempt 2 fired 1.2s later (`script.js:317`) and hit
+   `lock.waitLock(20000)` — **blocked behind attempt 1's still-running
+   execution.** It cannot answer sooner than attempt 1 finishes, so it burned
+   its own 12s waiting → second 502 → `confirmed: false` → yellow screen.
+
+**The retry is structurally unable to help here.** It is the documented fix for
+a slow upstream, but on a reservation it queues behind the exact execution it
+is retrying. Nothing about the friend's computer mattered; it is timing.
+
+**Evidence needed before fixing:** Apps Script → Executions should show **two**
+executions for that booking, the first long and the second long and almost
+entirely idle. Not yet checked.
+
+**Proposed fix (not applied):** release the lock after `createRecurringPlan`
+(~`:1380`) and before `sendBookingSms`. The lock exists to serialize *sheet*
+writes; Twilio and Gmail touch no sheet. Attempt 1 would still overrun and 502,
+but attempt 2 would then take the lock as soon as the sheet work is done, hit
+`alreadyWritten` (`:1300`) and return `{status:"ok",duplicate:true}` in about a
+second — which the client already treats as confirmed.
+
+**The suite cannot catch this one** — Apps Script's lock and the 12s Worker
+budget do not exist in the harness. Same shape as the metadata bug below.
+
+---
+
+## Earlier — 2026-09-16, Claude Code: two bugs the tests could not have caught
 
 **LIVE.** Apps Script **r51**, Worker/site at **`4b381dc`**. The payment
 write-back now works end to end on the test key: the founder resent a failed

@@ -1,7 +1,47 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-16  ·  master  ·  r51 — the bridge secret survives a paste
+ * VERSION STAMP:  2026-09-16  ·  master  ·  r52 — a 50% discount is not funded by a 15% margin
+ *
+ * r52 = THE HALF-PRICE FIRST CLEAN PAYS THE PARTNER A DIFFERENT SHARE.
+ *
+ *      THE ARITHMETIC, WHICH IS THE WHOLE REASON THIS EXISTS. Serve's cut is
+ *      15% and the first-clean discount is 50%. A 50% discount therefore
+ *      cannot be funded out of the margin: at the ordinary 0.85 the partner is
+ *      paid 85% of a HALVED ticket — 42.5% of the job's real price — for work
+ *      the pricing model costs at 67% of it. The cleaning company would absorb
+ *      almost the entire discount, which is neither fair nor something a real
+ *      partner accepts twice.
+ *
+ *      NEW `payoutRateFor(data)`. A half-price first clean stamps 0.98, so
+ *      Serve keeps 2% of that visit and is near break-even on it by design.
+ *      Everything else — a move clean, a 4BR+ heavy first clean, and every
+ *      RECURRING visit — stamps the ordinary 0.85. The recurring visits are
+ *      the repayment: 15% of a biweekly covers the whole first-visit shortfall
+ *      in one visit. `bookPlanVisit` therefore still calls currentPayoutRate()
+ *      directly and MUST NOT be routed through payoutRateFor().
+ *
+ *      WHICH RATE IS DERIVED, NEVER READ FROM THE PAYLOAD. payoutRateFor
+ *      recomputes the discount from service, condition and bedrooms and
+ *      ignores the `discount_applied` string the site sends for the sheet's
+ *      benefit. A crafted booking claiming a half-price first clean must not
+ *      be able to collect 0.98 on an undiscounted move clean. Tested.
+ *
+ *      readPayoutRate now takes (key, fallback) so both rates share one
+ *      validator — same (0,1] refusal, same loud log, same "%" tolerance.
+ *      New Ops SETTINGS key `payout_rate_first_clean`.
+ *
+ *      THIS RULE IS ALSO WRITTEN IN pricing-engine.js (R5 + discountApplies),
+ *      because Apps Script cannot require() the engine. If the two copies
+ *      drift, NOTHING FAILS LOUDLY — the customer is charged half price while
+ *      the partner is paid 85% of that half, with no error and no log line.
+ *      tests/payout-discount-parity.test.js drives both halves over 240 homes
+ *      and fails naming the home that disagrees. Change one, change the other.
+ *
+ *      No column, no view model, no response shape changes, and no partner
+ *      surface gains a rate — partners see a dollar payout and never a share.
+ *      So this paste and the site deploy in either order, though the standing
+ *      order (script first) still applies.
  *
  * r51 = WHY THE r50 WRITE-BACK REFUSED EVERY REAL PAYMENT.
  *
@@ -1305,8 +1345,12 @@ function routePost(e, parsed) {
     /* THE PARTNER SHARE IN FORCE RIGHT NOW, stamped onto this booking so that
        changing the rate tomorrow cannot reprice it. Assigned, never defaulted:
        `data` came from a browser, and a payload arriving with its own
-       payout_rate must not be the one that gets written. See currentPayoutRate. */
-    data.payout_rate = currentPayoutRate();
+       payout_rate must not be the one that gets written. See currentPayoutRate.
+
+       WHICH of the two shares, as of 2026-09-16, is also derived here rather
+       than taken from the payload — a half-price first clean is passed through
+       at 0.98, everything else pays the ordinary 0.85. See payoutRateFor. */
+    data.payout_rate = payoutRateFor(data);
 
     const sched  = normalizeSchedule(data);
     const leadId = resolveLeadId(data);
@@ -1549,7 +1593,7 @@ function routeGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-16 r51" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-16 r52" });
 }
 
 
@@ -3769,7 +3813,13 @@ function bookPlanVisit(ss, contact, origin, opts) {
     submission_id: opts.submissionId,
     /* The share in force NOW, stamped onto this booking, exactly as doPost
        does it — a rate change tomorrow must not reprice a job a partner has
-       already accepted. */
+       already accepted.
+
+       DELIBERATELY THE ORDINARY SHARE, NOT payoutRateFor(). This is a
+       RECURRING visit, and the recurring visits are precisely where Serve's
+       15% earns back the near-zero margin on the half-price first clean. A
+       recurring clean is never discounted — `recurringPriceFor` prices it at
+       the steady-state rate — so there is nothing here to pass through. */
     payout_rate: currentPayoutRate(),
     /* ATTRIBUTION IS DELIBERATELY BLANK. This booking came from a customer
        opening their own portal, not from a campaign, and inventing a src tag
@@ -5560,6 +5610,12 @@ function opsBook() {
    What fraction of a booking goes to the partner company. 0.85 means the
    partner is paid 85% of the ticket and Serve keeps 15%.
 
+   THERE ARE TWO OF THESE AS OF 2026-09-16 — `payout_rate` for an ordinary
+   booking and `payout_rate_first_clean` for a half-price first clean, which is
+   passed through at 0.98 because a 50% discount cannot be funded from a 15%
+   margin. payoutRateFor() picks between them from the home itself. Everything
+   below is true of both.
+
    ONE PLACE TO CHANGE IT, AND IT IS A SHEET CELL. `SETTINGS` in the Ops
    workbook, column A `key`, column B `value`, row `payout_rate`. Editing that
    cell changes the rate for every booking made afterwards, with no code change,
@@ -5584,28 +5640,91 @@ function opsBook() {
    DEFAULT_PAYOUT_RATE. A booking must never fail because a settings lookup did. */
 
 const DEFAULT_PAYOUT_RATE = 0.85;
+
+/* THE HALF-PRICE FIRST CLEAN PAYS A DIFFERENT SHARE — 2026-09-16.
+   Ops SETTINGS key `payout_rate_first_clean`.
+
+   THE ARITHMETIC THAT FORCES THIS. Serve's cut is 15% and the first-clean
+   discount is 50%. A 50% discount therefore cannot be funded out of the
+   margin: at the ordinary 0.85 the partner would be paid 85% of a HALVED
+   ticket, which is 42.5% of the job's real price, for work the pricing model
+   costs at 67% of it. The discount would be absorbed almost entirely by the
+   company doing the cleaning, which is both unfair and unacceptable to them.
+
+   At 0.98 the partner is paid nearly all of what Serve actually collects on
+   that visit and Serve keeps 2%. Serve is close to break-even on the first
+   clean by design — the recurring visits that follow it are where the 15%
+   earns, and one of them repays the whole first-visit shortfall.
+
+   THE 15% TICKETS DO NOT USE THIS. A move clean and a large heavy first clean
+   are discounted 15%, not 50%, so the ordinary share already leaves the
+   partner above cost. Only the half-price path is passed through — see
+   payoutRateFor(). */
+const DEFAULT_PAYOUT_RATE_FIRST_CLEAN = 0.98;
+
 const SETTINGS_TAB = "SETTINGS";
 
-/** Parsed once per execution. Apps Script runs are short; this is per-request. */
-var PAYOUT_RATE_CACHE = null;
+/** Parsed once per execution, per key. Apps Script runs are short. */
+var PAYOUT_RATE_CACHE = {};
 
 function currentPayoutRate() {
-  if (PAYOUT_RATE_CACHE !== null) return PAYOUT_RATE_CACHE;
-  PAYOUT_RATE_CACHE = readPayoutRate();
-  return PAYOUT_RATE_CACHE;
+  return cachedPayoutRate("payout_rate", DEFAULT_PAYOUT_RATE);
 }
 
-function readPayoutRate() {
+/** The share on a HALF-PRICE first clean. See DEFAULT_PAYOUT_RATE_FIRST_CLEAN. */
+function currentPayoutRateFirstClean() {
+  return cachedPayoutRate("payout_rate_first_clean", DEFAULT_PAYOUT_RATE_FIRST_CLEAN);
+}
+
+function cachedPayoutRate(key, fallback) {
+  if (PAYOUT_RATE_CACHE[key] === undefined) {
+    PAYOUT_RATE_CACHE[key] = readPayoutRate(key, fallback);
+  }
+  return PAYOUT_RATE_CACHE[key];
+}
+
+/**
+ * WHICH SHARE THIS BOOKING PAYS, derived from the home — never read from the
+ * payload.
+ *
+ * `payout_rate` has been assigned by doPost rather than accepted from the
+ * browser since r24, for the obvious reason. The same has to be true of the
+ * CHOICE between the two rates, so this re-derives the discount from the three
+ * priced inputs instead of trusting the `discount_applied` string the site
+ * sends for the sheet's benefit. A crafted payload claiming a half-price first
+ * clean must not be able to talk Serve out of its margin.
+ *
+ * MIRRORS R5 IN pricing-engine.js, AND IS TESTED AGAINST IT. These are two
+ * copies of one rule in two languages — Apps Script cannot import the engine —
+ * so payout-discount-parity.test.js drives both over a grid of homes and fails
+ * if they ever disagree. Change the rule in one place and that test goes red.
+ */
+function payoutRateFor(data) {
+  var service   = String(data && data.service || data && data.service_type || "").trim();
+  var condition = String(data && data.condition || "").trim().toLowerCase();
+  var bedrooms  = Number(data && data.bedrooms);
+
+  var isFirstClean = service === "first_clean";
+  /* R5 — a 4BR+ heavy first clean takes the 15% instead of the half price,
+     so it pays the ordinary share like any other 15% ticket. */
+  var noStack = isFirstClean && isFinite(bedrooms) && bedrooms >= 4 && condition === "heavy";
+
+  return (isFirstClean && !noStack)
+    ? currentPayoutRateFirstClean()
+    : currentPayoutRate();
+}
+
+function readPayoutRate(key, fallback) {
   try {
     var sheet = opsBook().getSheetByName(SETTINGS_TAB);
-    if (!sheet || sheet.getLastRow() < 2) return DEFAULT_PAYOUT_RATE;
+    if (!sheet || sheet.getLastRow() < 2) return fallback;
 
     var rows = sheet.getRange(1, 1, sheet.getLastRow(), 2).getValues();
     for (var i = 0; i < rows.length; i++) {
-      if (String(rows[i][0] || "").trim().toLowerCase() !== "payout_rate") continue;
+      if (String(rows[i][0] || "").trim().toLowerCase() !== key) continue;
 
       var raw = String(rows[i][1] === 0 ? "0" : (rows[i][1] || "")).trim();
-      if (!raw) return DEFAULT_PAYOUT_RATE;
+      if (!raw) return fallback;
 
       var pct = /%\s*$/.test(raw);
       var n = Number(raw.replace(/%\s*$/, "").trim());
@@ -5616,16 +5735,16 @@ function readPayoutRate() {
            Never clamp into range: "85" is far more likely to be a typo for
            0.85 than an instruction to pay 8500%, and guessing which would be
            guessing with somebody's money. */
-        console.error("SETTINGS payout_rate is not a fraction in (0,1]: " +
-                      JSON.stringify(raw) + " — using " + DEFAULT_PAYOUT_RATE);
-        return DEFAULT_PAYOUT_RATE;
+        console.error("SETTINGS " + key + " is not a fraction in (0,1]: " +
+                      JSON.stringify(raw) + " — using " + fallback);
+        return fallback;
       }
       return n;
     }
-    return DEFAULT_PAYOUT_RATE;
+    return fallback;
   } catch (err) {
-    console.error("payout_rate lookup failed, using default: " + err);
-    return DEFAULT_PAYOUT_RATE;
+    console.error(key + " lookup failed, using default: " + err);
+    return fallback;
   }
 }
 

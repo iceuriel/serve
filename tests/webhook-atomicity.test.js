@@ -160,14 +160,49 @@ t('quote_meta has nothing unexpected',
    Every partner surface reads the stamped value rather than the live setting,
    so changing the rate tomorrow cannot reprice a job already accepted. That
    only holds if what lands here came from the server. */
-t('the partner share is stamped on the booking', meta.payout_rate === 0.85, meta.payout_rate);
+/* 2026-09-16 — AND WHICH OF THE TWO SHARES IS STAMPED DEPENDS ON THE HOME.
+   BOOKING is a 2BR standard first clean, so it takes the half price and the
+   partner is paid the passthrough share: a 50% discount cannot be funded out
+   of a 15% margin, so Serve keeps 2% on that visit and earns on the recurring
+   ones. See payoutRateFor() in webhook.gs, and payout-discount-parity.test.js
+   for the rule locked against the pricing engine. */
+t('a half-price first clean stamps the passthrough share',
+  meta.payout_rate === 0.98, meta.payout_rate);
+{
+  const move = A.post(Object.assign({}, BOOKING, {
+    submission_id: 'payout-move-1', service: 'move_out', service_type: 'move_out',
+  }));
+  const moveRow  = A.tabs.JOBS._rows.find(r => r[h('submission_id')] === 'payout-move-1');
+  const moveMeta = JSON.parse(moveRow[h('quote_meta')]);
+  /* A move clean is discounted 15%, not 50%, so the ordinary share already
+     leaves the partner above cost. Asserted through doPost rather than by
+     calling payoutRateFor directly — the wiring is the part that broke last
+     time, not the rule. */
+  t('a move clean stamps the ORDINARY share', moveMeta.payout_rate === 0.85,
+    moveMeta.payout_rate);
+  t('and the two really are different end to end, or neither assertion means '
+    + 'anything', meta.payout_rate !== moveMeta.payout_rate,
+    [meta.payout_rate, moveMeta.payout_rate]);
+}
 {
   const sneaky = A.post(Object.assign({}, BOOKING,
     { submission_id: 'payout-forge-1', payout_rate: 0.99 }));
   const forged = A.tabs.JOBS._rows.find(r => r[h('submission_id')] === 'payout-forge-1');
   const forgedMeta = JSON.parse(forged[h('quote_meta')]);
-  t('a payload cannot set its own payout rate', forgedMeta.payout_rate === 0.85,
+  t('a payload cannot set its own payout rate', forgedMeta.payout_rate === 0.98,
     forgedMeta.payout_rate);
+
+  /* THE FORGERY THAT PAYS: claim the half-price discount on a move clean and
+     collect the passthrough share on an undiscounted ticket. The rate is
+     re-derived from the home, so the claim is ignored. */
+  A.post(Object.assign({}, BOOKING, {
+    submission_id: 'payout-forge-2', service: 'move_out', service_type: 'move_out',
+    discount_applied: 'First clean 50% off', payout_rate: 0.98,
+  }));
+  const forged2 = A.tabs.JOBS._rows.find(r => r[h('submission_id')] === 'payout-forge-2');
+  const meta2   = JSON.parse(forged2[h('quote_meta')]);
+  t('nor talk its way onto the passthrough share by claiming a discount',
+    meta2.payout_rate === 0.85, meta2.payout_rate);
 }
 t('property_key still populated alongside the address',
   row[h('property_key')] === '02134-123-BEACON-ST-4B', row[h('property_key')]);

@@ -1142,22 +1142,33 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
         const isFirst = state.service === 'first_clean';
 
         // --- Price block ---
+        /* EVERY PATH SHOWS A STRUCK-THROUGH ANCHOR AS OF 2026-09-16, because
+           every path is now discounted — see SECONDARY_FACTOR in the engine.
+           The percentage comes from the engine rather than being written here,
+           so the badge cannot claim a number the arithmetic did not produce.
+
+           The old no-stack branch promised "$50 off visits 2-4 on a recurring
+           plan instead". Nothing anywhere implemented that, so it was a
+           customer promise the system could not keep; those homes now get a
+           real 15% off the visit in front of them. */
         let html = '';
         if (isFirst && q.discountApplies) {
             html = `
-                <div class="price-badge">First clean — 50% off</div>
+                <div class="price-badge">First clean — ${q.discountPercent}% off</div>
                 <div class="price-strike">$${q.deepAnchorDisplay}</div>
                 <div class="price-main" id="price-main">$${q.displayPrice}</div>
                 <div class="price-caption">Your first-visit price — for first-time customers.</div>`;
         } else if (isFirst && q.noStack) {
             html = `
-                <div class="price-badge">First clean</div>
+                <div class="price-badge">First clean — ${q.discountPercent}% off</div>
+                <div class="price-strike">$${q.deepAnchorDisplay}</div>
                 <div class="price-main" id="price-main">$${q.displayPrice}</div>
                 <div class="price-caption">Your first-visit price — for first-time customers.</div>
-                <p class="price-note">For larger homes needing heavy-duty attention, the first-visit discount doesn't apply — you'll get $50 off visits 2&ndash;4 on a recurring plan instead.</p>`;
+                <p class="price-note">A larger home that hasn't been cleaned in a while is a full deep clean, so it's priced as one &mdash; ${q.discountPercent}% off rather than the half-price first visit.</p>`;
         } else {
             html = `
-                <div class="price-badge">Move In / Move Out</div>
+                <div class="price-badge">Move In / Move Out — ${q.discountPercent}% off</div>
+                <div class="price-strike">$${q.deepAnchorDisplay}</div>
                 <div class="price-main" id="price-main">$${q.displayPrice}</div>
                 <div class="price-caption">Your all-in move clean.</div>`;
         }
@@ -1477,7 +1488,10 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
         p.service_type      = state.service;
         p.modifiers_applied = addonLabels();
         p.original_price    = q.deepAnchorDisplay != null ? q.deepAnchorDisplay : q.displayPrice;
-        p.discount_applied  = (state.service === 'first_clean' && q.discountApplies) ? 'First clean 50% off' : 'None';
+        /* Straight from the engine as of 2026-09-16. It was assembled here from
+           a hardcoded string plus a flag, which meant the sheet said "None" for
+           the move cleans and large heavy homes that now carry a real 15%. */
+        p.discount_applied  = q.discountLabel;
         p.first_visit_total = q.displayPrice;
         p.recurring_weekly   = state.service === 'first_clean' ? q.freqSteady.weekly   : '';
         p.recurring_biweekly = state.service === 'first_clean' ? q.freqSteady.biweekly : '';
