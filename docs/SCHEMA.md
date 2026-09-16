@@ -56,7 +56,7 @@ narrative.
 > `SRV-20260812-11B353` is recorded as `420` for a job that ran 3.5 hours with
 > two people. That is correct and is the convention.
 | 19 | `photos_passed` | **OPS** | `TRUE`/`FALSE`. Photo-verification QA gate. |
-| 20 | `payment_status` | **OPS** | Never touched by the script. |
+| 20 | `payment_status` | **OPS + SCRIPT** | **Changed 2026-09-15 (r50) — this used to read "never touched by the script".** Stripe now writes it through one exempt path. Values the code recognises: blank · `authorized` · `paid` · `released` · `refunded`. See below. |
 | 21 | `job_status` | WH → OPS | Script writes `new` at booking, and `cancelled` when a customer calls the visit off in their portal (r43). Operator updates otherwise. **A cancelled booking is never deleted** — see below. |
 | 22 | `notes` | WH | **Schedule summary only.** Human-readable, never empty. Not customer text. |
 | 23 | `submission_id` | WH | Client-generated UUID. **Idempotency key.** Dedupe runs on this. |
@@ -73,6 +73,66 @@ narrative.
 | 34 | `unit` | WH | Unit/apt. |
 | 35 | `zip` | WH | ZIP. |
 | 36 | `quote_meta` | WH | JSON blob: secondary quote data only (`original_price`, `discount_applied`, `steady_state_price`, the three recurring prices, `zip_tier`, `page_path`, `utm_*`, `unit_label`, `src`, `submitted_at`, the two SMS consent flags, plus `zone` / `park_tier` / `levels`, and `quote_sig` / `quote_scope` / `quote_version` — see below). |
+| 37 | `payment_ref` | **SCRIPT** | Added 2026-09-15 (r50). The Stripe PaymentIntent (`pi_…`) behind whatever `payment_status` says — the handle that ties this row to the Stripe dashboard, and what gets voided when a customer cancels. **Optional**: where the header is absent the payment state still writes and the omission is logged. Reaches no view model. |
+
+### The columns ops actually owns, and the one exception — r50
+
+Two columns on this tab are written by no one but a person, and one used to be:
+
+| | |
+|---|---|
+| `completed_date`, `cleaner`, `duration_min`, `photos_passed`, `partner_payout`, `vendor_id`, `operator_id` | **still ops-only.** `setJobCells` throws if anything tries. |
+| `payment_status` | **ops, plus exactly one script path.** |
+
+**Why the promise changed.** The old rule made sense while the only way Serve
+learned about money was a person seeing it arrive. Once `/api/checkout` started
+placing real holds, the sheet had no way to find out one existed — so a
+customer who authorized ninety seconds ago reloaded their portal and was told
+"Not yet authorized", with the Authorize button still inviting a second hold on
+the same card. Stripe knows sooner and more exactly than a person can.
+
+**The exemption is one function, not a door left open.** `payment_status` is
+still in `OPS_OWNED_COLUMNS`, which guards `setJobCells` — the booking form,
+the portal writes, the reschedule and the cancellation are all still refused.
+`handlePaymentEvent` writes the cell directly, behind `PAYMENT_BRIDGE_SECRET`,
+and nothing else does.
+
+**The two sources coexist.** An operator typing `paid` for a customer who paid
+by check still works and is still correct. Stripe never blanks a hand-typed
+value; the rank guard below decides who wins.
+
+**Three states, because the flow has three.** `paid` keeps its exact old
+meaning — money actually taken. `authorized` is the hold in between, where the
+funds are guaranteed to Serve and nothing has left the customer's account.
+Writing `paid` on a mere hold would tell somebody they had been charged when
+they had not, which is the specific lie this column previously had no way to
+avoid. `released` (hold voided or lapsed) and `refunded` are the two reversals.
+
+**The rank guard: once money has actually moved, only news about money that has
+actually moved may overwrite it.** Stripe retries failed deliveries for days
+and promises no ordering, so `amount_capturable_updated` can arrive *after*
+`succeeded` — which, written naively, turns a captured payment back into a mere
+hold and re-offers the Authorize button to somebody already charged. Below that
+line (blank, `released`, `authorized`) nothing has left anyone's account and
+every transition is allowed, including the ordinary `authorized` → `released`
+of a cancelled booking.
+
+### `partner_payout` — documented 2026-09-15, and it predates this note
+
+**This column has existed since r13 and appeared nowhere in this file**, which
+breaks the first rule at the top of it. Recorded now rather than left to be
+rediscovered.
+
+| | |
+|---|---|
+| **Owner** | **OPS.** Set by hand at dispatch. Never written or blank-filled by the script. |
+| **What** | What the partner *company* is paid for this job, in dollars. |
+| **Beside** | `payout_rate` in `quote_meta`, which derives a payout from the ticket. **This column wins wherever it is set** — it is how one job gets a different answer (a difficult home, an apology, a bonus), and a derived figure must never quietly replace a number a human chose. |
+
+**It is not the customer's money and must never be confused with it.** Customer
+→ Serve is `payment_status` and `/api/checkout`. Serve → partner is this
+column, and nothing built for payments touches it. **The customer never pays
+the partner**, and the joint-employer position depends on that staying true.
 
 ### `payout_rate` in `quote_meta` — added 2026-09-11 (webhook.gs r24)
 
@@ -1287,6 +1347,7 @@ held `direct ×1` and blank ×12, with no channel values anywhere.
 
 | Date | Change |
 |---|---|
+| 2026-09-15 | **Payment state is written down — webhook r50, the Worker and the site. THE FIRST ENTRY HERE THAT CHANGES AN OWNERSHIP PROMISE.** `payment_status` (#20) was documented as "never touched by the script" since this file was created; it is now written by Stripe through one exempt path, `handlePaymentEvent`, behind a new Script Property `PAYMENT_BRIDGE_SECRET`. It stays in `OPS_OWNED_COLUMNS`, so every other caller is still refused, and a hand-typed value still works. **New column `payment_ref` (37)** — the Stripe PaymentIntent; optional, and absent it the state still writes. **New recognised values** blank · `authorized` · `paid` · `released` · `refunded`, because authorize-at-booking has three states and the column could previously say only two — recording a hold as `paid` tells a customer they were charged when no money has moved. Both customer view models gain `authorized` beside `paid`; `paymentNote` replaces the hardcoded "Due at service". **New Worker route `/api/stripe-webhook`**, the only one authenticated by a signature rather than a ticket token, plus `can_record_payments` on `/api/health` — `can_charge: true` with `can_record_payments: false` is the dangerous combination and is now one request away from being visible. A customer cancelling a booking with an uncaptured hold releases it; a captured one is still a human's decision. `partner_payout` documented at last — it has existed since r13 and appeared nowhere in this file. See `HANDOFF.md` §r50. |
 | 2026-09-15 | **Load-time fixes — webhook r49, the Worker and the site.** No column, tab or response change; the paste and the push can go in either order. Webhook: a `booking_photo` read runs before the script lock, in a shared-snapshot scope (new row in "How the webhook reads the sheets"); the customer's partner card is cached five minutes per company, cleared by a vendor portal save or `forgetPartnerCards()` (see VENDORS). Site: `booking-photos.js` remembers photos it has read for the life of the page and sends at most three reads at once. Worker: an `/api/address` miss reads its two counters together and writes both before the provider is called (still fail-closed), then saves the answer via `waitUntil`. `read-budget.test.js` §8–9, `address-suggest.test.js` A4 and the new `photo-cache.test.js` enforce it. See `HANDOFF.md` §2026-09-15. |
 | 2026-09-14 | **The cleaner ticket's rooms, simplified — webhook r48, the Worker and the site.** Supersedes r47's UI. New tab **`PARTNER_NOTES`** (auto-created; partner-token writes via `partner_note`). **`COMPLETION_PHOTOS`** drops `room_label`, `service_label`, `scheduled_date` and no longer requires `finished: true`. View models: partner ticket `scope[].note`; vendor portal `bookings[].report` replaces `completionHistory`; customer portal `bookings[].partnerNotes`. Site: each Scope room is a closed box with one Add photos control and an optional note; `completion-photos.css` removed. See `HANDOFF.md` §r48. |
 | 2026-09-14 | **A plan after a move — webhook r45, the Worker and the site.** No column or tab change. The portal model gains `movePlan`; two portal writes `plan_start` and `plan_change`; `/api/quote` also returns `recurring` (the engine's three per-visit prices). A move-in / move-out customer chooses a cadence priced by the engine for their home, books the first visit at an open time or earlier/later, and the box stays as their plan until they change it. `bookPlanVisit`, `visitAlreadyAt` and `moveVisit` were split out of r42/r43 unchanged. New section "A plan after a move" above. See `HANDOFF.md` §r45. |

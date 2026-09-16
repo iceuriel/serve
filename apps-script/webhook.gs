@@ -1,7 +1,42 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-15  ·  master  ·  r49 — photo reads skip the lock; partner card cached
+ * VERSION STAMP:  2026-09-15  ·  master  ·  r50 — payment state is written down at last
+ *
+ * r50 = THE SHEET FINALLY LEARNS WHAT HAPPENED TO A CARD.
+ *
+ *      THE GAP THIS CLOSES. /api/checkout has been issuing real Stripe holds
+ *      since r21, and NOTHING recorded that one was placed. `payment_status`
+ *      was filled in by hand, so a customer who authorized ninety seconds ago
+ *      reloaded their portal and was told "Not yet authorized", with the
+ *      Authorize button still there inviting a second hold on the same card.
+ *      Survivable on a test key. Not survivable on a live one — which is why
+ *      the live key waited for this revision.
+ *
+ *      NEW ACTION `payment_event` (handlePaymentEvent). The Worker verifies
+ *      Stripe's signature, then relays the outcome here behind a new Script
+ *      Property, PAYMENT_BRIDGE_SECRET. Its own secret, NOT PHOTO_BRIDGE_
+ *      SECRET: the rule that one credential never opens another surface holds
+ *      for bridges too.
+ *
+ *      `payment_status` IS NOW SCRIPT-WRITTEN, which changes a promise
+ *      SCHEMA.md made and is documented there in the same commit. It stays in
+ *      OPS_OWNED_COLUMNS — that list guards setJobCells, and every other
+ *      caller is still refused. An operator typing "paid" for a customer who
+ *      paid by check still works; the two sources coexist.
+ *
+ *      A THIRD STATE. not authorized -> authorized (held, no money moved) ->
+ *      paid. The old shape could only say the first and last, so a hold had to
+ *      be recorded as either a lie or nothing. `booking.payment.authorized`
+ *      joins `paid` and both customer surfaces read it.
+ *
+ *      NEW COLUMN `payment_ref` on JOBS — the Stripe PaymentIntent, the handle
+ *      that ties a row to the dashboard. Optional: absent, the state still
+ *      writes and the omission is logged. It reaches NO view model.
+ *
+ *      A CANCELLED VISIT RELEASES ITS HOLD. cancelBooking names an uncaptured
+ *      authorization in its reply and the Worker voids it. Nothing here
+ *      refunds — money actually taken is still a human's decision.
  *
  * r49 = TWO THINGS THAT MADE PAGES WAIT, NEITHER CHANGING WHAT ANY PAGE GETS.
  *      No request or response shape changes, so this paste and the site can
@@ -800,7 +835,16 @@ const PROTECTED_TABS = [
     reads `completed_date` or `photos_passed` to release a payout; both are
     verified by hand and payment is made by hand. The copy describes how Serve
     operates. If that ever becomes automatic it is a new decision, and this
-    column stops being ops-owned on the same day. */
+    column stops being ops-owned on the same day.
+
+    r50 — `payment_status` HAS EXACTLY ONE EXEMPT WRITER, and it is still in
+    this list on purpose. The list guards setJobCells, which is what the
+    booking form, the portal writes, the reschedule and the cancellation all
+    go through; every one of them is still refused. handlePaymentEvent writes
+    the cell directly, behind PAYMENT_BRIDGE_SECRET, because Stripe knows what
+    happened to a card sooner and more exactly than a person can. Keeping the
+    name here means the exemption is one function rather than a door left open
+    — anything that reaches for setJobCells still gets an exception. */
 const OPS_OWNED_COLUMNS = ["completed_date", "cleaner", "duration_min", "photos_passed",
                            "payment_status", "partner_payout", "vendor_id", "operator_id"];
 
@@ -815,7 +859,7 @@ const CANCELLED_JOB_STATUS = "cancelled";
 
 /* ============================================================
    2. HEADER_MAP — payload/record key -> EXACT header text
-   Built against the 36-column JOBS row 1:
+   Built against JOBS row 1 — 36 columns until r50, 37 with `payment_ref`:
 
      job_id | lead_id | source | property_key | service_type | frequency |
      condition | beds | baths | quoted_price | add_ons | add_on_rev |
@@ -823,7 +867,12 @@ const CANCELLED_JOB_STATUS = "cancelled";
      duration_min | photos_passed | payment_status | job_status | notes |
      submission_id | received_at | name | email | phone | segment |
      src_chain | customer_notes | pets_flag | scheduling_type |
-     address | unit | zip | quote_meta
+     address | unit | zip | quote_meta | payment_ref
+
+   r50 added `payment_ref` (37) — the Stripe PaymentIntent behind whatever
+   `payment_status` says. OPTIONAL: where the header is absent the payment
+   state still writes and the omission is logged, so adding the column late
+   costs nothing but the reconciliation handle.
 
    Only keys whose record name DIFFERS from the header need an entry here.
    Everything else matches by name: job_id, lead_id, property_key, condition,
@@ -1199,6 +1248,12 @@ function routePost(e, parsed) {
        booking rather than the site reporting one. */
     if (eventType === "booking_instruction") return handleInstruction(ss, data);
     if (eventType === "booking_photo") return handleBookingPhoto(ss, data);
+    /* r50. What Stripe says happened to a card, relayed by the Worker after it
+       has verified Stripe's signature. Routed here rather than through
+       handleEvent because it updates a JOBS row and must never append an
+       EVENTS one — and because it is the single caller allowed past the
+       ops-owned guard on payment_status. */
+    if (eventType === "payment_event") return handlePaymentEvent(ss, data);
     /* r48. A cleaner's note on a room, from the partner ticket. */
     if (eventType === "partner_note") return handlePartnerNote(ss, data);
 
@@ -1471,7 +1526,7 @@ function routeGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-15 r49" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-15 r50" });
 }
 
 
@@ -1940,9 +1995,30 @@ function bookingFromRow(h, values, tz) {
        Blank on anything booked before r24, which is a real state and reads as
        "no derived payout" rather than as zero. */
     payoutRate:    Number(meta.payout_rate) || null,
+    /* THE COLUMN MODELS TWO STATES AND THE FLOW HAS THREE (r50).
+       Until the Stripe write-back existed, `paid` was the only question worth
+       asking, because the only thing that could set this cell was an operator
+       typing into it after money had already moved. Authorize-at-booking adds
+       a middle state the old shape could not say:
+
+         not authorized  ->  authorized (held, NO money moved)  ->  paid
+
+       Writing "paid" on a mere hold would tell a customer they have been
+       charged when they have not, and hide the Authorize button from the one
+       person who still needs it. So `paid` keeps its exact old meaning — money
+       actually taken — and `authorized` is a new, separate field.
+
+       `released` and `refunded` are deliberately NEITHER. A voided hold is a
+       booking back to needing authorization, which is the same thing the blank
+       cell means, and every surface should treat it that way. */
     payment: {
-      status: String(f("payment_status") || ""),
-      paid:   String(f("payment_status") || "").toLowerCase() === "paid",
+      status:     String(f("payment_status") || ""),
+      paid:       String(f("payment_status") || "").toLowerCase() === "paid",
+      authorized: String(f("payment_status") || "").toLowerCase() === "authorized",
+      /* INTERNAL. The Stripe PaymentIntent behind the state above — the handle
+         that ties this row to the dashboard, and what the Worker voids when a
+         customer cancels. Reaches no view model; see the whitelists. */
+      ref:        String(f("payment_ref") || ""),
     },
 
     /* people — INTERNAL */
@@ -2218,10 +2294,17 @@ function buildClientTicketModel(ss, booking) {
       /* The price the customer agreed to. `final` once an operator sets it,
          otherwise the quote. Never both, so there is nothing to reconcile. */
       price:        booking.price.final || booking.price.quoted,
-      /* Real column, filled by hand. There is no Stripe integration, so there
-         is no payment link and this must not pretend otherwise. */
+      /* r50. THREE STATES, NOT TWO — see the note on booking.payment. `paid`
+         keeps its old meaning exactly: money actually taken. `authorized` is
+         the hold in between, and a page that cannot tell them apart either
+         tells a customer they were charged when they were not, or goes on
+         asking them to pay when they already have.
+         `payment_ref` is NOT here and must not be: whitelists are built up
+         field by field, and an internal Stripe handle has no business on a
+         customer's page. */
       paid:         booking.payment.paid,
-      paymentNote:  booking.payment.paid ? "Paid" : "Due at service",
+      authorized:   booking.payment.authorized,
+      paymentNote:  paymentNote(booking),
     },
 
     home: {
@@ -4399,6 +4482,156 @@ function setJobCells(jobs, rowNumber, headers, fields) {
   });
 }
 
+
+/* ============================================================
+   PAYMENT STATE — WRITTEN BY STRIPE, THROUGH THE WORKER (r50)
+   ============================================================
+
+   `payment_status` IS NO LONGER PURELY OPS-OWNED, and that is a real change to
+   the promise SCHEMA.md made. It is worth being precise about what changed:
+
+     BEFORE  the only thing that could fill this cell was a person typing into
+             it, because the only way Serve learned about money was a person
+             seeing it arrive.
+     NOW     Stripe knows first, and knows exactly. A customer who authorized
+             ninety seconds ago should not have to wait for an operator to
+             notice before their own portal stops asking them to pay again.
+
+   It stays in OPS_OWNED_COLUMNS on purpose, which is NOT a contradiction. That
+   list guards `setJobCells`, and it is what stops the booking form, the portal
+   writes, the reschedule and the cancellation from ever touching this cell.
+   Exactly one caller is exempt, it is the function below, and it writes
+   through its own path so the exemption cannot spread by accident. An operator
+   typing "paid" for a customer who paid by check still works and is still
+   correct — the two sources coexist, and neither blanks the other.
+
+   THE GUARD THAT MATTERS IS THE RANK. Stripe retries failed deliveries for
+   days and does not promise order, so `amount_capturable_updated` can land
+   AFTER `succeeded` — which, written naively, would turn a captured payment
+   back into a mere hold and re-offer the Authorize button to somebody who has
+   already been charged. Rank makes that specific downgrade impossible while
+   leaving the two legitimate ones (a hold voided, a payment refunded) alone. */
+
+/* HOW FAR THE MONEY HAS GOT. `released` sits at 0 beside the blank cell
+   because that is honestly what it is: no money, no hold, and a booking that
+   needs authorizing again.
+
+   A FIRST DRAFT OF THIS REJECTED EVERY DOWNGRADE, and a test caught that
+   voiding a hold — `authorized` -> `released`, a perfectly ordinary
+   cancellation — would then never have been recorded at all. The rule is
+   narrower than "newer must outrank older", and worth stating exactly:
+
+     ONCE MONEY HAS ACTUALLY MOVED, only news about money that has actually
+     moved may overwrite it.
+
+   Below that line (blank, released, authorized) nothing has left anybody's
+   account, every transition is reversible, and a late event costs nothing. At
+   or above it, a stale delivery would rewrite history the customer can see in
+   their bank — which is the only case this guard exists for. */
+const PAYMENT_RANK = { "": 0, "released": 0, "authorized": 1, "paid": 2, "refunded": 3 };
+
+/* The line. `paid` and above mean a real card was really debited. */
+const PAYMENT_SETTLED_RANK = 2;
+
+/**
+ * The one line a customer reads about money on this booking.
+ *
+ * FOUNDER COPY, NOT MINE — every sentence here is a statement about when a
+ * real card gets charged, and it replaced "Due at service", which stopped
+ * being true the moment authorize-at-booking shipped. It is worded to be
+ * accurate rather than final; reword it freely, but keep the three cases
+ * distinct, because collapsing them is what makes a page lie.
+ */
+function paymentNote(booking) {
+  if (booking.payment.paid)       return "Paid";
+  if (booking.payment.authorized) return "Card authorized — charged after your clean";
+  return "Authorize before your clean";
+}
+
+/**
+ * Record what Stripe says happened to one booking's money.
+ *
+ * ONLY THE WORKER MAY CALL THIS. The /exec URL is public, so a caller who
+ * knows a job id must not be able to mark it paid; PAYMENT_BRIDGE_SECRET is
+ * what separates this Worker from anyone else who has found the endpoint. It
+ * is a DIFFERENT secret from PHOTO_BRIDGE_SECRET for the same reason the four
+ * ticket audiences are different: one leaking must not become the other.
+ *
+ * Returns `applied: false` when the rank guard declined. That is a success —
+ * the state on the row is already at least as advanced as the news — and the
+ * Worker must not retry it.
+ */
+function handlePaymentEvent(ss, data) {
+  var secret = PropertiesService.getScriptProperties().getProperty("PAYMENT_BRIDGE_SECRET");
+  /* Same answer for "no secret configured" and "wrong secret". A caller
+     probing this endpoint learns nothing about which it was. */
+  if (!secret || String(data.bridge_token || "") !== secret) {
+    return json({ ok: false, error: "not_found" });
+  }
+
+  var jobId = String(data.job_id || "").trim();
+  var state = String(data.state || "").trim().toLowerCase();
+  if (!jobId) return json({ ok: false, error: "not_found" });
+  if (!PAYMENT_RANK.hasOwnProperty(state) || state === "") {
+    return json({ ok: false, error: "bad_state" });
+  }
+
+  var jobs = requireTab(ss, JOBS_TAB);
+  var found = findJobRow(jobs, jobId);
+  /* A job id Stripe knows and this sheet does not is not a retryable failure —
+     it is a payment against something that was never booked here, or a test
+     event from another environment. Said plainly so the Worker stops asking. */
+  if (!found) {
+    console.error("payment event for an unknown job: " + jobId);
+    return json({ ok: true, applied: false, reason: "unknown_job" });
+  }
+
+  var h = found.headers;
+  var statusCol = h.indexOf("payment_status");
+  if (statusCol === -1) {
+    console.error("JOBS has no payment_status column — payment state cannot be recorded");
+    return json({ ok: false, error: "no_column" });
+  }
+
+  var current = String(jobs.getRange(found.rowNumber, statusCol + 1).getValue() || "")
+    .trim().toLowerCase();
+  /* An operator's hand-typed value that means nothing to this map ranks 0, so
+     Stripe's news wins over a typo but never over a real state. */
+  var currentRank = PAYMENT_RANK.hasOwnProperty(current) ? PAYMENT_RANK[current] : 0;
+
+  /* Stripe retries for days and promises no order, so the harmful case is real:
+     `amount_capturable_updated` landing AFTER `succeeded` would turn a captured
+     payment back into a mere hold, and re-offer the Authorize button to
+     somebody who has already been charged.
+
+     Only settled states are defended. Below that line every transition is
+     legitimate — including the downgrade an earlier draft of this wrongly
+     refused, `authorized` -> `released`, which is just a cancelled booking
+     letting go of its hold. */
+  if (currentRank >= PAYMENT_SETTLED_RANK && PAYMENT_RANK[state] < currentRank) {
+    console.log("payment event ignored, money has already moved for " + jobId +
+                ": " + current + " -> " + state);
+    return json({ ok: true, applied: false, reason: "stale" });
+  }
+
+  jobs.getRange(found.rowNumber, statusCol + 1).setValue(state);
+
+  /* The reconciliation handle, where the column exists. Missing is survivable
+     and logged rather than fatal: the payment state itself is the part a
+     customer sees, and refusing to write it because a nice-to-have column is
+     absent would be the wrong trade. */
+  var refCol = h.indexOf("payment_ref");
+  var ref = String(data.payment_ref || "").trim();
+  if (ref && refCol !== -1) {
+    jobs.getRange(found.rowNumber, refCol + 1).setValue(ref);
+  } else if (ref) {
+    console.log("No payment_ref column on " + JOBS_TAB + " — state written without it");
+  }
+
+  console.log("payment_status " + jobId + ": " + (current || "(blank)") + " -> " + state);
+  return json({ ok: true, applied: true, job_id: jobId, state: state });
+}
+
 /** Is this booking already called off? */
 function bookingIsCancelled(booking) {
   return String(booking.status || "").trim().toLowerCase() === CANCELLED_JOB_STATUS;
@@ -4675,11 +4908,27 @@ function moveVisit(jobs, found, booking, sched) {
 /**
  * CALL ONE VISIT OFF.
  *
- * The row is marked, never removed, and the slot goes back to the feed. What
- * this deliberately does NOT do is touch money: nothing in this system has ever
- * captured a payment, refund terms are the founder's open decision, and a
- * cancellation that silently voided or kept a hold would be making that
- * decision by accident. The email tells a human a hold may be outstanding.
+ * The row is marked, never removed, and the slot goes back to the feed.
+ *
+ * r50 — A CANCELLED VISIT NO LONGER LEAVES A HOLD ON THE CARD. This used to
+ * touch money in neither direction, on the reasoning that refund terms were
+ * the founder's open decision and a cancellation that silently voided or kept
+ * a hold would be settling it by accident. Half of that still stands: nothing
+ * here refunds, because a refund gives back money that was actually taken and
+ * that IS a policy question.
+ *
+ * Releasing an authorization is not the same act. No money ever moved, the
+ * customer has just called the visit off themselves, and the only question is
+ * whether their card stays encumbered for a week for a cleaning nobody is
+ * coming to do. Leaving it was never the neutral choice — to the person whose
+ * available balance is short, it reads exactly like being charged for a
+ * service they cancelled.
+ *
+ * THIS FUNCTION STILL TOUCHES NO MONEY ITSELF, and must not: the Stripe key is
+ * deliberately not available to Apps Script. It NAMES the outstanding hold in
+ * its reply, and the Worker — which verified the caller and holds the key —
+ * voids it. A captured payment is named by nobody, because taking money back
+ * is the decision this still refuses to make on its own.
  */
 function cancelBooking(ss, contact, booking, data) {
   var notice = cancelNoticeHours();
@@ -4720,7 +4969,18 @@ function cancelBooking(ss, contact, booking, data) {
     console.error("cancel email failed (the cancellation stands): " + mailErr);
   }
 
-  return json({ ok: true, job_id: booking.bookingId, released: release.action });
+  /* r50. ONLY AN UNCAPTURED HOLD, and only when there is a Stripe intent to
+     name. `authorized` is the one state where money is promised but not taken,
+     so it is the one state where letting go costs the customer nothing and
+     costs Serve nothing. A `paid` booking is money that really moved and stays
+     a human's decision; the email below still says so.
+
+     The Worker strips this before the browser sees it. */
+  var out = { ok: true, job_id: booking.bookingId, released: release.action };
+  if (booking.payment.authorized && booking.payment.ref) {
+    out.payment_ref = booking.payment.ref;
+  }
+  return json(out);
 }
 
 /**
@@ -4809,11 +5069,16 @@ function sendVisitChangedEmail(ctx) {
           : (slot.reason ? " — " + slot.reason : "")) + "\n"
       : "") +
     (ctx.reason ? "\n— WHY THEY SAID —\n" + ctx.reason + "\n" : "") +
-    /* MONEY IS A HUMAN'S. Nothing captures, and nothing here voids a hold. */
+    /* TAKING MONEY, AND GIVING IT BACK, ARE STILL A HUMAN'S (r50). Releasing
+       an untaken hold is not — see cancelBooking. The three cases are named
+       separately because the thing a person has to DO about them differs. */
     (b.payment.paid
-      ? "\n— MONEY —\nThis booking reads PAID. Decide what is owed back.\n"
-      : "\n— MONEY —\nNo payment captured. If a card was authorized, the hold\n" +
-        "is still outstanding — release it in Stripe if this is not rebooked.\n") +
+      ? "\n— MONEY —\nThis booking reads PAID — money was actually taken.\n" +
+        "Decide what is owed back and refund it in Stripe.\n"
+      : b.payment.authorized
+      ? "\n— MONEY —\nA hold was outstanding. Releasing it was requested\n" +
+        "automatically; confirm in Stripe that the authorization is gone.\n"
+      : "\n— MONEY —\nNo payment was authorized or captured. Nothing to undo.\n") +
     "\n" + ticketBlock(b.bookingId, ctx.contactId, b.vendorId, slot.action));
 }
 
@@ -4898,7 +5163,9 @@ function buildPortalModel(ss, contact) {
            start showing cancelled visits as live ones the day they did. */
         cancelled:    cancelled,
         price:        b.price.final || b.price.quoted,
+        /* r50. See the client ticket's copy of this for why two fields. */
         paid:         b.payment.paid,
+        authorized:   b.payment.authorized,
         addOns:       b.addOns,
         propertyLabel: [b.address, b.unit].filter(Boolean).join(", "),
         editable:     !done && !cancelled,

@@ -732,9 +732,29 @@ console.log('\n=== 7. the failure UI exists and is reachable ===');
       form.get('payment_intent_data[capture_method]') === 'manual');
     t('the job is on the session for reconciliation',
       form.get('client_reference_id') === 'SRV-1' && form.get('metadata[job_id]') === 'SRV-1');
+    /* A DOUBLE-CLICK MUST NOT MAKE TWO HOLDS, AND A REISSUE MUST NOT REPLAY A
+       DEAD ONE. Stripe caches the response BODY against an idempotency key for
+       24 hours, so a key of job+amount alone means that expiring a link and
+       reissuing it hands back the original, already-dead session — exactly the
+       recovery an operator reaches for after a failed attempt. The time bucket
+       is what separates the two cases, so this asserts the shape AND that the
+       bucket actually moves. */
+    const key = seen.stripe[0].init.headers['Idempotency-Key'];
     t('a double-click cannot make two holds',
-      seen.stripe[0].init.headers['Idempotency-Key'] === 'serve-SRV-1-23900',
-      seen.stripe[0].init.headers['Idempotency-Key']);
+      /^serve-SRV-1-23900-\d+$/.test(key), key);
+    t('and the key is job AND amount, so a repriced booking is a new session',
+      key.startsWith('serve-SRV-1-23900-'), key);
+    {
+      /* Ten-minute buckets: two calls now share a key, a call an hour later
+         does not. Proved by arithmetic on the shipped constant rather than by
+         waiting — the bucket width is the thing under test. */
+      const bucket = Number(key.split('-').pop());
+      const width  = 600000;
+      t('two clicks seconds apart land in the same bucket',
+        Math.floor((bucket * width + 5000) / width) === bucket, bucket);
+      t('but a reissue an hour later gets a fresh session, not the dead one',
+        Math.floor((bucket * width + 3600000) / width) !== bucket, bucket);
+    }
     t('the portal was read with the caller\'s own token',
       /portal=CON-1/.test(seen.portal[0].target) && /t=a-token/.test(seen.portal[0].target));
   }

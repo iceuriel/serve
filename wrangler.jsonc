@@ -54,10 +54,43 @@
 
   // SECRETS ARE NOT LISTED HERE, AND MUST NOT BE.
   //
-  // The Worker expects TWO, both set as Cloudflare SECRETS rather than vars:
+  // Set as Cloudflare SECRETS rather than vars:
   //
   //     npx wrangler secret put GEOAPIFY_KEY     // /api/address
   //     npx wrangler secret put QUOTE_SECRET     // /api/quote
+  //     npx wrangler secret put PHOTO_BRIDGE_SECRET   // /api/photos
+  //     npx wrangler secret put STRIPE_SECRET_KEY     // /api/checkout
+  //     npx wrangler secret put STRIPE_WEBHOOK_SECRET // /api/stripe-webhook
+  //     npx wrangler secret put PAYMENT_BRIDGE_SECRET // the write-back
+  //
+  // THE THREE PAYMENT SECRETS ARE NOT INTERCHANGEABLE AND MUST NOT BE SET TO
+  // THE SAME VALUE.
+  //
+  //   STRIPE_SECRET_KEY      Stripe's key. MOVES REAL MONEY when it starts
+  //                          `sk_live_`. /api/health reports `stripe_mode`
+  //                          precisely so a live key cannot reach production
+  //                          unnoticed — that is the one mistake here a
+  //                          redeploy cannot undo.
+  //   STRIPE_WEBHOOK_SECRET  `whsec_…`, from the Stripe dashboard's webhook
+  //                          endpoint. Verifies that a callback really came
+  //                          from Stripe. WITHOUT IT THE ROUTE REFUSES rather
+  //                          than trusting the caller: /api/stripe-webhook
+  //                          writes payment state for whatever job id it is
+  //                          handed, so unverified it would be a public
+  //                          endpoint for marking any booking paid.
+  //   PAYMENT_BRIDGE_SECRET  Ours, not Stripe's. Any long random string, and
+  //                          it must MATCH the Apps Script Script Property of
+  //                          the same name — that is what lets the booking
+  //                          webhook tell this Worker from anyone else who has
+  //                          found the public /exec URL. A DIFFERENT value
+  //                          from PHOTO_BRIDGE_SECRET, for the same reason the
+  //                          four ticket audiences differ: one credential must
+  //                          never open another surface.
+  //
+  // `can_charge: true` with `can_record_payments: false` is the combination
+  // worth checking for after any secret change. It means cards are charged and
+  // nothing is written down — every customer surface goes on saying "Not yet
+  // authorized" to people who have already paid.
   //
   // QUOTE_SECRET signs the price the server issues, so that a figure which has
   // been sitting in a browser can be proved to have come from here before

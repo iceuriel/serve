@@ -1217,7 +1217,11 @@
         sum.appendChild(el('span', 'pb__title', b.serviceLabel));
         sum.appendChild(el('span', 'pb__when', whenLine(b) || 'Date to be confirmed'));
         var price = money(b.price);
-        if (price) sum.appendChild(el('span', 'pb__price', price + (b.paid ? ' · paid' : '')));
+        /* The summary is the line a customer scans without opening anything,
+           so it has to distinguish money TAKEN from money merely held — those
+           mean different things to somebody checking their balance. */
+        if (price) sum.appendChild(el('span', 'pb__price',
+            price + (b.paid ? ' · paid' : b.authorized ? ' · authorized' : '')));
         det.appendChild(sum);
 
         var inner = el('div', 'pb__body');
@@ -1253,15 +1257,26 @@
             }
             add(inner, partnerNotes(b));
             add(inner, line('Completed', prettyDate(b.completed) || b.completed));
-            add(inner, line('Payment', b.paid ? 'Paid' : 'Due'));
+            add(inner, line('Payment', b.paid ? 'Paid'
+                                     : b.authorized ? 'Card authorized' : 'Due'));
             inner.appendChild(el('p', 'tk-note',
                 'Finished bookings are a record — they can no longer be edited.'));
             det.appendChild(inner);
             return det;
         }
 
-        add(inner, line('Payment', b.paid ? 'Paid' : 'Not yet authorized'));
-        if (!b.paid && Number(b.price) > 0) inner.appendChild(payBlock(b));
+        /* THREE STATES, AND THE MIDDLE ONE IS THE WHOLE POINT (r50).
+           Before payment state was written back, this page could only say
+           "Paid" or "Not yet authorized" — so a customer who had authorized
+           two minutes earlier was told they had not, with the button still
+           there inviting a second hold on the same card. The button now
+           disappears the moment Stripe confirms the hold, which is the only
+           version of this a real customer can trust. */
+        add(inner, line('Payment', b.paid ? 'Paid'
+                                 : b.authorized ? 'Card authorized'
+                                 : 'Not yet authorized'));
+        if (b.authorized) add(inner, authorizedNote(b));
+        if (!b.paid && !b.authorized && Number(b.price) > 0) inner.appendChild(payBlock(b));
 
         /* Who is coming. The portal is the link the confirmation email
            actually sends, so this is the surface that has to answer it —
@@ -1346,6 +1361,18 @@
         price_out_of_range:'We need to check the price on this booking first. We will be in touch.',
         not_found:         'We could not find that booking on your account.',
     };
+
+    /* What somebody sees INSTEAD of the button, once the hold is on. It has to
+       answer the two questions a person actually has at that moment — has my
+       money gone, and when will it — because "Card authorized" alone reads
+       like a charge to most people. FOUNDER COPY: this is a promise about when
+       a real card is charged, and the wording is open to change. */
+    function authorizedNote(b) {
+        return el('p', 'tk-note',
+            'Your card is authorized for ' + money(b.price) + '. Nothing has ' +
+            'been charged yet — we take payment once your cleaner confirms ' +
+            'the job. Cancel and the hold is released.');
+    }
 
     function payBlock(b) {
         var wrap = el('div', 'pay__wrap');

@@ -13,7 +13,172 @@ except where a later section supersedes them.
 
 ---
 
-## Current work — 2026-09-15, Claude Code: the portal that would not open twice
+## Current work — 2026-09-15, Claude Code: payment state, and what a live key still needs
+
+**NOT DEPLOYED. NOT LIVE. Local working-tree changes, NOT COMMITTED, and the
+Apps Script is NOT pasted.** Touched: `src/worker.js`, `apps-script/webhook.gs`,
+`portal.js`, `ticket.js`, `wrangler.jsonc`, `docs/SCHEMA.md`, this file, and
+three test files (`tests/stripe-payments.test.js` is new). `AGENTS.md`,
+`CLAUDE.md` and the two `images/` files were already modified/untracked on
+arrival and are **not this agent's** — left alone.
+This is the build that has to land *before* the Stripe
+key is switched from `sk_test_` to `sk_live_`, and the founder has four setup
+steps that only they can do. See "What the founder has to do" below.
+
+**Ordering, and it is the kind that has caused an outage here before:** this
+change spans `webhook.gs` **and** the site/Worker, so **paste r50 FIRST, then
+push.** The reverse order gives a Worker relaying `payment_event` to a script
+that has never heard of it.
+
+### The stale note this corrects
+
+The previous entry and the r49 section both say **"r49 is still unpasted"**.
+**That is wrong — r49 is live.** Probed today: the `/exec` endpoint answers
+`{"ok":true,"service":"serve-booking-webhook","version":"2026-09-15 r50"}` once
+this is pasted; before the paste it answered **r49**. Whoever wrote that
+follow-up action completed it and did not clear the note.
+
+### What the founder asked for, and what was actually in the way
+
+The ask was "put a real Stripe connection in instead of the testing one". The
+key swap is the smallest part of it. **Swapping the key today would have taken
+real money and still shown every customer "Not yet authorized" forever**,
+because nothing recorded that a hold had been placed — `payment_status` was
+hand-typed, and `/api/checkout` wrote to no sheet at all. The Authorize button
+stayed on screen after a successful payment, inviting a second hold on the same
+card. That was an annoyance on a test key and a customer telling you their
+money did not arrive on a live one.
+
+So this closes gaps 1, 2 and 3 from "NEXT UP — payments" below, and answers
+three of the founder decisions that were open there.
+
+### Founder decisions taken 2026-09-15 (all three the recommended option)
+
+| Question | Answer |
+|---|---|
+| Deposit or full amount | **Full quoted amount.** One hold, one capture, nothing to collect on the day. |
+| Who captures | **The founder, by hand, in the Stripe dashboard**, when the partner accepts. Zero new code, no new money-moving endpoint to secure, and the webhook writes `paid` back within seconds of the click. |
+| A customer cancels an authorized booking | **The hold is released automatically.** Leaving it for ~7 days reads, to the person whose balance is short, exactly like being charged for a cleaning they cancelled. |
+
+Still open and still the founder's: **refund and cancellation terms**, and the
+**partner response deadline** now that the seven-day authorization window is
+real. Neither is a coding decision and neither blocks the key swap.
+
+### What changed
+
+**`webhook.gs` r50 (NOT PASTED).**
+- **New action `payment_event` → `handlePaymentEvent`**, behind a new Script
+  Property `PAYMENT_BRIDGE_SECRET`. Its own secret, not `PHOTO_BRIDGE_SECRET`.
+- **`payment_status` is now script-written.** This changes a promise SCHEMA.md
+  has made since it was created, and SCHEMA.md is updated in the same commit.
+  It **stays in `OPS_OWNED_COLUMNS`** — that list guards `setJobCells`, so the
+  booking form, portal writes, reschedule and cancel are all still refused.
+  Exactly one function is exempt. A hand-typed `paid` still works and is never
+  blanked by Stripe.
+- **A third state.** `not authorized → authorized (held, no money moved) →
+  paid`, plus `released` and `refunded`. Both customer view models gain
+  `authorized` beside `paid`, and `paymentNote` replaces the hardcoded
+  "Due at service".
+- **New optional JOBS column `payment_ref`** (37) — the PaymentIntent. Absent,
+  the state still writes and the omission is logged.
+- **`cancelBooking` names an uncaptured hold** in its reply so the Worker can
+  void it. A captured payment is named by nobody.
+
+**`src/worker.js`.**
+- **New route `POST /api/stripe-webhook`** — the only route authenticated by a
+  signature rather than a ticket token. HMAC-SHA256 over `<t>.<raw body>`,
+  constant-time compare, 5-minute tolerance, multiple `v1` digests accepted so
+  a secret rotation does not take payments offline.
+- **A failed write-back returns 500 on purpose.** Stripe retries a non-2xx with
+  backoff for up to three days, which is a more durable queue than anything
+  worth building here. A 200 would drop the payment state permanently and
+  silently, and the customer would be the one to notice.
+- **The idempotency key gained a 10-minute time bucket** (gap 2 below). Stripe
+  caches the response *body* against a key for 24 hours, so reissuing a link
+  for the same job and amount replayed the original, already-dead session —
+  exactly the recovery an operator reaches for after a failed attempt.
+- **`can_record_payments` on `/api/health`.** `can_charge: true` beside
+  `can_record_payments: false` is the dangerous combination and is now one
+  request away from being visible.
+- **`afterPortalWrite`** releases the hold on a cancellation and **strips
+  `payment_ref` before the browser sees it** — view models are whitelists.
+
+**`portal.js` / `ticket.js`.** Three payment states on both surfaces. The
+Authorize button disappears the moment Stripe confirms the hold.
+
+### What was verified
+
+- **`node tests/run-all.js` — all 33 files pass**, including the new
+  `tests/stripe-payments.test.js`.
+- **16 deliberate mutations, 16 killed, 0 survivors.** Removing the signature
+  check, signing only the timestamp, dropping the replay tolerance, answering
+  200 on a failed write, recording a hold as `paid`, leaking `payment_ref` to
+  the browser, accepting a non-`pi_` ref, dropping the time bucket, trusting an
+  unconfigured route, hardcoding `can_record_payments`, removing the rank
+  guard, skipping the bridge secret, accepting an unknown state, naming a
+  captured payment on cancellation, and blinding the surfaces to `authorized` —
+  every one turns the suite red.
+- **A REAL BUG WAS CAUGHT THIS WAY, not by reading.** The first rank guard
+  rejected *every* downgrade, which would have meant a cancelled booking's hold
+  release was never recorded. The rule is narrower than "newer must outrank
+  older": **once money has actually moved, only news about money that has
+  actually moved may overwrite it.** Below that line every transition is
+  legitimate.
+- **NOTHING IS VERIFIED IN PRODUCTION.** No paste, no push, no live payment, no
+  real card. The four setup steps below have not been done.
+
+### What the founder has to do — the walkthrough
+
+Do these **in order**. Steps 1–3 are safe at any time; **step 5 is the one that
+starts moving real money.**
+
+1. **Activate the Stripe account.** Dashboard → Activate payments. Business
+   details, bank account, tax info. Until this is done there is no live key.
+2. **Add the JOBS column.** Leads MASTER → JOBS → a new header in column 37
+   named exactly `payment_ref`. (Optional — without it the payment state still
+   writes. Worth having for reconciling a row against Stripe.)
+3. **Paste r50 and set the Script Property.** Extensions → Apps Script, paste
+   `apps-script/webhook.gs`, Deploy → Manage deployments → edit the EXISTING
+   deployment → New version. Then Project Settings → Script Properties → add
+   `PAYMENT_BRIDGE_SECRET` = any long random string (`openssl rand -hex 32`).
+   Verify: the `/exec` URL answers `"version":"2026-09-15 r50"`.
+4. **Push the site**, and set the two new Cloudflare secrets —
+   `PAYMENT_BRIDGE_SECRET` (**the same string as step 3**) and, after step 5,
+   `STRIPE_WEBHOOK_SECRET`.
+5. **Create the Stripe webhook endpoint.** Stripe → Developers → Webhooks → Add
+   endpoint → `https://servecleaning.com/api/stripe-webhook`. Subscribe to
+   exactly these five: `checkout.session.completed`,
+   `payment_intent.amount_capturable_updated`, `payment_intent.succeeded`,
+   `payment_intent.canceled`, `charge.refunded`. Copy the signing secret
+   (`whsec_…`) into the Cloudflare secret `STRIPE_WEBHOOK_SECRET`.
+6. **Test the whole path on the TEST key first**, then swap
+   `STRIPE_SECRET_KEY` to `sk_live_…` last. Confirm `/api/health` reports
+   `stripe_mode: "LIVE"` **and** `can_record_payments: true` together.
+
+**Setting a Cloudflare secret redeploys the Worker with the code from the LAST
+GIT PUSH.** That has confused this project before: a secret set, a script
+deployed, and a site pushed are three separate events and none implies another.
+
+### The proof sequence, once it is wired
+
+Book on the live site → open the portal link from the confirmation email → pay
+with `4242 4242 4242 4242` → **confirm Stripe shows an UNCAPTURED payment
+rather than a charge**, and that the portal now reads "Card authorized" with no
+Authorize button. Then capture in the dashboard and confirm the portal flips to
+"Paid". That last pair is what proves authorize-not-charge and the write-back
+both took effect.
+
+### Still not built
+
+**Nothing watches the seven-day authorization window** (gap 4 below). A partner
+has to accept inside it or the hold has to be retaken, and no deadline is set.
+**The payment copy is still mine, not the founder's** (gap 5) — it is worded to
+be accurate, not final; `paymentNote()` in webhook.gs and `authorizedNote()` in
+portal.js are where it lives.
+
+---
+
+## Earlier — 2026-09-15, Claude Code: the portal that would not open twice
 
 **LIVE AND VERIFIED (2026-09-15 23:25Z), pushed as `4411703`.** Workers Builds
 registered a check run this time and succeeded at 23:25:19Z. `portal.js`,
@@ -22,8 +187,10 @@ registered a check run this time and succeeded at 23:25:19Z. `portal.js`,
 PASTE — `webhook.gs` is
 untouched and stays at r49**, so there is no script-before-site ordering to
 respect here. This is `src/worker.js`, `portal.js`, `ticket.js`, `vendor.js`,
-`style.css` and two test files; it deploys by pushing. (r49 itself is still
-unpasted — see the section below. That is a separate, still-open action.)
+`style.css` and two test files; it deploys by pushing. (This said r49 was
+"still unpasted". **Corrected 2026-09-15: r49 IS pasted and live** — the
+`/exec` endpoint was probed and answered `2026-09-15 r49`. Whoever completed
+that action did not clear the note.)
 
 ### The complaint
 
@@ -177,7 +344,10 @@ genuinely bad link. Then settle the warm-ping question above.
 
 ## Earlier — 2026-09-15, Claude Code: load-time fixes 1–4 (r49 + site + Worker)
 
-**SITE + WORKER LIVE AND VERIFIED (2026-09-15 ~14:15Z); r49 NOT YET PASTED.**
+**SITE + WORKER LIVE AND VERIFIED (2026-09-15 ~14:15Z).** *(This section said
+"r49 NOT YET PASTED". **r49 was pasted and is live** — probed 2026-09-15, the
+`/exec` endpoint answered `2026-09-15 r49`. The "Next" line at the end of this
+section is likewise complete.)*
 `468baf8` reached GitHub at 14:00:11Z, but Workers Builds never registered a
 build for it: no check run after 12 minutes, where the previous push had one
 within 47s. Pushing the docs commit `ca64ca0` started a build within seconds,
@@ -252,7 +422,7 @@ dedupe; no forget on delete; no upload seed; no eviction; failed read kept.
 unchanged), a real phone, a real signed link, and production timing
 before/after.
 
-**Next:** founder pastes r49; verify `/exec`. Then, optionally, re-measure a
+**Next:** ~~founder pastes r49; verify `/exec`~~ — **DONE, r49 is live.** Then, optionally, re-measure a
 photo-heavy portal. Fix 5 (self-host Inter) and the a/b/c trade-offs still
 need the founder's decision.
 
@@ -2220,6 +2390,14 @@ Concurrent Stripe, continuity-file, and logo changes remain uncommitted in Code.
 
 ## NEXT UP — payments. Queued 2026-09-11 (Claude Code)
 
+> **Substantially addressed 2026-09-15 by r50 — see the current-work entry at
+> the top of this file.** Gaps **1, 2 and 3 are built** (not yet deployed), and
+> three of the four founder decisions are taken. **Gaps 4 and 5 are still
+> open**, as are refund terms and the partner response deadline. The
+> `partner_payout` documentation gap under gap 1 is closed — it has a row in
+> SCHEMA.md now. Each item below is annotated; the original text is kept
+> because the reasoning still explains *why* each fix is shaped the way it is.
+
 Nothing here is started. The payment path is LIVE in Stripe TEST mode from
 `c22d360`; `/api/health` reports `can_price`, `can_sign`, `can_charge` true and
 `stripe_mode: "test"`. These are the known gaps, worst first.
@@ -2227,7 +2405,7 @@ Nothing here is started. The payment path is LIVE in Stripe TEST mode from
 **Do not treat any of this as authorized to go live.** The key is `sk_test_`,
 and the items under "founder decisions" below are unanswered.
 
-### 1. Payment state is never written back — the biggest gap
+### 1. Payment state is never written back — the biggest gap  ✅ BUILT (r50, not deployed)
 
 Nothing records that a link was issued, opened, or authorized. `/api/checkout`
 writes to no sheet; the only trace anywhere is one Worker log line,
@@ -2263,7 +2441,12 @@ joint-employer constraint depends on that staying true.
 webhook.gs and it appears nowhere in SCHEMA.md, which breaks that file's first
 rule. Needs a row and an owner before payouts are automated.
 
-### 2. The idempotency key outlives the session it created
+> **Closed 2026-09-15.** It has a row in SCHEMA.md now, owner **OPS**, beside a
+> note on how it relates to `payout_rate` and why customer→Serve money and
+> Serve→partner money must never be confused. (The claim that webhook.gs writes
+> it was wrong: it is in `OPS_OWNED_COLUMNS`, so `setJobCells` throws on it.)
+
+### 2. The idempotency key outlives the session it created  ✅ FIXED (r50, not deployed)
 
 In `handleCheckout`, the key is `serve-<job>-<cents>`. Stripe caches the
 **response body** against a key for 24 hours, so expiring a link and reissuing
@@ -2277,19 +2460,31 @@ short time bucket in the key (a double-click needs seconds of protection, not a
 day), or follow the create with a `GET /v1/checkout/sessions/{id}` to read the
 current status and retry with a salted key when it is not open.
 
-### 3. Nothing captures the hold
+> **Fixed 2026-09-15 with the time bucket** — `serve-<job>-<cents>-<10-minute
+> bucket>`. Ten minutes covers the double-click, the impatient reload and the
+> back button; anything slower legitimately deserves a fresh session. The
+> `worker-proxy.test.js` assertion checks the bucket width, not just the shape.
+
+### 3. Nothing captures the hold  ✅ DECIDED (2026-09-15) — no code needed
 
 `capture_method: manual` places the hold and there is no capture anywhere in
 the system. The founder's decision is capture-on-partner-acceptance, so this
 needs an operator action, not an automatic one.
 
-### 4. The seven-day window is now a live constraint, not a hypothesis
+> **Resolved 2026-09-15: the founder captures in the Stripe dashboard by hand.**
+> An uncaptured payment shows a Capture button there. This deliberately builds
+> nothing: an operator-only capture endpoint would be a second way to move real
+> money that has to be secured, and the dashboard already does the job well.
+> The r50 webhook turns that click into `payment_status: paid` on the row
+> within seconds, which was the only part actually missing.
+
+### 4. The seven-day window is now a live constraint, not a hypothesis  ⬜ STILL OPEN
 
 An authorization lapses after roughly seven days. Once a customer authorizes, a
 partner has to accept inside that window or the hold has to be retaken, and
 **nothing watches for this.** No deadline has been set — see founder decisions.
 
-### 5. The customer-facing payment copy is mine, not the founder's
+### 5. The customer-facing payment copy is mine, not the founder's  ⬜ STILL OPEN
 
 Both surfaces now read "We place a hold on your card for $X now, and only
 charge it once your cleaner has confirmed the job." That is a promise about
@@ -2312,6 +2507,13 @@ proves authorize-not-charge actually took effect.
 Deposit versus full amount. Refund and cancellation terms. What the customer is
 told about when their card is charged. A partner response deadline, now that
 the seven-day window is real. None is a coding decision.
+
+> **2026-09-15 — three are now settled:** the full quoted amount is held; the
+> founder captures by hand in the Stripe dashboard when the partner accepts;
+> and a customer's cancellation releases an uncaptured hold automatically.
+> **Refund and cancellation terms and the partner response deadline remain
+> open**, as does the exact wording of the payment copy. None blocks the live
+> key.
 
 ## Session 2026-09-10 — signed quotes, step 1 of Stripe (Claude Code)
 

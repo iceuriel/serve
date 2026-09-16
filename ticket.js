@@ -435,11 +435,19 @@
                collected only once the partner has accepted the job, because
                Serve should not be holding somebody's money for work nobody has
                agreed to do yet. The old copy said "due at service", which
-               stopped being true the moment a card is authorized at booking. */
+               stopped being true the moment a card is authorized at booking.
+
+               r50. THE MIDDLE STATE EXISTS NOW. Until payment state was
+               written back, an authorized customer saw the unpaid copy and the
+               button, and could place a second hold on their own card. */
             p.appendChild(el('div', 'tk-note',
-                b.paid ? 'Paid — thank you.'
-                       : 'All in, and it does not change on the day.'));
-            if (!b.paid && !done) p.appendChild(payBlock(b));
+                b.paid       ? 'Paid — thank you.'
+                : b.authorized
+                    ? 'Your card is authorized for ' + price + '. Nothing has ' +
+                      'been charged yet — we take payment once your cleaner ' +
+                      'confirms the job.'
+                    : 'All in, and it does not change on the day.'));
+            if (!b.paid && !b.authorized && !done) p.appendChild(payBlock(b));
             bodyEl.appendChild(p);
         }
         add(bodyEl, block('Add-ons', b.addOns));

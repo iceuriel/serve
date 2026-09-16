@@ -152,11 +152,14 @@ export default {
     if (url.pathname === "/api/submit") return handleSubmit(request, env);
     if (url.pathname === "/api/quote")  return handleQuote(request, env);
     if (url.pathname === "/api/checkout") return handleCheckout(request, env);
+    /* Stripe calls this one, not a browser. It is the only route whose caller
+       proves itself with a signature rather than a ticket token. */
+    if (url.pathname === "/api/stripe-webhook") return handleStripeWebhook(request, env);
     if (url.pathname === "/api/slots")  return handleSlots(request, env);
     if (url.pathname === "/api/job")    return handleJob(request, env);
     if (url.pathname === "/api/photos") return handlePhotos(request, env);
     if (url.pathname === "/api/address")  return handleAddressSuggest(request, env, ctx);
-    if (url.pathname === "/api/portal")   return handlePortal(request, env);
+    if (url.pathname === "/api/portal")   return handlePortal(request, env, ctx);
     if (url.pathname === "/api/vendor")   return handleVendor(request, env);
     if (url.pathname === "/api/health")   return handleHealth(env);
 
@@ -379,7 +382,7 @@ async function handleJobWrite(request, env) {
    NEVER CACHED, and the token travels in the BODY on writes. A query string
    lands in proxy logs, browser history and referrer headers; this token is the
    only thing between a URL and a customer's whole account. */
-async function handlePortal(request, env) {
+async function handlePortal(request, env, ctx) {
   if (!env.WEBHOOK_URL) return json({ ok: false, error: "not_configured" }, 500);
 
   if (request.method === "POST") {
@@ -400,7 +403,7 @@ async function handlePortal(request, env) {
       console.error("portal write relay failed: " + up.error);
       return json({ ok: false, error: "upstream_unreachable" }, 502);
     }
-    return portalResponse(up.text);
+    return afterPortalWrite(up.text, env, ctx);
   }
 
   if (request.method !== "GET" && request.method !== "HEAD") {
@@ -422,6 +425,48 @@ async function handlePortal(request, env) {
     return json({ ok: false, error: "upstream_unreachable" }, 502);
   }
   return portalResponse(up.text);
+}
+
+/**
+ * A cancelled booking should not leave a hold sitting on the customer's card.
+ *
+ * Apps Script cancels the visit and, when that visit had a live authorization,
+ * names the PaymentIntent in its reply. This is the only place in the system
+ * that knows both facts at once: Apps Script holds the row but must never hold
+ * the Stripe key, and the Worker holds the key but does not know what was
+ * cancelled until the answer comes back.
+ *
+ * TWO THINGS HAPPEN HERE AND THE ORDER MATTERS.
+ *
+ * `payment_ref` IS STRIPPED BEFORE THE BROWSER SEES IT. It is not a secret and
+ * nothing can be done with it without the account key, but it is an internal
+ * reconciliation handle that a customer's page has no use for, and the house
+ * rule is that view models are whitelists — a field reaches a browser because
+ * somebody put it there on purpose. This one is used and dropped.
+ *
+ * THE RELEASE NEVER DELAYS OR FAILS THE CANCELLATION. It runs after the answer
+ * is already on its way back, because the customer's visit is cancelled either
+ * way and making them wait on Stripe to hear so would trade a certainty for a
+ * network call. A failed release leaves the hold exactly where it was before
+ * this existed, and the cancellation email still tells a human to check.
+ */
+function afterPortalWrite(text, env, ctx) {
+  let out;
+  try {
+    out = JSON.parse(text);
+  } catch (_) {
+    /* Not ours to interpret. Hand it back untouched, exactly as before. */
+    return portalResponse(text);
+  }
+  if (!out || !out.payment_ref) return portalResponse(text);
+
+  const ref = String(out.payment_ref);
+  delete out.payment_ref;
+
+  const release = releaseHold(env, ref);
+  if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(release);
+
+  return portalResponse(JSON.stringify(out));
 }
 
 function portalResponse(text) {
@@ -531,8 +576,14 @@ function handleHealth(env) {
        loud — whether it would move real money. A live key reaching production
        unnoticed is the one mistake here that cannot be undone with a redeploy. */
     can_charge: !!(env && env.STRIPE_SECRET_KEY),
-    stripe_mode: !(env && env.STRIPE_SECRET_KEY) ? "none"
-      : (env.STRIPE_SECRET_KEY.startsWith("sk_test_") ? "test" : "LIVE"),
+    stripe_mode: stripeMode(env),
+    /* Whether a payment, once taken, can be WRITTEN DOWN. False beside
+       can_charge: true is the specific dangerous combination — cards would be
+       charged and every customer surface would go on saying "Not yet
+       authorized" forever. Reported separately so that combination is one
+       request away from being obvious, instead of a support call. */
+    can_record_payments: !!(env && env.STRIPE_WEBHOOK_SECRET &&
+                            env.PAYMENT_BRIDGE_SECRET && env.WEBHOOK_URL),
     bindings: names,
   });
 }
@@ -1165,6 +1216,28 @@ async function handleQuote(request, env) {
    look at the row, not to raise the number. */
 const MAX_CHARGE_CENTS = 250000;   // $2,500
 
+/**
+ * Is this key test money or real money?
+ *
+ * STRIPE ISSUES TWO KINDS OF SECRET KEY AND BOTH ARE VALID HERE. A standard
+ * secret key is `sk_test_…` / `sk_live_…`; a RESTRICTED key, which is the
+ * better practice because it can be limited to just the few permissions this
+ * Worker needs, is `rk_test_…` / `rk_live_…`. Both carry the mode in the same
+ * position.
+ *
+ * Matching only `sk_test_` reported a restricted TEST key as LIVE. That errs
+ * in the safe direction — it over-warns rather than under-warns — but a health
+ * line that cries wolf is a health line nobody reads, and this particular line
+ * exists to catch the one mistake on this project that a redeploy cannot
+ * undo. Anything unrecognised still reads LIVE, deliberately: an unfamiliar
+ * key shape must never be assumed harmless.
+ */
+function stripeMode(env) {
+  const key = env && env.STRIPE_SECRET_KEY;
+  if (!key) return "none";
+  return /^(sk|rk)_test_/.test(key) ? "test" : "LIVE";
+}
+
 async function handleCheckout(request, env) {
   if (request.method !== "POST") {
     return json({ ok: false, error: "method_not_allowed" }, 405);
@@ -1288,8 +1361,23 @@ async function handleCheckout(request, env) {
         "Content-Type": "application/x-www-form-urlencoded",
         /* A double-click must not create two holds on one card. Keyed on the
            amount as well as the job, so a repriced booking is legitimately a
-           new session rather than silently reusing the old figure. */
-        "Idempotency-Key": "serve-" + jobId + "-" + cents,
+           new session rather than silently reusing the old figure.
+
+           THE TIME BUCKET IS NOT DECORATION. Stripe caches the RESPONSE BODY
+           against an idempotency key for 24 hours, so without it, expiring a
+           link and reissuing it for the same job at the same price replays the
+           original session — and hands the customer a URL that is already
+           dead. That is exactly the recovery an operator reaches for after a
+           failed attempt, so the bug would surface on the worst possible day.
+           A double-click needs seconds of protection, not a day; ten minutes
+           covers the click, the impatient reload and the back button, and
+           anything slower than that legitimately deserves a fresh session.
+
+           Checking `session.status === "open"` instead does NOT work: that
+           reads the cached body, which reports the status as it was at
+           creation rather than as it is now. */
+        "Idempotency-Key": "serve-" + jobId + "-" + cents + "-" +
+                           Math.floor(Date.now() / 600000),
       },
       body: form.toString(),
     });
@@ -1317,11 +1405,282 @@ async function handleCheckout(request, env) {
 
   /* Amount and job, never a name or an address. This is the line that answers
      "was a link ever issued for this booking, and for how much". */
+  const mode = stripeMode(env);
   console.log("checkout session created: " + jobId + " " + cents + " " +
-              (env.STRIPE_SECRET_KEY.startsWith("sk_test_") ? "TEST" : "LIVE"));
+              mode.toUpperCase());
 
   return json({ ok: true, url: session.url, amount: cents,
-                test_mode: env.STRIPE_SECRET_KEY.startsWith("sk_test_") });
+                test_mode: mode === "test" });
+}
+
+
+/* ============================================================
+   PAYMENT STATE  —  POST /api/stripe-webhook
+   ============================================================
+
+   THE OTHER HALF OF /api/checkout, AND WITHOUT IT THE FIRST HALF LIES.
+
+   Until this existed, nothing anywhere recorded that a card had been
+   authorized. `payment_status` was typed by hand, so a customer who had just
+   paid reloaded their portal and was told "Not yet authorized" — with the
+   Authorize button still sitting there inviting them to do it twice. That was
+   survivable while the key was `sk_test_`. It is not survivable with real
+   money, and it is the reason the live key waited for this.
+
+   WHY STRIPE TELLS US RATHER THAN US ASKING STRIPE. The customer's browser is
+   the one thing we must not believe: it comes back to `/h?pay=done` whether or
+   not a card was ever charged, and anyone can type that URL. Stripe signs
+   these callbacks with a secret only Stripe and this Worker hold, which makes
+   them the only account of what happened to the money that is worth writing to
+   a sheet.
+
+   THE SIGNATURE IS THE WHOLE SECURITY MODEL. This route writes payment state
+   for any job id it is handed. Unverified, it would be a public endpoint for
+   marking anybody's booking paid. So: no signature, no write — and the body is
+   verified as the exact bytes that arrived, before anything parses it.
+
+   WHAT IT DOES NOT DO. It never captures, never refunds, never cancels. Every
+   movement of real money stays a human's deliberate click in the Stripe
+   dashboard; this only writes down what already happened. The one exception is
+   the customer's own cancellation, which voids their hold — see releaseHold,
+   where it is the customer acting on their own card. */
+
+/* Stripe's own default. An event older than this is a replay, not news. The
+   writes below are idempotent and rank-guarded, so this is a second lock on a
+   door that is already bolted — kept because a stale event that somehow named
+   a rebooked job is exactly the kind of thing worth refusing outright. */
+const STRIPE_SIG_TOLERANCE_S = 300;
+
+/* Stripe event -> what it means for a booking. Everything absent from this map
+   is acknowledged and ignored: Stripe sends dozens of event types, an endpoint
+   subscribed to more than it needs is normal, and answering anything but 200
+   to a routine event would have Stripe retrying it for three days. */
+const STRIPE_EVENT_STATES = {
+  /* The customer finished checkout. With capture_method: manual this means a
+     hold is placed and no money has moved. */
+  "checkout.session.completed":              "authorized",
+  /* The hold is confirmed on the card. Belt and braces with the above — either
+     can arrive first, and the rank guard upstream makes that not matter. */
+  "payment_intent.amount_capturable_updated": "authorized",
+  /* Captured. THIS is the event that means money actually moved. */
+  "payment_intent.succeeded":                "paid",
+  /* The hold was voided or lapsed. The card is free and the booking is back to
+     needing authorization, which is a real state and not an error. */
+  "payment_intent.canceled":                 "released",
+  "charge.refunded":                         "refunded",
+};
+
+/**
+ * Verify a `Stripe-Signature` header against the raw body.
+ *
+ * The header looks like `t=1699999999,v1=<hex>,v1=<hex>` — more than one v1 is
+ * normal while a secret is being rotated, and ANY of them matching is a pass.
+ * The signed payload is `<t>.<raw body>`, so this has to run on the exact bytes
+ * that arrived. Parsing first and re-serialising would change them.
+ */
+async function verifyStripeSignature(rawBody, header, secret, nowS) {
+  if (!header || !secret) return false;
+
+  let ts = "";
+  const claimed = [];
+  for (const part of String(header).split(",")) {
+    const eq = part.indexOf("=");
+    if (eq === -1) continue;
+    const k = part.slice(0, eq).trim();
+    const v = part.slice(eq + 1).trim();
+    if (k === "t") ts = v;
+    else if (k === "v1") claimed.push(v);
+  }
+  if (!ts || !claimed.length) return false;
+
+  const age = Math.abs(nowS - Number(ts));
+  if (!isFinite(age) || age > STRIPE_SIG_TOLERANCE_S) return false;
+
+  const expected = await hmac(secret, ts + "." + rawBody);
+  return claimed.some(c => timingSafeEqual(c, expected));
+}
+
+/**
+ * Compare two hex strings without leaking where they diverge.
+ *
+ * A plain `===` returns as soon as it finds a difference, and the time that
+ * takes is measurable across enough requests — which is a way to guess a
+ * signature one character at a time. Both inputs here are fixed-length hex, so
+ * comparing every character and OR-ing the differences costs the same whatever
+ * the answer is.
+ */
+function timingSafeEqual(a, b) {
+  const x = String(a), y = String(b);
+  if (x.length !== y.length) return false;
+  let diff = 0;
+  for (let i = 0; i < x.length; i++) diff |= x.charCodeAt(i) ^ y.charCodeAt(i);
+  return diff === 0;
+}
+
+async function handleStripeWebhook(request, env) {
+  if (request.method !== "POST") {
+    return json({ ok: false, error: "method_not_allowed" }, 405);
+  }
+  /* Not configured is not an outage — it means payment state is still being
+     read off whatever an operator typed, exactly as it was before this route
+     existed. Loud in the log, because the symptom (portals that never notice a
+     payment) looks nothing like the cause. */
+  if (!env.STRIPE_WEBHOOK_SECRET || !env.PAYMENT_BRIDGE_SECRET || !env.WEBHOOK_URL) {
+    console.error("stripe webhook arrived but the route is not configured");
+    return json({ ok: false, error: "not_configured" }, 503);
+  }
+
+  let raw;
+  try {
+    raw = await request.text();
+  } catch (_) {
+    return json({ ok: false, error: "unreadable_body" }, 400);
+  }
+  /* Stripe events are small. A megabyte of anything is not one, and the point
+     of the cap is to refuse it before spending an HMAC on it. */
+  if (!raw || raw.length > 262144) return json({ ok: false, error: "bad_body" }, 400);
+
+  const nowS = Math.floor(Date.now() / 1000);
+  const good = await verifyStripeSignature(
+    raw, request.headers.get("Stripe-Signature"), env.STRIPE_WEBHOOK_SECRET, nowS);
+  if (!good) {
+    /* No detail, in the answer or the log. "Timestamp too old" versus "bad
+       digest" is a free hint to whoever is probing, and neither tells US
+       anything a wrong secret would not. */
+    console.error("stripe webhook signature rejected");
+    return json({ ok: false, error: "bad_signature" }, 400);
+  }
+
+  let event;
+  try {
+    event = JSON.parse(raw);
+  } catch (_) {
+    return json({ ok: false, error: "bad_body" }, 400);
+  }
+
+  const type  = String((event && event.type) || "");
+  const state = STRIPE_EVENT_STATES[type];
+  /* Acknowledged, not an error. See the note on the map above. */
+  if (!state) return json({ ok: true, ignored: type });
+
+  const obj = (event.data && event.data.object) || {};
+  const jobId = String((obj.metadata && obj.metadata.job_id) || obj.client_reference_id || "");
+  if (!jobId) {
+    /* A payment that is genuinely not ours — someone else's test event, or a
+       charge raised from the dashboard by hand — has no job to write to.
+       Answered 200 on purpose: retrying will not grow a job id. */
+    console.log("stripe event carries no job_id, ignored: " + type);
+    return json({ ok: true, ignored: "no_job_id" });
+  }
+
+  /* The PaymentIntent id is the handle that ties a sheet row to the Stripe
+     dashboard, and it is what the cancellation path later voids. A charge
+     names its intent in a different field than a session does. */
+  const ref = String(
+    obj.object === "checkout.session" ? (obj.payment_intent || "")
+      : obj.object === "charge"       ? (obj.payment_intent || "")
+      : (obj.id || ""));
+
+  /* A checkout session under automatic capture would already be money taken.
+     Serve always sets manual capture, so this should never fire — it is here
+     so that if that ever changes, the customer is not told a hold was placed
+     when they have actually been charged. */
+  const settled = (obj.object === "checkout.session" && obj.payment_status === "paid")
+    ? "paid" : state;
+
+  const cents = Number(obj.amount_total || obj.amount_captured ||
+                       obj.amount_capturable || obj.amount || 0) || 0;
+
+  const wrote = await recordPayment(env, {
+    job_id: jobId, state: settled, payment_ref: ref, amount_cents: cents,
+  });
+
+  if (!wrote.ok) {
+    /* THE 500 IS LOAD-BEARING. Stripe retries a failed webhook with backoff
+       for up to three days, which is a more durable queue than anything worth
+       building here. Answering 200 on a failed write would drop the payment
+       state permanently and silently, and the customer would be the one to
+       notice. */
+    console.error("payment write-back failed, asking Stripe to retry: " +
+                  jobId + " " + settled + " — " + wrote.error);
+    return json({ ok: false, error: "write_failed" }, 500);
+  }
+
+  /* Job, state and amount. Never a name, an address or a card. */
+  console.log("payment recorded: " + jobId + " " + settled + " " + cents +
+              " " + (wrote.applied === false ? "(no change)" : ""));
+  return json({ ok: true, job_id: jobId, state: settled });
+}
+
+/**
+ * Write one payment state onto the JOBS row, through Apps Script.
+ *
+ * The Worker cannot touch the sheet directly and should not learn how: Apps
+ * Script owns every write, which is what keeps "who may change this column" a
+ * question with one answer. PAYMENT_BRIDGE_SECRET is the same shape of shared
+ * secret as PHOTO_BRIDGE_SECRET and exists for the same reason — the /exec URL
+ * is public, so the upstream must be able to tell this Worker from anyone else
+ * who has found it.
+ */
+async function recordPayment(env, fields) {
+  const up = await relay(env.WEBHOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify(Object.assign({
+      event_type: "payment_event",
+      bridge_token: env.PAYMENT_BRIDGE_SECRET,
+    }, fields)),
+  }, UPSTREAM_TIMEOUT_MS.page);
+
+  if (!up.ok) return { ok: false, error: up.error };
+  try {
+    const out = JSON.parse(up.text);
+    if (!out || out.ok !== true) return { ok: false, error: (out && out.error) || "refused" };
+    return { ok: true, applied: out.applied };
+  } catch (_) {
+    return { ok: false, error: "unreadable" };
+  }
+}
+
+/**
+ * Void the hold on a cancelled booking.
+ *
+ * WHY THIS IS NOT "SERVE MOVING MONEY". Everywhere else, a human decides. Here
+ * the customer has just called the visit off themselves, and the only question
+ * is whether their card stays encumbered for a week afterwards for a cleaning
+ * nobody is coming to do. Leaving it is not the cautious choice — it is the one
+ * that reads as being charged for a service they cancelled.
+ *
+ * Cancelling a PaymentIntent releases the hold and can never take money, so the
+ * worst failure here is a hold that lingers exactly as long as it used to. That
+ * is why the cancellation itself never waits on this and never fails with it.
+ */
+async function releaseHold(env, paymentRef) {
+  if (!env.STRIPE_SECRET_KEY || !/^pi_/.test(String(paymentRef || ""))) return;
+  try {
+    const res = await fetch(
+      "https://api.stripe.com/v1/payment_intents/" +
+        encodeURIComponent(paymentRef) + "/cancel",
+      {
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer " + env.STRIPE_SECRET_KEY,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: "cancellation_reason=requested_by_customer",
+      });
+    if (!res.ok) {
+      /* Already captured, already cancelled, or gone. None of these is worth
+         failing a cancellation the customer has already been told succeeded —
+         and the cancellation email still tells a human to look. */
+      console.error("hold release refused: " + paymentRef.slice(0, 12) +
+                    " HTTP " + res.status);
+      return;
+    }
+    console.log("hold released on cancellation: " + paymentRef.slice(0, 12));
+  } catch (err) {
+    console.error("hold release unreachable: " + String(err));
+  }
 }
 
 

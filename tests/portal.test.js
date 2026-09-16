@@ -39,7 +39,9 @@ const JOBS_HEADERS = ['job_id','lead_id','source','property_key','service_type',
   'completed_date','cleaner','start_time','duration_min','photos_passed','payment_status',
   'job_status','notes','submission_id','received_at','name','email','phone','segment','src_chain',
   'customer_notes','pets_flag','scheduling_type','address','unit','zip','quote_meta',
-  'property_id','contact_id','partner_payout','vendor_id','operator_id'];
+  'property_id','contact_id','partner_payout','vendor_id','operator_id',
+  /* r50. The Stripe PaymentIntent behind whatever payment_status says. */
+  'payment_ref'];
 
 const LEADS_HEADERS = ['lead_id','name','email','phone','service_address','unit','zip','source',
   'source_detail','contacted_via','source_history','status','first_variant','dnc_scrub',
@@ -2227,6 +2229,140 @@ head('25. r45 — a plan after a move');
   t('r38 still never OFFERS a move a plan at booking',
     MB.createRecurringPlan(M.ss, { frequency_selected: 'weekly', service_type: 'move_out' },
       { job_id: 'SRV-X', lead_id: 'x' }, {}) === 'not a first clean');
+}
+
+/* ------------------------------------------------------------------ */
+head('r50. Three payment states, because two of them tell a customer a lie');
+
+/* THE BUG THIS SECTION EXISTS FOR. Until payment state was written back, the
+   column said "paid" or it said nothing, so a card that was AUTHORIZED — held,
+   with no money moved — had to be recorded as one or the other. Recording it
+   as paid tells somebody they were charged when they were not. Recording it as
+   nothing leaves the Authorize button in front of a customer who has already
+   authorized, inviting a second hold on the same card.
+
+   Both customer surfaces have to be able to tell the three apart, so both are
+   checked here rather than trusting that they share a code path. */
+{
+  seedLead('pay@example.com', 'Pay Tester', 'CON-PAY');
+  const TOK = S.portalToken('CON-PAY');
+
+  seedJob('SRV-20260925-UNPAID', 'pay@example.com', 'PROP-PAY');
+  seedJob('SRV-20260926-HELD',   'pay@example.com', 'PROP-PAY',
+          { payment_status: 'authorized', payment_ref: 'pi_held' });
+  seedJob('SRV-20260927-PAID',   'pay@example.com', 'PROP-PAY',
+          { payment_status: 'paid', payment_ref: 'pi_taken' });
+  seedJob('SRV-20260928-FREED',  'pay@example.com', 'PROP-PAY',
+          { payment_status: 'released', payment_ref: 'pi_gone' });
+
+  const PP = get({ portal: 'CON-PAY', t: TOK });
+  const row = id => (PP.bookings || []).find(b => b.bookingId === id) || {};
+
+  t('the portal opens', PP.ok === true, PP.error);
+
+  const unpaid = row('SRV-20260925-UNPAID');
+  t('an unauthorized booking is neither paid nor authorized',
+    unpaid.paid === false && unpaid.authorized === false, unpaid);
+
+  const held = row('SRV-20260926-HELD');
+  t('a HELD booking reports authorized', held.authorized === true, held.authorized);
+  t('and is NOT reported as paid — no money has moved',
+    held.paid === false, held.paid);
+
+  const paid = row('SRV-20260927-PAID');
+  t('a captured booking reports paid', paid.paid === true, paid.paid);
+  t('and is not still reported as merely authorized',
+    paid.authorized === false, paid.authorized);
+
+  /* A voided hold is worth exactly what a blank cell is worth: the customer
+     can and should authorize again. */
+  const freed = row('SRV-20260928-FREED');
+  t('a RELEASED hold is back to neither', freed.paid === false && freed.authorized === false, freed);
+
+  t('all four are booleans, never the sheet wording',
+    [unpaid, held, paid, freed].every(b =>
+      typeof b.paid === 'boolean' && typeof b.authorized === 'boolean'), true);
+
+  /* THE INTERNAL HANDLE MUST NOT TRAVEL. View models are whitelists built up
+     field by field; payment_ref is used by the cancellation path and by
+     nothing a browser ever sees. */
+  const portalJson = JSON.stringify(PP);
+  t('no PaymentIntent id reaches the portal',
+    !portalJson.includes('pi_held') && !portalJson.includes('pi_taken') &&
+    !portalJson.includes('pi_gone'), true);
+  t('and no bare payment_ref field exists on any booking',
+    (PP.bookings || []).every(b => b.payment_ref === undefined &&
+                                   b.paymentRef === undefined), true);
+
+  /* ---- the same three states on the client ticket ---- */
+  const ticket = id => get({ job: id, t: S.ticketToken(id, 'client'), view: 'client' });
+
+  const tHeld = ticket('SRV-20260926-HELD');
+  t('the client ticket also separates a hold from a charge',
+    tHeld.booking.authorized === true && tHeld.booking.paid === false, tHeld.booking);
+  t('and says so in words a customer reads',
+    /authorized/i.test(tHeld.booking.paymentNote || '') &&
+    !/^Paid$/i.test(tHeld.booking.paymentNote || ''), tHeld.booking.paymentNote);
+
+  const tPaid = ticket('SRV-20260927-PAID');
+  t('a captured ticket reads Paid', tPaid.booking.paid === true &&
+    /paid/i.test(tPaid.booking.paymentNote || ''), tPaid.booking.paymentNote);
+
+  const tUnpaid = ticket('SRV-20260925-UNPAID');
+  t('an unauthorized ticket asks for authorization',
+    tUnpaid.booking.paid === false && tUnpaid.booking.authorized === false &&
+    /authorize/i.test(tUnpaid.booking.paymentNote || ''), tUnpaid.booking.paymentNote);
+
+  /* "Due at service" stopped being true the moment a card is authorized at
+     booking. A test kept it from coming back; r50 keeps that going. */
+  t('no surface has gone back to "Due at service"',
+    !/due at service/i.test(JSON.stringify(tHeld) + JSON.stringify(tPaid) +
+                            JSON.stringify(tUnpaid) + portalJson), true);
+
+  t('and the ticket leaks no PaymentIntent either',
+    !JSON.stringify(tHeld).includes('pi_held'), true);
+}
+
+/* ------------------------------------------------------------------ */
+head('r50. Cancelling names an untaken hold — and never a captured payment');
+
+/* The Worker voids whatever this reply names, so what gets named IS the
+   decision about whose money moves. An authorization is Serve letting go of a
+   claim on money it never took. A capture is money that really left somebody's
+   account, and handing it back is a refund — the founder's decision, not a
+   side effect of a customer clicking Cancel. */
+{
+  const cancelOf = (id, cid, tok) =>
+    write({ kind: 'cancel', job_id: id }, tok, cid);
+
+  seedLead('cx@example.com', 'Cancel Tester', 'CON-CX');
+  const CXT = S.portalToken('CON-CX');
+
+  seedJob('SRV-20261101-HELD', 'cx@example.com', 'PROP-CX',
+          { payment_status: 'authorized', payment_ref: 'pi_outstanding' });
+  seedJob('SRV-20261102-PAID', 'cx@example.com', 'PROP-CX',
+          { payment_status: 'paid', payment_ref: 'pi_captured' });
+  seedJob('SRV-20261103-NONE', 'cx@example.com', 'PROP-CX');
+
+  const heldOut = cancelOf('SRV-20261101-HELD', 'CON-CX', CXT);
+  t('cancelling a held booking succeeds', heldOut.ok === true, heldOut);
+  t('and NAMES the outstanding hold for the Worker to void',
+    heldOut.payment_ref === 'pi_outstanding', heldOut.payment_ref);
+
+  const paidOut = cancelOf('SRV-20261102-PAID', 'CON-CX', CXT);
+  t('cancelling a PAID booking still succeeds', paidOut.ok === true, paidOut);
+  t('but names NO hold — money already taken is a human\'s decision',
+    paidOut.payment_ref === undefined, paidOut.payment_ref);
+
+  const noneOut = cancelOf('SRV-20261103-NONE', 'CON-CX', CXT);
+  t('cancelling an unauthorized booking names nothing',
+    noneOut.ok === true && noneOut.payment_ref === undefined, noneOut);
+
+  /* All three are really cancelled — naming a hold is not what cancels a
+     visit, and a failure to release must never look like a failure to cancel. */
+  t('all three visits are cancelled regardless',
+    ['SRV-20261101-HELD', 'SRV-20261102-PAID', 'SRV-20261103-NONE']
+      .every(id => jobCell(id, 'job_status') === 'cancelled'), true);
 }
 
 console.log('\n' + (bad ? bad + ' FAILURES' : 'ALL ASSERTIONS PASSED'));
