@@ -15,38 +15,61 @@ except where a later section supersedes them.
 
 ## Current work — 2026-09-17, Claude Code: the live Stripe key — what it needs, and the guard that makes the swap safe
 
+> ## ⚠️ SERVE IS ON A LIVE STRIPE KEY AS OF 2026-09-17. REAL CARDS.
+>
+> **Verified from production, probed twice:** `/api/health` answers
+> **`stripe_mode: "LIVE"`** beside `can_charge: true` and
+> `can_record_payments: true`. The founder created a **restricted** live key
+> (`rk_live_`, scoped to Checkout Sessions: Write and PaymentIntents: Write and
+> nothing else) and a **live-mode webhook destination**, and set both Cloudflare
+> secrets. `PAYMENT_BRIDGE_SECRET` was correctly left alone.
+>
+> **The key deliberately CANNOT capture.** Taking money still requires the
+> founder's click in the Stripe dashboard. A leaked key could place and release
+> holds; it could not charge anyone or issue a refund.
+>
+> **STILL UNPROVEN, AND IT IS NOW THE FIRST THING THAT MATTERS:** no real card
+> has ever gone through this path — see step 5 of the runbook. The capture path
+> was unproven even on the test key. **Any test booking made from now on is a
+> real charge on a real card.** The `4242…` test card no longer works, and a
+> leftover test-mode webhook destination pointed at this URL will now be refused
+> with `test_event_on_live_key` — that is the guard below working, not a fault.
+
 **NO CODE CHANGE WAS NEEDED TO GO LIVE, AND THAT IS THE HEADLINE.** The founder
 asked to put in "a real Stripe link for real payments, no more test link". The
-payment path is already built, deployed and working end to end; production
-answers `can_charge: true`, `can_record_payments: true`, `stripe_mode: "test"`.
-**Going live is two secret swaps in the founder's hands, not a rewrite.** The
-runbook is below and it is the operative part of this entry.
+payment path was already built, deployed and working end to end; production
+answered `can_charge: true`, `can_record_payments: true`, `stripe_mode: "test"`.
+**Going live was two secret swaps in the founder's hands, not a rewrite** — both
+now done. The runbook below is kept as the record of what was actually set.
 
 Files touched: `src/worker.js`, `tests/stripe-payments.test.js`, this entry.
 No Apps Script change — **webhook.gs is untouched by this work, so the r56 paste
 below is still the outstanding one and this adds nothing to it.**
 
-### THE RUNBOOK — the founder's steps, in this order
+### THE RUNBOOK — steps 1-4 DONE 2026-09-17, step 5 OUTSTANDING
 
-1. **Activate the Stripe account for live payments** (business details, bank
+1. ✅ **Activate the Stripe account for live payments** (business details, bank
    account). Live mode does not exist until Stripe says it does.
-2. **Create the LIVE webhook endpoint** — dashboard in **Live mode**, not test.
+2. ✅ **Create the LIVE webhook endpoint** — dashboard in **Live mode**, not test.
    URL `https://servecleaning.com/api/stripe-webhook`. Subscribe exactly these
    five, which are `STRIPE_EVENT_STATES` in `src/worker.js`:
    `checkout.session.completed`, `payment_intent.amount_capturable_updated`,
    `payment_intent.succeeded`, `payment_intent.canceled`, `charge.refunded`.
    Copy its signing secret (`whsec_…`) — **it is a DIFFERENT secret from the
    test endpoint's.**
-3. **Create the LIVE API key.** A restricted key (`rk_live_…`) is better than
+3. ✅ **Create the LIVE API key.** A restricted key (`rk_live_…`) is better than
    `sk_live_…`: it can be scoped to Checkout Sessions (write) and
-   PaymentIntents (read + cancel), which is everything this Worker does.
-4. **Set both secrets, then verify:**
+   PaymentIntents (read + cancel), which is everything this Worker does —
+   verified by grepping `api.stripe.com` in `src/worker.js`, which has exactly
+   two call sites. **Capture is deliberately NOT among them.**
+4. ✅ **Set both secrets, then verify:**
    `npx wrangler secret put STRIPE_SECRET_KEY`
    `npx wrangler secret put STRIPE_WEBHOOK_SECRET`
    `curl -s https://servecleaning.com/api/health` → **`stripe_mode: "LIVE"`**
    beside `can_record_payments: true`. **Leave `PAYMENT_BRIDGE_SECRET alone` —
    it is ours, not Stripe's, and has no modes.**
-5. **Prove it with one real booking on a real card**, then **refund it**. Watch
+5. ⬜ **OUTSTANDING — prove it with one real booking on a real card**, then
+   **refund it**. Watch
    for an **UNCAPTURED** payment in the dashboard (a hold, not a charge), the
    portal line flipping to "Card authorized" — **the line, never the `?pay=done`
    banner** — then capture by hand and watch it reach `paid`.
