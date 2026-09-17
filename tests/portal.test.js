@@ -826,7 +826,7 @@ if (otherUp) {
   t('this contact has exactly one upcoming booking', true, 'null case covered below');
 }
 
-/* A finished booking is a receipt. "Coordinating with our vendor network" over
+/* A finished booking is a receipt. "Coordinating with our provider network" over
    a job that already happened would be nonsense, not merely useless. */
 const donerow = (P18.bookings || []).filter(b => b.completed)[0];
 if (donerow) {
@@ -1006,7 +1006,7 @@ t('and does NOT repeat the "consumed no availability row" line',
   !/consumed no/.test(promised));
 t('it still names the fix', /vendor_id/.test(promised) && /printVendorLinks/.test(promised));
 t('and tells the operator what the customer is seeing meanwhile',
-  /Coordinating with our vendor network/.test(promised));
+  /Coordinating with our provider network/.test(promised));
 t('still no vendor link, because there is no vendor',
   promised.indexOf('/v?id=') === -1);
 

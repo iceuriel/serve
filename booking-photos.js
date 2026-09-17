@@ -107,7 +107,7 @@
     /* Two kinds of room photo. A customer's (the default) shows the cleaner what
        they mean: up to 3, removable. A cleaner's (purpose: 'completion') shows
        the finished room: one Add photos button, several at a time, and no
-       remove — what was uploaded stays with Serve and the vendor company. */
+       remove — what was uploaded stays with Serve and the provider company. */
     function mount(opts) {
         var completion = opts.purpose === 'completion';
         var wrap = node('div', 'room-photos');

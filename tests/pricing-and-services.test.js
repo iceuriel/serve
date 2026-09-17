@@ -530,11 +530,11 @@ t('and it is the small one', /tk-seek__stage--sm/.test(confirmBlock));
 
 /* The line the customer reads after booking now names what Serve is doing. */
 t('the confirmation says Serve is coordinating',
-  /Serve is coordinating with the vendor network/.test(INDEX));
+  /Serve is coordinating with our provider network/.test(INDEX));
 const SCRIPT = fs.readFileSync(path.join(REPO_ROOT, 'script.js'), 'utf8');
 t('and so does the slot-booked variant script.js writes',
-  (SCRIPT.match(/Serve is coordinating with the vendor network/g) || []).length === 2,
-  (SCRIPT.match(/Serve is coordinating with the vendor network/g) || []).length);
+  (SCRIPT.match(/Serve is coordinating with our provider network/g) || []).length === 2,
+  (SCRIPT.match(/Serve is coordinating with our provider network/g) || []).length);
 
 /* ---------- 7c. After you book matches the network model --------------- */
 console.log('\n=== 7c. After you book: the company, never the person ===');
@@ -566,10 +566,10 @@ t('still six bubbles, so the grid stays two clean rows',
   (after.match(/svmA-bubble/g) || []).length === 6,
   (after.match(/svmA-bubble/g) || []).length);
 
-/* The vendor relationship is the product now, and this section is where it is
+/* The provider relationship is the product now, and this section is where it is
    spelled out for someone deciding whether to book. */
-t('the network is described as vendors Serve coordinates',
-  /network of trusted Boston vendors/.test(after));
+t('the network is described as providers Serve coordinates',
+  /network of trusted Boston providers/.test(after));
 
 /* ---------- 8. teasers are placed where they were asked for ---------- */
 console.log('\n=== 8. teaser placement ===');

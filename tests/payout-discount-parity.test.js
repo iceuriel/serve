@@ -415,5 +415,68 @@ console.log('\n=== 6. the pages promise what the engine charges ===');
     !new RegExp(FAQ_TAIL + '[^"<]*\\$50').test(PRICING_HTML));
 }
 
+/* ------------------------------------------------------------
+   7. THE WORD CUSTOMERS AND PARTNERS READ IS "PROVIDER", NEVER "VENDOR".
+
+   A marketing decision, 2026-09-16: "vendor" is a procurement word and reads
+   as a supplier of goods. Every surface a browser downloads says "provider".
+
+   THE IDENTIFIERS DELIBERATELY DID NOT CHANGE, and that separation is the
+   whole point of this section. `vendor_id`, the `VENDORS` and
+   VENDOR_SERVICES tabs, the `/v` route, the `|vendor` HMAC token audience and
+   the `view: "vendor"` response discriminator are all load-bearing:
+
+     - renaming a column breaks the SCHEMA contract and the live sheets
+     - renaming the token audience invalidates every signed link already sent
+     - renaming `/v` breaks every provider link already in a partner's inbox
+     - renaming `view` breaks the portal, since vendor.js matches on it
+
+   So this asserts the COPY changed and the PROTOCOL did not. Getting that
+   backwards is how a rename takes a portal offline.
+   ------------------------------------------------------------ */
+console.log('\n=== 7. "provider" in the copy, "vendor" in the wiring ===');
+{
+  const read2 = (f) => fs.readFileSync(path.join(REPO_ROOT, f), 'utf8');
+  const SHIPPED = ['index.html', 'services.html', 'pricing.html', 'v.html',
+                   'h.html', 'j.html', 'script.js', 'vendor.js', 'portal.js',
+                   'ticket.js', 'partner-card.js', 'booking-photos.js', 'style.css'];
+
+  /* Everything a browser downloads, comments included — they are served too,
+     which this suite learned the hard way on the retired discount above.
+     Identifier and protocol mentions are the only allowed survivors. */
+  const ALLOWED = /\/api\/vendor|vendor\.js|VENDOR_EDITABLE|buildVendorTicketModel|'vendor'|"vendor"|vendor_write|vendor_id|vendorId|VENDORS|vendor portal load failed/;
+  for (const f of SHIPPED) {
+    let src;
+    try { src = read2(f); } catch (_) { continue; }
+    const offending = src.split('\n')
+      .map((line, i) => ({ line, n: i + 1 }))
+      .filter(o => /vendor/i.test(o.line) && !ALLOWED.test(o.line));
+    t(f + ' says "provider", not "vendor", in everything it ships',
+      offending.length === 0, offending.slice(0, 3));
+  }
+
+  /* The copy actually reads "provider" — an empty result above would also be
+     satisfied by deleting the sentences outright. */
+  const IDX = read2('index.html'), SJS = read2('script.js'), PC = read2('partner-card.js');
+  t('the confirmation names the provider network',
+    /Serve is coordinating with our provider network/.test(IDX) &&
+    (SJS.match(/Serve is coordinating with our provider network/g) || []).length === 2);
+  t('the seeking card names it too',
+    /Coordinating with our provider network/.test(PC));
+  t('and so do all three social/meta descriptions',
+    (IDX.match(/trusted local Boston providers/g) || []).length === 3,
+    (IDX.match(/trusted local Boston providers/g) || []).length);
+
+  /* THE WIRING IS UNTOUCHED. These are not cosmetic. */
+  const WH = fs.readFileSync(path.join(REPO_ROOT, 'apps-script', 'webhook.gs'), 'utf8');
+  t('the HMAC token audience is still "vendor" — renaming it invalidates every '
+    + 'signed provider link already sent', /\|vendor/.test(WH));
+  t('the response discriminator is still view: "vendor" on both sides',
+    /view:\s*"vendor"/.test(WH) && /view\s*!==\s*'vendor'/.test(read2('vendor.js')));
+  t('the /v route is unchanged, so links in partner inboxes still open',
+    /\/api\/vendor/.test(read2('v.html')));
+  t('and the sheet columns are unchanged', /"vendor_id"/.test(WH));
+}
+
 console.log('\n' + (bad ? bad + ' FAILED' : 'all passed'));
 process.exit(bad ? 1 : 0);

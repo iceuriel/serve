@@ -1,5 +1,5 @@
 /* ============================================================
-   SERVE — VENDOR PORTAL
+   SERVE — PROVIDER PORTAL
    Vanilla JS, no dependencies, same as the rest of the site.
 
    Two tabs: the jobs assigned to this company, and the company profile that
@@ -85,10 +85,15 @@
                 true);
             return;
         }
-        /* view === vendor, not merely ok. An older deployment has no vendor
-           route, so doGet falls through to the health check, which answers
-           ok:true — and this page would render that as an empty company
-           rather than saying anything was wrong. */
+        /* d.view === 'vendor', not merely ok. That string is the SERVER'S
+           response discriminator and is deliberately not renamed with the
+           customer-facing copy — see section 7 of
+           tests/payout-discount-parity.test.js.
+
+           An older deployment has no provider route at all, so doGet falls
+           through to the health check, which answers ok:true — and this page
+           would render that as an empty company rather than saying anything
+           was wrong. */
         if (d.ok !== true || d.view !== 'vendor') {
             fail('We could not open that link. It may be mistyped, or it ' +
                  'may have been replaced.');
@@ -382,7 +387,7 @@
             payload: function (v) { return { kind: 'profile', field: 'capabilities', value: v }; },
         }));
 
-        /* SERVICES — Serve's three codes, not free text. A vendor cannot offer
+        /* SERVICES — Serve's three codes, not free text. A provider cannot offer
            something the calculator has no price for. */
         bodyEl.appendChild(el('h2', 'portal__h', 'Services you offer'));
         (model.services || []).forEach(function (s) { bodyEl.appendChild(serviceRow(s)); });

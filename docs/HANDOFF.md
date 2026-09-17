@@ -126,22 +126,25 @@ put into the partner payout copy. **All 34 test files pass.**
 
 ### Remaining work / next action
 
-1. **PASTE APPS SCRIPT r53.** This is the one outstanding action. The site is
-   already live with the new pricing (`b83684c`, Workers Builds **completed
-   success**), so until the paste happens:
-   - a half-price first clean stamps `payout_rate` **0.85, not 0.98** — and the
-     stamp is permanent by design, so any first clean booked in this window
-     carries the wrong share and needs `partner_payout` set by hand;
-   - the confirmation-screen fix is not in effect.
+1. ~~PASTE APPS SCRIPT r53.~~ **Done — founder-reported 2026-09-16**, not
+   independently verified (no route exposes the upstream version).
 
-   Neither is an outage. Verify the paste by probing `/exec`, which answers
-   `"2026-09-16 r53"`. **Probe more than once** — Google intermittently serves
-   an HTML "unable to open the file" page and a single probe can lie.
+   **One thing to check because of the gap before that paste:** the site went
+   live with the new pricing at `b83684c` while the deployed script was still
+   r52's predecessor, so any first clean booked in that window stamped
+   `payout_rate` **0.85 instead of 0.98** — and the stamp is permanent by
+   design. Those rows need `partner_payout` set by hand. If no real booking
+   landed in that window, there is nothing to fix.
 
-   **r52 and r53 were both created this session** (webhook.gs was at r51 on
-   arrival). The stamp and the string `doGet` returns are asserted to agree by
-   three separate tests, so they cannot drift apart — but nothing asserts that
-   a revision was bumped *at all*, which was missed once here and caught by the
+   **r52, r53 and r54 were all created this session** (webhook.gs was at r51 on
+   arrival). **r54 is copy-only and its paste is OPTIONAL** — see its section
+   above. Verify any paste by probing `/exec`; **probe more than once**, since
+   Google intermittently serves an HTML "unable to open the file" page and a
+   single probe can lie.
+
+   The stamp and the string `doGet` returns are asserted to agree by three
+   separate tests, so they cannot drift apart — but nothing asserts that a
+   revision was bumped *at all*, which was missed once here and caught by the
    founder, not by the suite.
 2. **Confirm the confirmation-screen diagnosis** in Apps Script → Executions —
    the fix shipped in r53 without that evidence, so it is worth a look.
@@ -216,7 +219,49 @@ Both were run.
 
 ---
 
+## r54 — 2026-09-16: "provider", not "vendor", in anything a human reads
+
+Founder's call, a marketing one: *"vendor"* is a procurement word and reads as
+a supplier of goods. **Every surface a browser downloads now says "provider".**
+
+Changed: the three social/meta descriptions and the "after you book" section on
+`/`, the post-booking confirmation line (in `index.html` **and** the two
+runtime variants in `script.js`), the seeking card in `partner-card.js`, the
+provider-portal banner in `vendor.js` and its CSS section, and — since they are
+served verbatim — **the prose in comments too**. Plus the ops email's own
+labels, which only the founder reads.
+
+`v.html`'s title was already `Serve Partners`, and the customer SMS and booking
+email never used the word.
+
+> ### THE IDENTIFIERS DID NOT CHANGE, AND THAT IS THE POINT
+>
+> | stays | why |
+> |---|---|
+> | `vendor_id`, `VENDORS`, `VENDOR_SERVICES` | the SCHEMA contract and the live sheets |
+> | the `\|vendor` HMAC token audience | renaming invalidates **every signed provider link already sent** |
+> | `view: "vendor"` | `vendor.js` matches on it — a rename blanks the portal |
+> | the `/v` route and `/api/vendor` | every link already in a partner's inbox |
+> | `VENDOR_EDITABLE`, `buildVendorTicketModel`, `vendor_write` | ordinary code names |
+>
+> **Section 7 of `payout-discount-parity.test.js` asserts the copy changed AND
+> the wiring did not**, per file, comments included. Three mutations were run
+> and all three went red: reverting the copy, renaming the token audience, and
+> renaming the `view` discriminator. Getting that direction backwards is how a
+> rename takes a portal offline.
+
+**r54 is COPY ONLY in webhook.gs and the paste is optional** — skipping it costs
+the word "Vendor" in the founder's own ops emails and nothing else. r53's fix is
+unaffected either way.
+
+---
+
 ## Fixed in r53 — 2026-09-16: the confirmation screen said "couldn't confirm" on a booking that fully succeeded
+
+**PASTED — founder-reported 2026-09-16, not independently verified.** No Worker
+route exposes the upstream version, so this could not be probed from the repo;
+`/api/health` reports the Worker's own state, not Apps Script's. To confirm it
+directly, open the `/exec` URL and check it answers `r53` or later.
 
 **FIXED IN CODE, NOT YET PROVEN IN PRODUCTION.** Same test booking. The
 customer saw the yellow failure panel; the row was written, the SMS and the

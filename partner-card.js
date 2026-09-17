@@ -106,7 +106,7 @@
     function card(v) {
         var wrap = el('div', 'tk-partner');
 
-        /* The logo is a file an operator placed in images/ — a vendor cannot
+        /* The logo is a file an operator placed in images/ — a provider cannot
            write to the repo, and logo_url is not in VENDOR_EDITABLE, so this
            URL is one of ours. alt is the company name, so a broken image still
            says who is coming. */
@@ -183,7 +183,7 @@
         }
 
         wrap.appendChild(stage);
-        wrap.appendChild(el('div', 'tk-seek__title', 'Coordinating with our vendor network'));
+        wrap.appendChild(el('div', 'tk-seek__title', 'Coordinating with our provider network'));
         wrap.appendChild(el('p', 'tk-seek__msg',
             'We’re negotiating with trusted local partners to find the best fit ' +
             'for your home. Their details will appear here before your visit.'));

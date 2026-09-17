@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-    VENDOR PORTAL — one partner company: their jobs and their company profile.
+    PROVIDER PORTAL — one partner company: their jobs and their company profile.
 
         /v?id=VEN-0001&t=<token>
 
@@ -8,14 +8,14 @@
     ticket, a customer portal and this are four separate keys — none opens
     another.
 
-    WHAT A VENDOR MAY EDIT IS DECIDED ON THE SERVER, not here. The response
+    WHAT A PROVIDER MAY EDIT IS DECIDED ON THE SERVER, not here. The response
     carries an editableFields list so the page can render Serve-controlled
     facts as text rather than inputs, but that is a courtesy to the layout: the
     write path has its own whitelist and does not trust anything this page
     sends.
 
     NO CUSTOMER NAMES, EMAILS OR PHONE NUMBERS reach this page, and no retail
-    price — a vendor sees their payout. Contact routes through Serve.
+    price — a provider sees their payout. Contact routes through Serve.
 
     NOINDEX in the markup and as X-Robots-Tag on /v in _headers, plus
     Referrer-Policy: no-referrer, because the token is in the URL.

@@ -213,7 +213,7 @@ head('E. No partner yet — the coordinating state');
 const seek = SP.seeking();
 const seekText = allText(seek);
 
-/Coordinating with our vendor network/.test(seekText)
+/Coordinating with our provider network/.test(seekText)
   ? ok('it says what Serve is doing')
   : fail('missing the headline: ' + seekText.slice(0, 90));
 /negotiating with trusted local partners/.test(seekText)

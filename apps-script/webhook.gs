@@ -1,7 +1,40 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-16  ·  master  ·  r53 — the retry no longer queues behind itself
+ * VERSION STAMP:  2026-09-16  ·  master  ·  r54 — "provider", not "vendor", in anything a human reads
+ *
+ * r54 = COPY ONLY. NO BEHAVIOUR CHANGES, AND A PASTE IS OPTIONAL.
+ *
+ *      "vendor" is a procurement word. Everything a customer or a partner
+ *      reads now says "provider". In THIS file that is three things, none of
+ *      them load-bearing:
+ *
+ *        - the customer-facing string quoted in the ops email and in two
+ *          comments, "Coordinating with our provider network" — the string
+ *          itself lives in partner-card.js and is rendered there, not here
+ *        - the ops email's own labels, "Provider portal for …" / "Provider
+ *          portal: nobody assigned …", which only the founder reads
+ *        - one comment above the portal-write route
+ *
+ *      NOT RENAMED, AND DELIBERATELY SO. Every identifier stays exactly as it
+ *      was, because each one is load-bearing:
+ *
+ *        vendor_id, VENDORS, VENDOR_SERVICES   the SCHEMA contract and the
+ *                                              live sheets
+ *        the "|vendor" token audience          renaming invalidates every
+ *                                              signed provider link already
+ *                                              sent
+ *        view: "vendor"                        vendor.js matches on it; a
+ *                                              rename blanks the portal
+ *        the /v route                          every link already in a
+ *                                              partner's inbox
+ *
+ *      Section 7 of tests/payout-discount-parity.test.js asserts the copy
+ *      changed AND the wiring did not, in both directions. Getting that
+ *      backwards is how a rename takes a portal offline.
+ *
+ *      Skipping this paste costs you the word "Vendor" in your own ops emails
+ *      and nothing else. r53's fix is unaffected.
  *
  * r53 = WHY A BOOKING THAT FULLY SUCCEEDED SAID "WE COULDN'T CONFIRM".
  *
@@ -475,7 +508,7 @@
  *
  *      Almost all of this already worked. The feed reads date/time/status and
  *      never looked at the vendor, the claim tolerated a blank one, and the
- *      customer's "Coordinating with our vendor network" state is the same one
+ *      customer's "Coordinating with our provider network" state is the same one
  *      every preference booking has always had. Two things were wrong:
  *
  *      RANK. An empty row scored ORDINARY, tying with a genuinely available
@@ -1379,7 +1412,7 @@ function routePost(e, parsed) {
       return handlePortalWrite(ss, data);
     }
 
-    /* Vendor portal writes. Authorised by a vendor token, and every field
+    /* Provider portal writes. Authorised by a provider token, and every field
        checked against a whitelist — a partner may describe themselves, not
        promote themselves. */
     if (eventType === "vendor_write") return handleVendorWrite(data);
@@ -1699,7 +1732,7 @@ function routeGet(e) {
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-16 r53" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-16 r54" });
 }
 
 
@@ -7125,7 +7158,7 @@ function ensurePropertyMemoryRow(ss, propertyId) {
    It exists so a time can be offered, and guaranteed, before anybody is booked
    to work it: the customer picks the slot, the booking is held, and the search
    for a partner starts from a time the customer has already chosen rather than
-   from a blank diary. Their ticket shows "Coordinating with our vendor network"
+   from a blank diary. Their ticket shows "Coordinating with our provider network"
    the whole time, which is the same state every preference booking has always
    had — nothing new to build on the customer's side.
 
@@ -8087,17 +8120,17 @@ function ticketBlock(jobId, contactId, vendorId, slotAction) {
        false, and would hide the one case that actually needs them today. */
     var vendor;
     if (isSet(vendorId)) {
-      vendor = "Vendor portal for " + vendorId + " (permanent):\n" + vendorUrl(vendorId) + "\n";
+      vendor = "Provider portal for " + vendorId + " (permanent):\n" + vendorUrl(vendorId) + "\n";
     } else if (String(slotAction) === "booked") {
       vendor = "*** NO VENDOR YET, AND THE TIME IS PROMISED ***\n" +
                "This booking took an UNASSIGNED availability row. The slot is\n" +
                "held and the customer has been given that time — find a partner\n" +
                "for it, put them in vendor_id on the JOBS row, then run\n" +
                "printVendorLinks() in the editor for their link.\n" +
-               "Their ticket reads \"Coordinating with our vendor network\"\n" +
+               "Their ticket reads \"Coordinating with our provider network\"\n" +
                "until that column is filled.\n";
     } else {
-      vendor = "Vendor portal: nobody assigned — this booking consumed no\n" +
+      vendor = "Provider portal: nobody assigned — this booking consumed no\n" +
                "availability row. Fill vendor_id on the JOBS row, then run\n" +
                "printVendorLinks() in the editor for the link.\n";
     }

@@ -4409,9 +4409,9 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
     .portal > .ticket__foot { grid-area: foot; }
 }
 
-/* --- Vendor portal ------------------------------------------------------
+/* --- Provider portal ------------------------------------------------------
    Reuses the customer portal's nav, booking rows, editors and save states.
-   Only the three things a vendor has and a customer does not need rules of
+   Only the three things a provider has and a customer does not need rules of
    their own: a logo, a service checklist, and a preference selector. */
 
 .vp__logo {

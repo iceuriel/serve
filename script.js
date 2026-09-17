@@ -1521,8 +1521,8 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
         if (confirmCopy) {
             confirmCopy.textContent = (p.slot_date && p.slot_time)
                 ? "You're on the schedule for " + slotLabel() +
-                  ". Serve is coordinating with the vendor network \u2014 we'll reach out shortly to confirm your exact arrival window."
-                : "Serve is coordinating with the vendor network. We'll reach out shortly to confirm your exact arrival window.";
+                  ". Serve is coordinating with our provider network \u2014 we'll reach out shortly to confirm your exact arrival window."
+                : "Serve is coordinating with our provider network. We'll reach out shortly to confirm your exact arrival window.";
         }
 
         // Only claim the spot once the sheet write comes back confirmed. If it
@@ -1896,7 +1896,7 @@ function serveRetirePulse() {
    exists because the three-pillar block above that section was repeating the
    steps; two of those ideas were folded into the step that already made the
    point, and the one that needed elaborating rather than compressing — the
-   vendor model — moved behind the phrase it explains.
+   provider model — moved behind the phrase it explains.
 
    PROGRESSIVE ENHANCEMENT, AND NOT ONLY IN NAME. Nothing a visitor needs in
    order to book lives inside a bubble. If this block never runs, the trigger
