@@ -815,6 +815,112 @@ console.log('\n=== 8. THE RANK GUARD — a late event must not undo a capture ==
   }
 }
 
+console.log('\n=== 9. TEST MONEY AND REAL MONEY MUST NOT BE CONFUSED ===');
+{
+  /* GOING LIVE IS TWO SECRET SWAPS, NOT ONE. Stripe's test and live modes are
+     separate worlds: separate keys, separate webhook endpoints, separate
+     signing secrets. A half-done swap is not a broken request — the leftover
+     endpoint keeps delivering events that verify PERFECTLY, because they really
+     are from our account. The signature cannot catch this. Only `livemode` can.
+
+     WHY THE FIXTURES BELOW SET `livemode` EXPLICITLY. Every other event in this
+     file omits it, and that is the 2026-09-16 trap in miniature: a suite is no
+     more honest than its fixtures, and a hand-built event that omits a field
+     REAL STRIPE ALWAYS SENDS can only ever confirm whatever the code assumed.
+     So each case here states the mode on purpose, and the last pair pins what
+     happens to an event that carries no mode at all. */
+  const LIVE_KEY = Object.assign({}, PENV, { STRIPE_SECRET_KEY: 'sk_live_realmoney' });
+
+  const paidEvent = live => ({
+    type: 'payment_intent.succeeded', livemode: live,
+    data: { object: { object: 'payment_intent', id: 'pi_9', amount: 23900,
+                      metadata: { job_id: 'SRV-REAL' } } },
+  });
+
+  /* ---- the dangerous direction: play money marking a real booking paid ---- */
+  {
+    const r = await deliver(paidEvent(false), { env: LIVE_KEY });
+    t('a TEST event on a LIVE key writes NOTHING', r.writes.length === 0, r.writes.length);
+    t('   and says which mismatch it was',
+      r.body.ignored === 'test_event_on_live_key', r.body);
+    /* 200, not 500. A retry cannot change the mode an event was born in, and
+       three days of them would bury the real deliveries in the dashboard. */
+    t('   answered 200 so Stripe stops rather than retrying for three days',
+      r.status === 200, r.status);
+    t('   and the reason is in the log for whoever goes looking',
+      r.logs.some(l => /TEST Stripe event refused on a LIVE key/.test(l)), r.logs.slice(-3));
+  }
+
+  /* ---- the other direction, which must behave in the OPPOSITE way ---- */
+  {
+    /* The money is real. Refusing to record it over a configuration smell is
+       exactly the bug this whole file exists to prevent, just reached by a
+       different road — a customer who has paid, told they have not. */
+    const r = await deliver(paidEvent(true), { env: PENV });
+    t('a LIVE event on a test key IS still recorded — the money is real',
+      r.writes.length === 1 && r.status === 200, r.body);
+    t('   with the true state, not a softened one',
+      r.wrote && r.wrote.state === 'paid', r.wrote);
+    t('   and the misconfiguration is shouted into the log',
+      r.logs.some(l => /LIVE Stripe event arrived while STRIPE_SECRET_KEY reads test/.test(l)),
+      r.logs.slice(-3));
+  }
+
+  /* ---- the matched pairs, which must be entirely ordinary ---- */
+  {
+    const liveOnLive = await deliver(paidEvent(true), { env: LIVE_KEY });
+    t('a LIVE event on a LIVE key is just a payment', liveOnLive.writes.length === 1, liveOnLive.body);
+    const testOnTest = await deliver(paidEvent(false), { env: PENV });
+    t('a test event on a test key is just a payment', testOnTest.writes.length === 1, testOnTest.body);
+    t('   and neither matched pair logs a mismatch',
+      !liveOnLive.logs.concat(testOnTest.logs).some(l => /mismatch|refused on a LIVE key/.test(l)),
+      liveOnLive.logs.concat(testOnTest.logs).slice(-4));
+  }
+
+  /* ---- no mode at all is not a third case to invent handling for ---- */
+  {
+    const noMode = await deliver(paidEvent(undefined), { env: LIVE_KEY });
+    t('an event carrying no livemode is recorded, not guessed at',
+      noMode.writes.length === 1, noMode.body);
+  }
+
+  /* ---- and the check must not become a way to skip the signature ---- */
+  {
+    const forged = await deliver(paidEvent(false),
+      { env: LIVE_KEY, secret: 'whsec_someone_elses_secret' });
+    t('an UNSIGNED test-mode event is refused as a forgery, not as a mode slip',
+      forged.status === 400 && forged.body.error === 'bad_signature', forged.body);
+  }
+
+  /* ---- the rejection body is the founder's diagnostic ---- */
+  {
+    /* r51 turned Stripe's Event deliveries tab into the diagnostic for a failed
+       WRITE. This does the same for a failed SIGNATURE, because the likeliest
+       cause on go-live day is a live endpoint added without swapping
+       STRIPE_WEBHOOK_SECRET — and /api/health cannot see it. `can_record_
+       payments` knows only that A secret is bound, never that it is the RIGHT
+       one, so without this the symptom is silent 400s and portals that never
+       notice a real payment. */
+    const r = await deliver(paidEvent(true), { secret: 'whsec_wrong_one' });
+    t('a rejected signature names the cause worth checking first',
+      /STRIPE_WEBHOOK_SECRET/.test(r.body.hint || ''), r.body);
+    t('   and still refuses, with nothing written',
+      r.status === 400 && r.writes.length === 0, r.status);
+
+    /* The hint must stay IDENTICAL across rejections. A body that varies is a
+       free oracle for whoever is probing — the exact thing the original comment
+       refused to give up, and it must not be given up here by accident. */
+    const other = await deliver(paidEvent(true),
+      { header: 't=' + Math.floor(Date.now() / 1000) + ',v1=' + 'a'.repeat(64) });
+    t('   and every rejection says the SAME thing, separating no cases',
+      JSON.stringify(other.body) === JSON.stringify(r.body), [r.body, other.body]);
+
+    const shown = JSON.stringify(r.body);
+    t('   while naming no secret VALUE, only a binding',
+      !/whsec_|sk_live_|sk_test_|bridge-secret-value/.test(shown), shown);
+  }
+}
+
 console.log('\n' + (bad ? 'FAILURES: ' + bad : 'all payment checks passed'));
 process.exit(bad ? 1 : 0);
 })();

@@ -1707,11 +1707,30 @@ async function handleStripeWebhook(request, env) {
   const good = await verifyStripeSignature(
     raw, request.headers.get("Stripe-Signature"), env.STRIPE_WEBHOOK_SECRET, nowS);
   if (!good) {
-    /* No detail, in the answer or the log. "Timestamp too old" versus "bad
-       digest" is a free hint to whoever is probing, and neither tells US
-       anything a wrong secret would not. */
+    /* No DISCRIMINATING detail, in the answer or the log. "Timestamp too old"
+       versus "bad digest" is a free hint to whoever is probing, and neither
+       tells US anything a wrong secret would not.
+
+       The line below is a different thing and gives that up nothing. It is
+       IDENTICAL for every rejection, so it separates no two cases for anyone
+       probing, and it says only what `bad_signature` already said. What it adds
+       is a name for the cause that is overwhelmingly the likely one on the day
+       a live key goes in: TEST AND LIVE ARE DIFFERENT ENDPOINTS THAT SIGN WITH
+       DIFFERENT SECRETS, so a live endpoint added without also swapping
+       STRIPE_WEBHOOK_SECRET rejects every real payment — while /api/health goes
+       on reporting `can_record_payments: true`, because it can see only that A
+       secret is bound, never that it is the RIGHT one.
+
+       It rides in the body for the same reason the write-back failure below
+       does: Stripe's Event deliveries tab shows the body of every attempt, so
+       the founder reads the diagnosis in their own dashboard with no Cloudflare
+       login and no tail running at the right moment. Nothing in it depends on
+       the secret, the request, or the mode. */
     console.error("stripe webhook signature rejected");
-    return json({ ok: false, error: "bad_signature" }, 400);
+    return json({ ok: false, error: "bad_signature",
+                  hint: "STRIPE_WEBHOOK_SECRET does not match the endpoint " +
+                        "that sent this. Test and live are separate endpoints " +
+                        "with different signing secrets." }, 400);
   }
 
   let event;
@@ -1722,6 +1741,49 @@ async function handleStripeWebhook(request, env) {
   }
 
   const type  = String((event && event.type) || "");
+
+  /* GOING LIVE IS TWO SECRET SWAPS, NOT ONE, AND A HALF-DONE SWAP IS SIGNED
+     CORRECTLY. Test and live are separate worlds in Stripe — separate keys,
+     separate endpoints, separate signing secrets — and an endpoint left over in
+     the other mode keeps delivering perfectly valid events long after the key
+     has moved. Every verified event says which world it came from.
+
+     THE TWO DIRECTIONS NEED OPPOSITE HANDLING, and getting that backwards is
+     worse than not checking at all:
+
+       live event, test key   WRITE IT ANYWAY. The money is real. Refusing real
+                              payment state over a configuration smell is
+                              precisely the bug this subsystem already shipped
+                              once — a customer who has paid, told they have
+                              not, with an Authorize button inviting a second
+                              hold on the same card. The signature already
+                              proved the event came from our own account; the
+                              mode disagreement is OUR plumbing being wrong, not
+                              the payment being false. Loud in the log instead.
+
+       test event, LIVE key   REFUSE. Writing it marks a REAL booking paid on
+                              play money — the same lie in the other direction,
+                              and the more dangerous one, because nobody is
+                              waiting to contradict it. Answered 200 rather than
+                              500 on purpose: a retry cannot change what mode an
+                              event was born in, and three days of them would
+                              bury the real deliveries in the founder's
+                              dashboard at exactly the wrong moment.
+
+     Strict equality, because a real Stripe event ALWAYS carries `livemode`. An
+     event without it is not a third case to invent handling for. */
+  const keyIsLive = stripeMode(env) === "LIVE";
+  if (event && event.livemode === false && keyIsLive) {
+    console.error("TEST Stripe event refused on a LIVE key — a test-mode " +
+                  "endpoint is still pointed at this URL: " + type);
+    return json({ ok: true, ignored: "test_event_on_live_key" });
+  }
+  if (event && event.livemode === true && !keyIsLive) {
+    console.error("LIVE Stripe event arrived while STRIPE_SECRET_KEY reads " +
+                  stripeMode(env) + " — real money moved and the key has not " +
+                  "been swapped. Recording it: " + type);
+  }
+
   const state = STRIPE_EVENT_STATES[type];
   /* Acknowledged, not an error. See the note on the map above. */
   if (!state) return json({ ok: true, ignored: type });

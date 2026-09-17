@@ -13,7 +13,112 @@ except where a later section supersedes them.
 
 ---
 
-## Current work — 2026-09-17, Claude Code: r56, a booking that succeeded can no longer show the failure panel
+## Current work — 2026-09-17, Claude Code: the live Stripe key — what it needs, and the guard that makes the swap safe
+
+**NO CODE CHANGE WAS NEEDED TO GO LIVE, AND THAT IS THE HEADLINE.** The founder
+asked to put in "a real Stripe link for real payments, no more test link". The
+payment path is already built, deployed and working end to end; production
+answers `can_charge: true`, `can_record_payments: true`, `stripe_mode: "test"`.
+**Going live is two secret swaps in the founder's hands, not a rewrite.** The
+runbook is below and it is the operative part of this entry.
+
+Files touched: `src/worker.js`, `tests/stripe-payments.test.js`, this entry.
+No Apps Script change — **webhook.gs is untouched by this work, so the r56 paste
+below is still the outstanding one and this adds nothing to it.**
+
+### THE RUNBOOK — the founder's steps, in this order
+
+1. **Activate the Stripe account for live payments** (business details, bank
+   account). Live mode does not exist until Stripe says it does.
+2. **Create the LIVE webhook endpoint** — dashboard in **Live mode**, not test.
+   URL `https://servecleaning.com/api/stripe-webhook`. Subscribe exactly these
+   five, which are `STRIPE_EVENT_STATES` in `src/worker.js`:
+   `checkout.session.completed`, `payment_intent.amount_capturable_updated`,
+   `payment_intent.succeeded`, `payment_intent.canceled`, `charge.refunded`.
+   Copy its signing secret (`whsec_…`) — **it is a DIFFERENT secret from the
+   test endpoint's.**
+3. **Create the LIVE API key.** A restricted key (`rk_live_…`) is better than
+   `sk_live_…`: it can be scoped to Checkout Sessions (write) and
+   PaymentIntents (read + cancel), which is everything this Worker does.
+4. **Set both secrets, then verify:**
+   `npx wrangler secret put STRIPE_SECRET_KEY`
+   `npx wrangler secret put STRIPE_WEBHOOK_SECRET`
+   `curl -s https://servecleaning.com/api/health` → **`stripe_mode: "LIVE"`**
+   beside `can_record_payments: true`. **Leave `PAYMENT_BRIDGE_SECRET alone` —
+   it is ours, not Stripe's, and has no modes.**
+5. **Prove it with one real booking on a real card**, then **refund it**. Watch
+   for an **UNCAPTURED** payment in the dashboard (a hold, not a charge), the
+   portal line flipping to "Card authorized" — **the line, never the `?pay=done`
+   banner** — then capture by hand and watch it reach `paid`.
+
+**Each `wrangler secret put` redeploys the Worker with the code from the LAST
+GIT PUSH.** Set a secret against unpushed code and it binds to a Worker that has
+no route for it. That has already happened once here.
+
+### The gap this session closed, and why it is worth the code
+
+**Step 4 is two commands, and doing only one of them is signed, valid, and
+silently wrong.** Test and live are separate worlds in Stripe — separate keys,
+separate endpoints, separate signing secrets — and **a leftover endpoint keeps
+delivering events that verify perfectly, because they really are from our
+account. The signature cannot catch this.** `/api/health` cannot either:
+`can_record_payments` sees only that *a* secret is bound, never that it is the
+*right* one. So each half-swap had a silent failure:
+
+| Half-done swap | What the founder would have seen |
+|---|---|
+| Key live, webhook secret still test | Real cards held; **every** event 400s; every portal says "Not yet authorized" forever, Authorize button inviting a second hold |
+| Webhook live, key still test | A test payment marking a **real** booking `paid` — nobody waiting to contradict it |
+
+**`livemode` is the only field that distinguishes them, and it was read
+nowhere.** Now it is, and **the two directions are handled in OPPOSITE ways on
+purpose:**
+
+- **Live event, test key → RECORD IT**, and shout in the log. The money is real.
+  Refusing real payment state over a configuration smell is exactly the bug this
+  subsystem already shipped once: a customer who paid, told they had not.
+- **Test event, LIVE key → REFUSE**, `200 {ignored:"test_event_on_live_key"}`.
+  Writing it marks a real booking paid on play money. **200 and not 500**
+  because a retry cannot change the mode an event was born in, and three days of
+  retries would bury the real deliveries in the dashboard.
+
+**A rejected signature now names the likely cause in the response body** —
+"STRIPE_WEBHOOK_SECRET does not match the endpoint that sent this" — because
+Stripe's Event deliveries tab shows the body of every attempt, so the founder
+reads the diagnosis in their own dashboard with no Cloudflare login. Same move
+r51 made for the bridge secret. **The string is identical for every rejection,
+so it separates no cases for anyone probing** and says only what `bad_signature`
+already said; a test asserts that sameness, so a future edit cannot turn it into
+an oracle.
+
+**Checked:** `node tests/run-all.js` — **all 35 files pass**, with a new §9 in
+`tests/stripe-payments.test.js`. **9 deliberate mutations, 9 killed:** removing
+the guard, inverting its direction, refusing a live event on a test key,
+answering 500, treating a missing `livemode` as test, letting the mode check
+precede the signature, dropping the hint, making the hint vary per rejection,
+and leaking the bound secret in it. Each fixture **states `livemode` explicitly**
+— the 2026-09-16 lesson applied: a hand-built event that omits a field real
+Stripe always sends can only confirm whatever the code assumed.
+
+### Still open, and both are the founder's, not mine
+
+- **Gap 5 below — the payment copy is agent-written.** Both surfaces say "We
+  place a hold on your card for $X now, and only charge it once your cleaner has
+  confirmed the job." It is accurate for manual capture, and it is still **a
+  promise about a stranger's money written by an agent.** It should be read and
+  approved before it describes real holds, not after.
+- **Refund and cancellation terms, and the partner response deadline** now that
+  the ~7-day authorization window becomes real money. Gap 4 below — nothing
+  watches that window.
+
+**Unproven and needing a real card, not a test one:** nothing on this path has
+ever run against live money. The capture path was still unproven on the test key
+as of 2026-09-16 (it needed a booking made after `7045796`); step 5 above proves
+both at once.
+
+---
+
+## Earlier — 2026-09-17, Claude Code: r56, a booking that succeeded can no longer show the failure panel
 
 **SITE PUSHED AND DEPLOYED (`6eb76d4`). APPS SCRIPT NOT PASTED — that paste is
 the remaining step and it is the one that fixes the bug.** Files:
