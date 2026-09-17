@@ -145,11 +145,14 @@ put into the partner payout copy. **All 34 test files pass.**
    founder, not by the suite.
 2. **Confirm the confirmation-screen diagnosis** in Apps Script → Executions —
    the fix shipped in r53 without that evidence, so it is worth a look.
-3. **Two published price claims that no longer match the engine**, both
-   pre-existing and both the founder's call, so neither was touched:
-   `pricing.html:52` JSON-LD says a first clean runs "$117 to $347" against the
-   engine's $127–$594, and the site-wide "$50 off visits 2–4" below.
+3. **One published price claim still does not match the engine**, pre-existing
+   and untouched: `pricing.html:52` JSON-LD says a first clean runs "$117 to
+   $347" against the engine's $127–$594. Nothing asserts it. It is a published
+   number, so it is the founder's call — the range is simply out of date rather
+   than promising anything the system cannot do.
 4. ~~The `/pricing` table hides the move discount.~~ **Done — see below.**
+5. ~~"$50 off visits 2–4" is promised and never applied.~~ **Removed
+   site-wide — see below.**
 
 ### The 15% is now visible where the 50% always was
 
@@ -180,26 +183,36 @@ the subtitle too.
 present — without it the function returns early and every assertion on its
 output would pass vacuously.
 
-### FOUND ALONG THE WAY, NOT FIXED: "$50 off visits 2–4" is promised and never applied
+### REMOVED: "$50 off visits 2–4" was promised in five places and never applied
 
-Five customer-facing places promise it, and **nothing in the code implements
-it**. `recurringPriceFor` prices a recurring visit at steady state with no
-deduction anywhere.
+Found while doing the visibility work above; **deleted site-wide on the
+founder's instruction the same day.** `recurringPriceFor` prices a recurring
+visit at steady state with no deduction anywhere, and never did — one of the
+five copies sat **inside the JSON-LD FAQ**, so Google could surface an offer
+the checkout would not honour.
 
-| where | what it says |
-|---|---|
-| `index.html:1190`, `services.html:103` | recurring card badge `$50 off visits 2–4` |
-| `index.html:508` | booking-form `freq-note` |
-| `pricing.html:188`, `:229` | body copy and the FAQ |
-| `pricing.html:84` | **inside JSON-LD structured data**, so Google can surface it |
+| where | was | now |
+|---|---|---|
+| `index.html`, `services.html` recurring card badge | `$50 off visits 2–4` | `Weekly, biweekly or monthly` (quiet) |
+| `index.html` booking-form `freq-note` | the offer | `No contract — change or cancel your plan anytime.` |
+| `pricing.html` "why recurring costs less" callout | closing sentence | sentence removed |
+| `pricing.html` visible FAQ **and** JSON-LD | the offer, in both | both rewritten identically |
 
-It predates this session — the only change made was to stop the 4BR no-stack
-branch offering it *as a substitute* for the discount it was withholding; those
-homes get a real 15% now instead of a promise about later visits.
+The two FAQ copies had to change **together** — structured data contradicting
+the visible page is worse than none, and holding the offer in two places is
+exactly how they would drift. A test asserts the shared sentence appears twice.
 
-**Either it gets built or the copy comes down.** Both are founder decisions
-(one is a price, the other a published claim), so neither was made. No test
-pins the current wording — that would only freeze the problem in place.
+**Replacement copy claims nothing new.** "No contract / cancel anytime" was
+already promised in the /pricing FAQ, and the cadence badge is a statement of
+fact. The recurring card no longer leads with an offer at all — **if you want
+one there, it has to be a discount `computeQuote` actually applies.**
+
+`payout-discount-parity.test.js` now asserts **no `$50` and no "visits two
+through four" anywhere** in index/services/pricing/script/portal/ticket, with
+comments stripped first — so the HTML comments recording this removal do not
+count as a promise, and a real one cannot hide inside one. Putting the badge
+back turns it red; so does letting the JSON-LD drift from the visible FAQ.
+Both were run.
 
 ---
 

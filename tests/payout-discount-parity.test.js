@@ -357,26 +357,53 @@ console.log('\n=== 6. the pages promise what the engine charges ===');
     /@media \(max-width: 639px\)[\s\S]{0,600}\.serve-table thead \{\s*display: none/
       .test(read('style.css')));
 
-  /* THE NO-STACK BRANCH NO LONGER OFFERS "$50 off visits 2-4" AS A SUBSTITUTE
-     for the discount it was withholding. Those homes now get a real 15% off
-     the visit in front of them instead of a promise about later ones.
+  /* "$50 OFF VISITS 2-4" IS GONE FROM THE WHOLE SITE — removed 2026-09-16 on
+     the founder's instruction.
 
-     NOTE, and it is NOT asserted here because it is the founder's call: that
-     $50 offer is still made site-wide in five places — a badge on the
-     recurring card in index.html and services.html, the freq-note in the
-     booking form, and twice on /pricing including inside JSON-LD structured
-     data — and NOTHING IN THE CODE IMPLEMENTS IT. recurringPriceFor prices a
-     recurring visit at steady state with no deduction. Either it gets built or
-     the copy comes down; a test that pinned today's wording would just freeze
-     the problem in place. See HANDOFF. */
-  /* Scoped to the RENDERED note, not the whole file — the comment above that
-     branch still names the retired promise on purpose, to record why it went. */
+     It was promised in five customer-facing places and NOTHING EVER APPLIED
+     IT: recurringPriceFor prices a recurring visit at steady state with no
+     deduction anywhere. One of the five was inside the JSON-LD FAQ, so Google
+     could surface an offer the checkout would never honour.
+
+     THE RULE THIS PINS: every discount the site advertises is one computeQuote
+     actually applies. A number in the markup that no code produces is the
+     failure mode, and it is invisible until a customer asks why they were not
+     given it.
+
+     Comments are stripped before matching, so the HTML comments recording the
+     removal do not count as a promise — and a real one cannot hide in one. */
+  const stripComments = (s) => s
+    .replace(/<!--[\s\S]*?-->/g, '')      // HTML
+    .replace(/\/\*[\s\S]*?\*\//g, '')     // JS block
+    .replace(/^\s*\/\/.*$/gm, '');        // JS line
   const priceNote = (SCRIPT_JS.match(/<p class="price-note">[\s\S]*?<\/p>/) || [''])[0];
   t('the no-stack branch renders a price-note at all', priceNote.length > 0);
-  t('and it no longer promises $50 off later visits',
-    !/\$50/.test(priceNote), priceNote.slice(0, 120));
-  t('it names a real percentage instead, computed from the factor',
+  t('it names a real percentage, computed from the factor',
     /discountPercent/.test(priceNote), priceNote.slice(0, 160));
+
+  /* Every surface the offer appeared on, plus the two it never did, so a
+     reappearance anywhere in the shipped site fails here. */
+  const SURFACES = ['index.html', 'services.html', 'pricing.html', 'script.js',
+                    'portal.js', 'ticket.js'];
+  for (const f of SURFACES) {
+    const clean = stripComments(read(f));
+    t(f + ' promises no $50-off-visits offer',
+      !/\$50/.test(clean) && !/visits two through four/i.test(clean),
+      (clean.match(/.{0,60}\$50.{0,60}/) || [null])[0]);
+  }
+
+  /* The JSON-LD and the visible FAQ answer the same question and MUST say the
+     same thing — structured data that contradicts the page is worse than none,
+     and this pair drifted apart exactly once already by holding the offer in
+     two places. Compared on the shared sentence rather than character for
+     character, since one is JSON and the other is markup. */
+  const FAQ_TAIL = 'recurring visits are priced well below a one-time clean '
+                 + 'because the home is already at baseline';
+  const faqHits = (PRICING_HTML.match(new RegExp(FAQ_TAIL, 'g')) || []).length;
+  t('the contract FAQ appears in both the JSON-LD and the visible page',
+    faqHits === 2, faqHits);
+  t('and neither copy mentions the retired offer',
+    !new RegExp(FAQ_TAIL + '[^"<]*\\$50').test(PRICING_HTML));
 }
 
 console.log('\n' + (bad ? bad + ' FAILED' : 'all passed'));

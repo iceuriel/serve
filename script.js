@@ -1150,7 +1150,13 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
            The old no-stack branch promised "$50 off visits 2-4 on a recurring
            plan instead". Nothing anywhere implemented that, so it was a
            customer promise the system could not keep; those homes now get a
-           real 15% off the visit in front of them. */
+           real 15% off the visit in front of them.
+
+           THAT OFFER IS NOW GONE FROM THE WHOLE SITE (2026-09-16) — it had
+           also been on the recurring card on / and /services, the frequency
+           note in this calculator, and twice on /pricing including inside the
+           JSON-LD FAQ. Every discount the site advertises is applied by
+           computeQuote. Do not add one here that is not. */
         let html = '';
         if (isFirst && q.discountApplies) {
             html = `
