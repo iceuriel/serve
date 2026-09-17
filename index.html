@@ -505,13 +505,13 @@
                 <div class="flow-card freq-block" id="freq-block" hidden>
                     <span class="field-label">Keep it going after the first clean?</span>
                     <div class="freq-options" id="freq-options"><!-- rendered by script.js --></div>
-                    <!-- 2026-09-16: was "New recurring customers get $50 off
-                         visits 2-4." Nothing in the pricing engine or the
+                    <!-- 2026-09-16: a flat-dollar recurring offer was removed
+                         from here. Nothing in the pricing engine or the
                          webhook ever applied it, so it was a promise the
-                         system could not keep. Replaced with something that is
-                         actually true and is already promised in the /pricing
-                         FAQ — do not put an offer back here unless the code
-                         applies it. -->
+                         system could not keep. This line is true and is
+                         already promised in the /pricing FAQ. Do not put an
+                         offer back here unless computeQuote applies it; see
+                         docs/HANDOFF.md 2026-09-16. -->
                     <p class="freq-note">No contract &mdash; change or cancel your plan anytime.</p>
                 </div>
 
@@ -1194,9 +1194,10 @@
                 </article>
 
                 <article class="serve-card">
-                    <!-- 2026-09-16: was "$50 off visits 2-4", which nothing
-                         implemented. A factual cadence rather than an invented
-                         offer — see the freq-note in the calculator above. -->
+                    <!-- 2026-09-16: a flat-dollar recurring offer was removed
+                         from here; nothing implemented it. A factual cadence
+                         rather than an invented one — see the freq-note in the
+                         calculator above. -->
                     <span class="serve-card__badge serve-card__badge--quiet">Weekly, biweekly or monthly</span>
                     <h3 class="serve-card__title">Recurring</h3>
                     <ul class="serve-card__list">

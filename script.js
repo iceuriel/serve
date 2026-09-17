@@ -1147,16 +1147,21 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
            The percentage comes from the engine rather than being written here,
            so the badge cannot claim a number the arithmetic did not produce.
 
-           The old no-stack branch promised "$50 off visits 2-4 on a recurring
-           plan instead". Nothing anywhere implemented that, so it was a
-           customer promise the system could not keep; those homes now get a
+           The old no-stack branch offered a flat-dollar discount on later
+           recurring visits instead. Nothing anywhere implemented it, so it was
+           a customer promise the system could not keep; those homes now get a
            real 15% off the visit in front of them.
 
            THAT OFFER IS NOW GONE FROM THE WHOLE SITE (2026-09-16) — it had
            also been on the recurring card on / and /services, the frequency
            note in this calculator, and twice on /pricing including inside the
            JSON-LD FAQ. Every discount the site advertises is applied by
-           computeQuote. Do not add one here that is not. */
+           computeQuote. Do not add one here that is not.
+
+           THE AMOUNT IS DELIBERATELY NOT NAMED IN THIS COMMENT. This file is
+           served verbatim to every visitor, so a comment quoting a retired
+           price is a discount in the page source that nothing will honour.
+           The figures live in docs/HANDOFF.md, which ships to nobody. */
         let html = '';
         if (isFirst && q.discountApplies) {
             html = `

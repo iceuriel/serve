@@ -370,12 +370,21 @@ console.log('\n=== 6. the pages promise what the engine charges ===');
      failure mode, and it is invisible until a customer asks why they were not
      given it.
 
-     Comments are stripped before matching, so the HTML comments recording the
-     removal do not count as a promise — and a real one cannot hide in one. */
-  const stripComments = (s) => s
-    .replace(/<!--[\s\S]*?-->/g, '')      // HTML
-    .replace(/\/\*[\s\S]*?\*\//g, '')     // JS block
-    .replace(/^\s*\/\/.*$/gm, '');        // JS line
+     MATCHED AGAINST THE RAW FILE, COMMENTS INCLUDED, and that is the whole
+     point of this assertion rather than an accident.
+
+     The first version of this test stripped comments first — and it passed
+     while the removal's own HTML comments, which quoted the offer verbatim,
+     were being served to every visitor. `curl` on production found
+     "New recurring customers get $50 off visits 2-4" sitting in the page
+     source of the live homepage. These files ship BYTE FOR BYTE to the
+     browser: index/services/pricing as markup, script.js as a plain script
+     tag, and no build step strips anything.
+
+     So a retired price quoted in a comment is still a discount in the page
+     source that nothing will honour, readable by anyone who views source.
+     Explanations belong here and in docs/HANDOFF.md, which ship to nobody;
+     the amount does not belong in anything a browser downloads. */
   const priceNote = (SCRIPT_JS.match(/<p class="price-note">[\s\S]*?<\/p>/) || [''])[0];
   t('the no-stack branch renders a price-note at all', priceNote.length > 0);
   t('it names a real percentage, computed from the factor',
@@ -386,10 +395,10 @@ console.log('\n=== 6. the pages promise what the engine charges ===');
   const SURFACES = ['index.html', 'services.html', 'pricing.html', 'script.js',
                     'portal.js', 'ticket.js'];
   for (const f of SURFACES) {
-    const clean = stripComments(read(f));
-    t(f + ' promises no $50-off-visits offer',
-      !/\$50/.test(clean) && !/visits two through four/i.test(clean),
-      (clean.match(/.{0,60}\$50.{0,60}/) || [null])[0]);
+    const raw = read(f);          // raw: comments ship to the browser too
+    t(f + ' carries no trace of the retired offer, comments included',
+      !/\$50/.test(raw) && !/visits two through four/i.test(raw),
+      (raw.match(/.{0,70}\$50.{0,70}/) || [null])[0]);
   }
 
   /* The JSON-LD and the visible FAQ answer the same question and MUST say the
