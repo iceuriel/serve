@@ -115,6 +115,8 @@ function build() {
     PropertiesService: { getScriptProperties: () => ({
       getProperty: k => (k in props ? props[k] : null),
       setProperty: (k, v) => { props[k] = String(v); },
+      deleteProperty: (k) => { delete props[k]; },
+      getProperties: () => Object.assign({}, props),
     }) },
     Utilities: {
       formatDate: (d, tz, fmt) => (fmt === 'yyyyMMdd'
@@ -129,8 +131,9 @@ function build() {
   };
   vm.createContext(sandbox);
   vm.runInContext(SRC, sandbox);
-  return { order, logs, tabs, sandbox,
-    post: p => JSON.parse(sandbox.doPost({ postData: { contents: JSON.stringify(p) } }).getContent()) };
+  return { order, logs, tabs, sandbox, props,
+    post: p => JSON.parse(sandbox.doPost({ postData: { contents: JSON.stringify(p) } }).getContent()),
+    get:  p => JSON.parse(sandbox.doGet({ parameter: p }).getContent()) };
 }
 
 const BOOKING = {
@@ -220,8 +223,188 @@ const at = SRC.indexOf('releaseWriteLock();');
 t('releaseWriteLock exists', /function releaseWriteLock\(\)/.test(SRC));
 t('it is idempotent, so the finally is safe',
   /if \(lockReleased\) return;/.test(SRC));
-t('and the early release is called before sendBookingSms in the source',
-  at !== -1 && at < SRC.indexOf('sendBookingSms(data'), [at, SRC.indexOf('sendBookingSms(data')]);
+/* r55 moved the inline sends into deliverBookingNotify. Anchored on the CALL
+   inside routePost, not the function name, which also appears in its own
+   definition further down and would make this pass whatever the order. */
+const inlineSend = SRC.indexOf('if (!notifyPending) deliverBookingNotify(notice);');
+t('and the early release is called before the inline send in the source',
+  at !== -1 && inlineSend !== -1 && at < inlineSend, [at, inlineSend]);
+
+/* ------------------------------------------------------------
+   6. r55 — DEFERRED: the booking answers before the text and email.
+   ------------------------------------------------------------ */
+console.log('\n=== 6. r55: the Worker asked to defer — answer first, send on the follow-up ===');
+{
+  const D = build();
+  const ID = 'deferred-55';
+  const booking = Object.assign({}, BOOKING, { submission_id: ID, notify_deferred: true });
+  const r = D.post(booking);
+  const KEY = 'notify:' + ID;
+
+  t('the reservation is accepted', r.status === 'ok' && r.duplicate === false, r);
+  t('and says a notice is pending', r.notify_pending === true, r);
+  t('a JOBS row was written', D.tabs.JOBS._rows.length === 2);
+  t('NO text was sent before answering', D.order.indexOf('sms') === -1, D.order);
+  t('NO email was sent before answering', D.order.indexOf('email') === -1, D.order);
+  t('the notice is parked under its submission_id', typeof D.props[KEY] === 'string');
+  t('the delivery flag never reaches a row or the dropped-fields list',
+    !(r.dropped_fields || []).includes('notify_deferred') &&
+    !JSON.stringify(D.tabs.JOBS._rows).includes('notify_deferred'), r.dropped_fields);
+  t('nor the parked notice', !String(D.props[KEY] || '').includes('notify_deferred'));
+  t('no sheet write after the release on this path either',
+    D.order.slice(D.order.indexOf('lock_released')).every(x => x.indexOf('sheet_write:') !== 0),
+    D.order);
+
+  /* The retry whose first attempt ran past the Worker's budget. */
+  const replay = D.post(booking);
+  t('a replay still dedupes', replay.duplicate === true, replay);
+  t('and reports the notice still pending, so its Worker sends it',
+    replay.notify_pending === true, replay);
+
+  D.order.length = 0;
+  const n1 = D.post({ event_type: 'booking_notify', submission_id: ID });
+  t('the follow-up answers ok and sent 1', n1.ok === true && n1.sent === 1, n1);
+  t('THE TEXT GOES OUT ON THE FOLLOW-UP', D.order.includes('sms'), D.order);
+  t('AND THE EMAIL', D.order.includes('email'), D.order);
+  t('claimed and released before sending, so a booking is never held up',
+    D.order.indexOf('lock_released') !== -1 &&
+    D.order.indexOf('lock_released') < D.order.indexOf('sms'), D.order);
+  t('the parked notice is gone', !(KEY in D.props));
+  t('the follow-up answer names nobody', !/Test|555|Beacon|example\.com|http/.test(JSON.stringify(n1)), n1);
+
+  D.order.length = 0;
+  const n2 = D.post({ event_type: 'booking_notify', submission_id: ID });
+  t('a second follow-up sends NOTHING — at most once', n2.sent === 0 &&
+    !D.order.includes('sms') && !D.order.includes('email'), { n2, order: D.order });
+  t('and a replay now reports nothing pending', D.post(booking).notify_pending === false);
+
+  const junk = D.post({ event_type: 'booking_notify', submission_id: '../../x' });
+  t('an unusable submission_id is refused', junk.ok === false, junk);
+}
+
+console.log('\n=== 7. r55: the sweep sends only what is overdue, once ===');
+{
+  const S = build();
+  S.post(Object.assign({}, BOOKING, { submission_id: 'young', notify_deferred: true }));
+  S.post(Object.assign({}, BOOKING, { submission_id: 'old', notify_deferred: true,
+    email: 'other@example.com', phone: '(617) 555-0199' }));
+  const oldNotice = JSON.parse(S.props['notify:old']);
+  oldNotice.queuedAt = Date.now() - 5 * 60 * 1000;
+  S.props['notify:old'] = JSON.stringify(oldNotice);
+  S.props.UNRELATED = 'keep me';
+
+  S.order.length = 0;
+  const sw = S.post({ event_type: 'booking_notify', action: 'sweep' });
+  t('the sweep sent exactly the overdue one', sw.ok === true && sw.sent === 1, sw);
+  t('it texted and emailed', S.order.includes('sms') && S.order.includes('email'), S.order);
+  t('the overdue notice is gone', !('notify:old' in S.props));
+  t('a fresh one is left for its own Worker', 'notify:young' in S.props);
+  t('and other script properties are untouched', S.props.UNRELATED === 'keep me');
+
+  S.order.length = 0;
+  const again2 = S.post({ event_type: 'booking_notify', action: 'sweep' });
+  t('sweeping again sends nothing', again2.sent === 0 && !S.order.includes('sms'), again2);
+}
+
+console.log('\n=== 8. r55: a notice too large to park is sent inline, as before ===');
+{
+  const L = build();
+  const big = L.post(Object.assign({}, BOOKING, { submission_id: 'big', notify_deferred: true,
+    customer_notes: 'x'.repeat(9000) }));
+  t('it still books', big.status === 'ok', big);
+  t('and reports nothing pending', big.notify_pending === false, big);
+  t('because it already texted and emailed', L.order.includes('sms') && L.order.includes('email'), L.order);
+  t('and parked nothing', !Object.keys(L.props).some(k => k.indexOf('notify:') === 0));
+}
+
+/* ------------------------------------------------------------
+   9. r56 — THE CHEAP QUESTION THE BROWSER CAN ACTUALLY AFFORD TO ASK.
+   ------------------------------------------------------------
+
+   r53 and r55 both went after the WAIT. This goes after the SCREEN, and it is
+   the one that closes the hole, because no latency budget is right every time.
+
+   On 2026-09-17, with r53 live, a booking completed in full — row, text, email
+   — and the customer was shown "your booking could not be confirmed". Both
+   POSTs had run past the Worker's 12s budget, and a POST that does not come
+   back says NOTHING about whether the booking happened. The browser had no
+   other way to ask, so it guessed, and guessed wrong.
+
+   WHAT THIS SECTION PINS: that the answer is right, that it costs no lock and
+   no write (the two properties that let it be polled WHILE the slow write is
+   still running), and that it agrees with the dedupe.
+   ------------------------------------------------------------ */
+console.log('\n=== 9. r56: "is this booking in the sheet yet?" ===');
+{
+  const Q = build();
+  const ID = 'watch-56';
+
+  const before = Q.get({ booking: ID });
+  t('a booking that was never made answers found:false',
+    before.ok === true && before.found === false, before);
+
+  /* THE TWO PROPERTIES THAT MAKE IT POLLABLE. routePost waits up to 20s for
+     the script lock before it routes anything, so a status check sent through
+     doPost would queue behind the very booking it is asking about — exactly
+     the trap this file's section 2 found in the retry. */
+  t('it took no lock', !Q.order.includes('lock_acquired'), Q.order);
+  t('and wrote nothing', !Q.order.some(x => x.indexOf('sheet_write:') === 0), Q.order);
+
+  const booked = Q.post(Object.assign({}, BOOKING, { submission_id: ID, notify_deferred: true }));
+  t('the booking itself still works', booked.status === 'ok', booked.status);
+
+  Q.order.length = 0;
+  const after = Q.get({ booking: ID });
+  t('THE SAME QUESTION NOW ANSWERS found:true', after.ok === true && after.found === true, after);
+  t('still no lock', !Q.order.includes('lock_acquired'), Q.order);
+  t('still no write', !Q.order.some(x => x.indexOf('sheet_write:') === 0), Q.order);
+
+  /* The property that stops the confirmation screen and the dedupe drifting
+     apart. Both read alreadyWritten(), so "the screen says confirmed" and "a
+     replay says duplicate" are the same fact — two opinions about whether a
+     booking exists would be two different screens for one customer. */
+  t('and agrees with what a replay would say',
+    after.found === (Q.post(Object.assign({}, BOOKING, { submission_id: ID })).duplicate === true));
+
+  /* r55's parked notice, reported so the polling Worker can send it — it may
+     be the only caller that ever learns one is waiting, because the Worker
+     that took the booking gave up before it was answered. */
+  t('it reports r55\'s parked text and email as pending', after.notify_pending === true, after);
+  Q.post({ event_type: 'booking_notify', submission_id: ID });
+  t('and reports nothing pending once that notice is claimed',
+    Q.get({ booking: ID }).notify_pending === false);
+
+  /* Nothing about the customer crosses this boundary — not a name, number,
+     address, price or job_id. A submission_id is a random id the browser
+     minted for itself; the answer is one boolean about that id. */
+  const answer = Q.get({ booking: ID });
+  t('the answer is three booleans and nothing else',
+    Object.keys(answer).sort().join() === 'found,notify_pending,ok', answer);
+  t('and names nobody',
+    !/Test|555|Beacon|example\.com|SRV-|02134/.test(JSON.stringify(answer)), answer);
+
+  /* REFUSED, not merely "not found" — and the difference is the whole guard.
+     Without the shape check a junk id falls through to a full column read and
+     comes back a cheerful found:false, so the check reads as working while
+     doing nothing. `ok:false` is the only answer that proves it fired. */
+  /* An EMPTY ?booking= is deliberately not in this list: it is not a malformed
+     status request, it is not a status request at all, and it falls through to
+     the health stamp below. The Worker refuses an empty id before it ever
+     relays one — see worker-proxy.test.js §4c. */
+  for (const junk of ['../../x', 'has space', 'x'.repeat(101)]) {
+    const r = Q.get({ booking: junk });
+    t('an unusable id (' + JSON.stringify(junk.slice(0, 10)) + ') is REFUSED, never found',
+      r.ok === false && r.found !== true, r);
+  }
+
+  /* An older deployment has no ?booking route. It must fall through to the
+     health stamp — no `found`, nothing written — so a site pushed before the
+     paste behaves exactly as it does today rather than creating rows. */
+  const health = Q.get({});
+  t('a GET with no booking is still the health stamp', health.service === 'serve-booking-webhook', health);
+  t('and the stamp carries no `found` for a stale script to be mistaken for',
+    !('found' in health), health);
+}
 
 console.log('\n' + (bad ? bad + ' FAILED' : 'all passed'));
 process.exit(bad ? 1 : 0);

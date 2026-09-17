@@ -6,10 +6,137 @@ assistant with no access to this repo. Self-contained on purpose.
 **Companion doc:** `/docs/SCHEMA.md` — authoritative for every column's meaning
 and who writes it. This file is the narrative; that file is the contract.
 
-**Latest session: 2026-09-16.** Jump to
+**Latest session: 2026-09-17.** Jump to
 [what changed on 2026-09-08 / 09](#session-2026-09-08--09) for the current
 state. The sections below it describe earlier builds and remain accurate
 except where a later section supersedes them.
+
+---
+
+## Current work — 2026-09-17, Claude Code: r56, a booking that succeeded can no longer show the failure panel
+
+**LOCAL EDITS ONLY until the founder pastes.** Files: `apps-script/webhook.gs`
+(now r56), `src/worker.js`, `script.js`, `tests/worker-proxy.test.js`,
+`tests/reservation-lock-release.test.js`, `docs/SCHEMA.md`, this entry.
+This entry supersedes the r55 one below it; **r55 is still unpasted and ships
+with r56 in the same file.**
+
+**Founder report, and it is the second time:** a test booking took a long time,
+**the text and the email both arrived**, and the screen still said "your booking
+could not be confirmed". r53 was live. So r53's rescue — attempt 2 reaching the
+dedupe — did not save it either.
+
+**MEASURED THIS SESSION, not inferred.** Three `POST /api/submit` calls with a
+body the webhook rejects before it touches any sheet: **4.1s, 2.2s, 1.5s.** That
+is the *floor* — container plus routing, zero work. A reservation adds a dozen
+Sheets calls across two workbooks, the script lock, Twilio and Gmail on top.
+The 12s submit budget is simply not comfortably above that, and no value for it
+would be: the tail is long and always will be.
+
+**THE REAL DEFECT WAS NEVER THE WAIT — it was that the browser had only one
+question to ask.** `/api/submit` is a write. A POST that does not come back in
+time says **nothing** about whether the booking happened, and the code treated
+"no reply" as "it failed". r53 and r55 both attacked the latency; this attacks
+the inference.
+
+**The fix (r56), three parts:**
+1. **Apps Script:** `GET ?booking=<submission_id>` → `{ok, found, notify_pending}`.
+   One column read. **No lock** (routed through `doGet`, so it cannot queue
+   behind the booking it is asking about) and **no write**. `found` *is*
+   `alreadyWritten()` — the dedupe's own predicate — so the screen and the
+   replay can never disagree.
+2. **Worker:** `GET /api/booking-status?id=`. Always 200; every answer means
+   "it is there" or "still don't know". If it is the first caller to hear that
+   r55 parked a notice, it sends it from `waitUntil`.
+3. **Browser:** a POST that does not answer starts a **watch** on the sheet
+   (30s, polling every 2.5s) *and* replays the POST once. Either can confirm;
+   **only the watch may conclude failure**, and 30s > 1.2s + 15s so it always
+   outlives the replay. The failure panel now means the row genuinely is not
+   there. Button copy gained a second stage at 18s.
+
+**Checked:** `node tests/run-all.js` — **all 35 pass.** New: worker-proxy §4c
+(24 assertions: GET not POST, upstream down → 200/ok:false, an old script never
+reads as confirmed *and* logs "paste r56", the notify follow-up only on
+`found && notify_pending`, malformed ids refused without a round trip) and §7's
+watch/replay contract; reservation-lock-release §9 (the check takes no lock,
+writes nothing, agrees with the dedupe, answers three booleans and names
+nobody). **13 mutations run, all red** — relaying a POST, 502 on an unreachable
+upstream, a stale script read as "not there", notify without `found`, a watch
+shorter than the replay, a failed poll read as "absent", concluding failure
+instead of watching, plus six on the Apps Script half.
+
+**NOT checked:** anything live. Nothing is pasted, nothing is pushed, and no
+real booking has been made against r56.
+
+**Next action — the paste is what actually fixes it:**
+1. Paste `apps-script/webhook.gs` into Leads MASTER → Extensions → Apps Script
+   and **deploy a new version**. Confirm `/exec` answers `2026-09-17 r56`.
+2. Push the site.
+3. Test booking. Expect it to confirm faster (r55 drops Twilio + Gmail off the
+   critical path) and, if it is still slow, to confirm anyway via the watch —
+   the console says `Reservation confirmed by watching the sheet.` when it did.
+4. In Apps Script → Executions, a `booking_notify` run should follow the
+   booking. If `wrangler tail` ever logs "upstream has no ?booking route", the
+   paste did not take.
+
+**Ordering note.** The standing rule is paste-before-push and it still applies,
+but r56 was built so the reverse cannot break anything: the check is a GET, an
+older script answers its health stamp, no row is created either way, and the
+r53 replay path is untouched — so during any gap a booking behaves exactly as it
+does today.
+
+---
+
+## Superseded — 2026-09-17, Claude Code: r55, "Reserve" no longer waits for the text and email
+
+**LOCAL EDITS ONLY. Not committed, not pushed, not pasted.** Files:
+`apps-script/webhook.gs`, `src/worker.js`,
+`tests/reservation-lock-release.test.js`, `tests/worker-proxy.test.js`,
+`docs/SCHEMA.md`, this entry. (`AGENTS.md` / `CLAUDE.md` were already modified
+when the session started — not touched, not mine.)
+
+**Founder report:** the Reserve button takes a long time to reach "You're on
+the schedule". **Diagnosis, from the code — not measured:** the webhook
+answered only after `sendBookingSms` (Twilio) and `sendReservationEmail`
+(Gmail). That regularly pushed it past the Worker's 12s submit budget → Worker
+502 → browser waits 1.2s → retry → r53's dedupe answers `duplicate:true` →
+confirmation. About 12 + 1.2 + 1–3s ≈ 15s. r53 fixed the *error screen*, not
+the wait. **To confirm:** Apps Script → Executions for a test booking should
+show a long execution followed closely by a short one.
+
+**The fix (r55):** the Worker sends `notify_deferred:true`; the webhook writes
+the sheets, parks the notice in script property `notify:<submission_id>`,
+answers `notify_pending:true`; the Worker POSTs `booking_notify` from
+`waitUntil`. Also: the duplicate reply reports `notify_pending`, so a retry's
+Worker sends it; and the 5-minute cron POSTs a sweep for notices over 60s old.
+Claim = read + delete under the script lock, so at most once. Full contract in
+SCHEMA → Endpoints → "Booking texts and emails are sent after the answer".
+**Either deploy order is safe** (each side only changes behaviour when the
+other asks), but paste first as usual.
+
+**Checked:** `node tests/run-all.js` — all 35 pass. New assertions: deferred
+path sends nothing before answering, follow-up sends once, second follow-up and
+sweep send nothing, sweep leaves young notices and unrelated properties alone,
+oversize notice falls back inline, flag never reaches a row; Worker adds the
+flag only with a ctx, queues the follow-up only on `notify_pending:true`,
+failure is a log line. **Five mutations run, all red:** claim without delete,
+never defer, sweep ignoring age, Worker never following up, cron without sweep.
+
+**NOT checked:** real timing (no harness has the lock, the 12s budget or
+waitUntil); real payload size vs the 8,500-char cap (estimated 2–3KB from
+`basePayload`'s fields — if the log ever says "too large to park", it is the
+old slow path, not an outage).
+
+**Next action:** ~~founder pastes r55~~ — **rolled into the r56 paste above;
+r55 was never pasted on its own.** The rest still applies: after the paste,
+time a test booking and confirm the SMS and email arrive within ~10–30s, and
+check Executions for a `booking_notify` run.
+
+**And the diagnosis above was CONFIRMED and then found incomplete.** The wait is
+real and r55 addresses it, but a second founder booking on 2026-09-17 took the
+slow path, delivered both messages, **and still showed the failure panel** — so
+r53's retry-reaches-the-dedupe rescue is not reliable either. That is what r56
+fixes, and why the fix is a different question rather than a different timeout.
 
 ---
 

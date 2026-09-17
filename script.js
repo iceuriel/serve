@@ -279,6 +279,10 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
     /* Booking webhook -> /apps-script/webhook.gs */
     const SHEETS_URL = '/api/submit';
 
+    /* "Is that booking in the sheet yet?" — the cheap read behind SHEETS_URL's
+       expensive write. See watchBooking. */
+    const BOOKING_STATUS_URL = '/api/booking-status';
+
     /* Availability feed -> /apps-script/availability.gs.
        Set to '' to skip the network call and go straight to the fallback.
        Response shape:
@@ -306,16 +310,34 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
        never leave them staring at "Reserving…". */
     const AVAILABILITY_TIMEOUT_MS = 5000;
 
-    /* Budget for the reservation POST.
+    /* Budget for one reservation POST.
        The Worker gives up on Apps Script at 12s and answers with its own 502,
        so 15s here is long enough to receive that rather than aborting blind.
-       Two attempts is cheap insurance — submission_id makes a retry safe — but
-       it puts the worst case near 30s, so the button reports progress instead
-       of sitting frozen. Most successes return in under five seconds. */
+       Most successes return in under five seconds. */
     const RESERVE_CONFIRM_TIMEOUT_MS = 15000;
-    const RESERVE_MAX_ATTEMPTS = 2;
     const RESERVE_RETRY_DELAY_MS = 1200;
     const RESERVE_SLOW_NOTICE_MS = 6000;
+    const RESERVE_WAIT_NOTICE_MS = 18000;
+
+    /* Budget for WATCHING the sheet after a submit ran long — see watchBooking.
+       Asking "is it there yet" is one column read with no lock behind it, so it
+       can be asked often and cheaply while the slow write finishes. 30s past the
+       first failure outlives the replay attempt (1.2s + 15s), which is what
+       makes the watcher, not the replay, the thing that decides failure. */
+    const RESERVE_WATCH_MS = 30000;
+    const RESERVE_WATCH_INTERVAL_MS = 2500;
+    const RESERVE_WATCH_TIMEOUT_MS = 10000;
+
+    /* Replies that mean THE BOOKING DID NOT HAPPEN, as distinct from "I did not
+       hear back" — the distinction the whole watch exists to draw. The Worker
+       produces every one of these BEFORE it relays anything upstream, so there
+       is no row on its way, nothing for a replay to fix, and no reason to make
+       somebody watch an empty sheet for half a minute. `upstream_unreachable`
+       is deliberately NOT here: that one is the ambiguous case. */
+    const RESERVE_REFUSALS = {
+        price_mismatch: 1, bad_body: 1, unreadable_body: 1,
+        not_configured: 1, method_not_allowed: 1,
+    };
 
     const $ = (id) => document.getElementById(id);
 
@@ -426,20 +448,13 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
     }
 
     /**
-     * Reservation POST — readable, so we only tell someone they are booked once
-     * the sheet write is confirmed.
+     * One reservation POST. Resolves { confirmed, error }; never rejects.
      *
-     * If the readable call fails for ANY reason (network, timeout, CORS, a non-ok
-     * status, an unparseable body), it retries once as the old fire-and-forget
-     * no-cors call so the lead still lands, then resolves unconfirmed. The caller
-     * shows the success panel either way — a customer never gets an error screen
-     * for a booking we may well have received. Both attempts carry the same
-     * submission_id, so the retry cannot double-book the sheet.
-     *
-     * Resolves { confirmed: true|false }. Never rejects.
+     * "Not confirmed" here means ONLY "this request did not come back with a
+     * yes" — never "the booking failed". The two were treated as the same thing
+     * until 2026-09-17, which is the whole bug postReservation below fixes.
      */
-    function postReservation(payload, attempt) {
-        attempt = attempt || 1;
+    function attemptReservation(payload, attempt) {
         return new Promise((resolve) => {
             const ctrl  = (typeof AbortController !== 'undefined') ? new AbortController() : null;
             const timer = setTimeout(() => { if (ctrl) ctrl.abort(); }, RESERVE_CONFIRM_TIMEOUT_MS);
@@ -456,24 +471,124 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
                     if (!body || body.status !== 'ok') {
                         throw new Error(body && body.error ? body.error : 'unconfirmed');
                     }
-                    resolve({ confirmed: true, body: body });
+                    /* duplicate:true is a yes. It means this very submission_id
+                       is already a row, which is the thing we wanted. */
+                    resolve({ confirmed: true, body: body, attempt: attempt });
                 })
                 .catch(err => {
                     clearTimeout(timer);
-                    /* One retry. submission_id is unchanged, so if the first
-                       attempt did land the server dedupes it and answers
-                       duplicate:true — which still counts as confirmed. */
-                    if (attempt < RESERVE_MAX_ATTEMPTS) {
-                        console.warn('Reservation attempt ' + attempt + ' failed, retrying.', err);
-                        setTimeout(function () {
-                            postReservation(payload, attempt + 1).then(resolve);
-                        }, RESERVE_RETRY_DELAY_MS);
-                        return;
-                    }
-                    console.error('Reservation could not be confirmed after ' +
-                                  attempt + ' attempts.', err);
-                    resolve({ confirmed: false, error: String(err && err.message || err) });
+                    resolve({ confirmed: false, attempt: attempt,
+                              error: String((err && err.message) || err) });
                 });
+        });
+    }
+
+    /**
+     * Has this booking reached the sheet? Resolves true only for a definite yes.
+     *
+     * A failed poll resolves FALSE MEANING "DON'T KNOW", never "absent" — the
+     * caller's answer to both is the same, ask again shortly, and the only thing
+     * that ends the watch is the deadline.
+     */
+    function bookingLanded(submissionId) {
+        return new Promise((resolve) => {
+            const ctrl  = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+            const timer = setTimeout(() => { if (ctrl) ctrl.abort(); }, RESERVE_WATCH_TIMEOUT_MS);
+
+            fetch(BOOKING_STATUS_URL + '?id=' + encodeURIComponent(submissionId), {
+                method: 'GET',
+                signal: ctrl ? ctrl.signal : undefined,
+            })
+                .then(res => res.json())
+                .then(body => { clearTimeout(timer); resolve(!!(body && body.ok && body.found)); })
+                .catch(() => { clearTimeout(timer); resolve(false); });
+        });
+    }
+
+    /**
+     * Poll until the booking appears or the budget runs out. Calls done(bool).
+     *
+     * THIS IS THE THING THAT DECIDES WHICH SCREEN THE CUSTOMER SEES, and it is
+     * deliberately the slowest of the three channels so that it always speaks
+     * last. A replay can only ever say "yes"; only the watcher may say "no".
+     */
+    function watchBooking(submissionId, done) {
+        if (!submissionId) { done(false); return; }
+        const deadline = Date.now() + RESERVE_WATCH_MS;
+        (function poll() {
+            bookingLanded(submissionId).then(function (landed) {
+                if (landed) return done(true);
+                if (Date.now() >= deadline) return done(false);
+                setTimeout(poll, RESERVE_WATCH_INTERVAL_MS);
+            });
+        })();
+    }
+
+    /**
+     * Reserve, and answer the only question that actually matters: IS THE
+     * BOOKING IN THE SHEET?
+     *
+     * WHY THIS IS NOT JUST A RETRY LOOP — the live failure of 2026-09-17, with
+     * r53 already deployed. A test booking completed in full: JOBS row written,
+     * confirmation text delivered, email delivered. The customer was shown "your
+     * booking could not be confirmed". Both POSTs had run past the Worker's 12s
+     * budget, and a POST that does not come back in time carries NO INFORMATION
+     * about whether the booking happened. The browser had no other way to ask,
+     * so it guessed, and it guessed wrong in the worst possible direction.
+     *
+     * No timeout can be tuned out of this. A reservation is a dozen Sheets
+     * calls across two workbooks behind a script lock; its tail is long and
+     * always will be. So the fix is a second question rather than a longer wait:
+     *
+     *   1. POST the reservation. Answered in time -> confirmed. Usually this.
+     *   2. Otherwise, start WATCHING the sheet (one cheap column read, no lock,
+     *      ~1s even while the slow write is still running), and
+     *   3. replay the POST once, 1.2s later, because if attempt 1 never landed
+     *      the replay is the only thing that can still create the booking.
+     *      Same submission_id, so it dedupes rather than double-books.
+     *
+     * A "yes" from either channel confirms immediately. Only the watcher, which
+     * outlives the replay, is allowed to conclude "no" — so the failure panel
+     * now means the booking genuinely is not in the sheet, which is the only
+     * thing it ever claimed to mean.
+     *
+     * Resolves { confirmed: true|false }. Never rejects.
+     */
+    function postReservation(payload) {
+        return new Promise((resolve) => {
+            let settled = false;
+            const finish = (result) => { if (!settled) { settled = true; resolve(result); } };
+
+            attemptReservation(payload, 1).then((first) => {
+                if (first.confirmed) return finish(first);
+
+                /* A refusal is an ANSWER, and a definite one. Watching for a row
+                   the server never started writing would only make somebody wait
+                   half a minute for the same failure panel. */
+                if (RESERVE_REFUSALS[first.error]) {
+                    console.error('Reservation refused outright: ' + first.error);
+                    return finish(first);
+                }
+
+                console.warn('Reservation POST 1 did not answer (' + first.error +
+                             '). Watching the sheet for ' + payload.submission_id + '.');
+
+                /* The only channel that can still CREATE the booking. Its
+                   failure is not evidence of anything and is dropped. */
+                setTimeout(function () {
+                    if (settled) return;
+                    attemptReservation(payload, 2).then((second) => {
+                        if (second.confirmed) finish(second);
+                        else console.warn('Reservation POST 2 did not answer either (' +
+                                          second.error + '). The watch decides.');
+                    });
+                }, RESERVE_RETRY_DELAY_MS);
+
+                watchBooking(payload.submission_id, function (landed) {
+                    if (landed) return finish({ confirmed: true, watched: true });
+                    finish({ confirmed: false, error: first.error || 'unconfirmed' });
+                });
+            });
         });
     }
 
@@ -1458,11 +1573,20 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
         reserveSubmit.disabled = true;
         reserveSubmit.textContent = 'Reserving…';
 
-        /* A retry can push the worst case near 30 seconds. Without this the
-           button just sits there and people assume it broke and leave. */
+        /* A slow booking plus the watch can run to the better part of a minute.
+           Without this the button just sits there and people assume it broke and
+           leave — and leaving is the one thing that costs them the booking,
+           since the write is very probably already running. Two stages: the
+           second one exists to keep somebody on the page at the point where a
+           single unchanging label starts reading as a hang. */
         const slowNotice = setTimeout(function () {
             if (reserveSubmitting) reserveSubmit.textContent = 'Still reserving — hold on…';
         }, RESERVE_SLOW_NOTICE_MS);
+        const waitNotice = setTimeout(function () {
+            if (reserveSubmitting) {
+                reserveSubmit.textContent = 'Almost there — please keep this page open';
+            }
+        }, RESERVE_WAIT_NOTICE_MS);
 
         recompute();
         const q = state.quote;
@@ -1525,10 +1649,6 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
                 : "Serve is coordinating with our provider network. We'll reach out shortly to confirm your exact arrival window.";
         }
 
-        // Only claim the spot once the sheet write comes back confirmed. If it
-        // cannot be confirmed, postReservation has already retried fire-and-forget
-        // and warned in the console — we still show success rather than sending a
-        // paying customer an error for a booking we probably received.
         /* Only claim the spot on a confirmed write.
 
            This used to show the confirmation regardless, on the reasoning that a
@@ -1539,7 +1659,12 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
            the schedule.
 
            Now the endpoint is same-origin a genuine failure means something is
-           actually broken, so saying so is both honest and rare. */
+           actually broken, so saying so is both honest and rare.
+
+           AND AS OF r56 "confirmed" MEANS THE ROW IS IN THE SHEET, rather than
+           "a POST came back in time". Those are not the same claim, and the
+           difference is what put a fully successful booking on the failure panel
+           on 2026-09-17. See postReservation. */
         /* Signature first, then the booking. signQuote never rejects and never
            blocks: an unreachable or unbound signer resolves null, `quote_sig`
            is simply absent, and the reservation proceeds exactly as it did
@@ -1553,12 +1678,19 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
             return postReservation(p);
         }).then(result => {
             clearTimeout(slowNotice);
+            clearTimeout(waitNotice);
             if (result.confirmed) {
                 setView('confirmed');
                 armPostBookingNotes(p.submission_id);
+                /* result.watched means the POST never answered and the sheet was
+                   watched until the row appeared. Same booking and the same
+                   screen — logged because it is the signal that the upstream is
+                   running slow, which is invisible from a green confirmation. */
+                if (result.watched) console.warn('Reservation confirmed by watching the sheet.');
                 return;
             }
-            console.error('Reservation NOT confirmed.', p.submission_id, result.error);
+            console.error('Reservation NOT confirmed — not in the sheet.',
+                          p.submission_id, result.error);
             showReserveFailure(p, result.error);
         });
     });

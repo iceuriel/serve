@@ -1254,7 +1254,65 @@ cold start. `wrangler.jsonc` therefore carries **two** cron triggers, and
 | cron | what runs |
 |---|---|
 | `17 8 * * *` | `cleanupPhotoStorage()` — deletes purged room photos from R2 |
-| `*/5 * * * *` | `warmUpstreams()` — a GET to each `/exec`, purely to keep the container alive |
+| `*/5 * * * *` | `warmUpstreams()` — a GET to each `/exec`, purely to keep the container alive, **plus (r55) one POST `booking_notify` `action:"sweep"` to the webhook**, which sends any booking text/email parked for over a minute |
+
+#### Booking texts and emails are sent after the answer (r55, 2026-09-17)
+
+`/api/submit` adds `notify_deferred: true` to the booking it relays. The webhook
+then writes the sheets, parks what the text and email need in **one script
+property, `notify:<submission_id>`** (JSON, ≤ 8,500 chars), and answers with
+`notify_pending: true`. The Worker answers the browser and, in `waitUntil`,
+POSTs `{event_type:"booking_notify", submission_id}`; the webhook claims the
+property under the script lock (read + delete), releases, and sends.
+
+| field / key | where | meaning |
+|---|---|---|
+| `notify_deferred` | request, Worker → webhook | delivery instruction; deleted before any row is written |
+| `notify_pending` | webhook reply, reservation and duplicate | a notice for this submission is parked; the Worker should send it |
+| `notify:<submission_id>` | Script Properties, Leads MASTER project | the parked notice, contact details included; deleted on claim |
+
+At most once per booking. No secret: the call can only send a notice the
+booking already parked. Too large, an unusable `submission_id`, a failed
+property write, or no `notify_deferred` → sent inline exactly as before r55.
+Either deploy order is safe.
+
+#### "Is this booking in the sheet yet?" (r56, 2026-09-17)
+
+**`GET /api/booking-status?id=<submission_id>` → `{ok, found}`.** The Worker
+relays it as **`GET <WEBHOOK_URL>?booking=<submission_id>`**; the webhook answers
+`{ok:true, found, notify_pending}`.
+
+**Why it exists.** `/api/submit` is a write with a 12s budget, and a POST that
+does not return in time carries **no information about whether the booking
+happened**. Those two were treated as the same thing until a booking that had
+fully succeeded — row written, text delivered, email delivered — showed the
+customer "your booking could not be confirmed" (2026-09-17, r53 live). No
+timeout can be tuned out of that; a reservation is a dozen Sheets calls across
+two workbooks behind the script lock and its tail is long. So the browser got a
+**second, cheaper question** instead of a longer wait.
+
+| property | why it is load-bearing |
+|---|---|
+| **No script lock** | `routePost` waits up to 20s for the lock before routing, so a status check sent as a POST would queue behind the very booking it asks about — the trap r53 found in the retry. `doGet` takes none, so this answers *while* the slow write is still running. |
+| **No write, ever** | it is a GET; it cannot create a row on any deployment. |
+| **`found` is `alreadyWritten()`** | the same predicate the reservation dedupes on, so "the screen says confirmed" and "a replay says duplicate" are one fact. Two opinions about whether a booking exists is two screens for one customer. |
+| **Always HTTP 200** | every answer means "it is there" or "still don't know"; the caller's response to the second is to ask again. A 502 reads as an outage and would stop the poll on a live booking. |
+
+**Nothing about the customer crosses this boundary** — no name, number, address,
+price or `job_id`. A `submission_id` is a random id the browser minted for
+itself and the answer is one boolean about it, so there is no secret to check
+and nothing to learn by guessing ids.
+
+**Safe in either deploy order, and safe un-pasted.** A webhook older than r56
+does not know `booking` and falls through to its health stamp, which carries no
+`found`; the Worker reports `upstream_stale` and **logs that the script needs
+pasting**. The browser then behaves exactly as it did before r56.
+
+The browser's side: a reservation POST that does not answer starts a watch
+(`RESERVE_WATCH_MS`, polling every `RESERVE_WATCH_INTERVAL_MS`) *and* replays
+the POST once. Either may confirm; **only the watch may conclude failure**, and
+it is sized to outlive the replay so that stays true. The failure panel now
+means the booking is genuinely not in the sheet.
 
 **The strings are duplicated in `wrangler.jsonc` and in the `CRON_*` constants**
 — Cloudflare reads the config, the Worker reads the event — so a test asserts

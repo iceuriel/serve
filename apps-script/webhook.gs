@@ -1,7 +1,54 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-16  ·  master  ·  r54 — "provider", not "vendor", in anything a human reads
+ * VERSION STAMP:  2026-09-17  ·  master  ·  r56 — the browser can ask whether a booking landed
+ *
+ * r56 = A BOOKING THAT SUCCEEDED CAN NO LONGER SHOW THE FAILURE PANEL.
+ *
+ *      r53 and r55 both attacked the WAIT. This attacks the SCREEN, and it is
+ *      the one that closes the hole for good, because no latency budget can be
+ *      made generous enough to be right every time.
+ *
+ *      Until now the only question the browser could ask was "please make this
+ *      booking" — a write, behind the script lock, costing the full reservation
+ *      path. If that ran past the Worker's 12s budget the browser learned
+ *      nothing at all, and a completed booking (row written, text sent, email
+ *      sent) showed the yellow "we couldn't confirm" panel. That happened to a
+ *      real test booking on 2026-09-17 with r53 live.
+ *
+ *      NOW THERE IS A SECOND, CHEAP QUESTION:  GET ?booking=<submission_id>
+ *      answers {ok:true, found:<bool>}. One column read. No lock, no write, no
+ *      customer data in or out. It answers in about a second WHILE the slow
+ *      write is still running, which is exactly when it is needed.
+ *
+ *      `found` is alreadyWritten() — the very predicate the reservation dedupes
+ *      on — so the confirmation screen appears exactly when a replay would have
+ *      answered duplicate:true. See handleBookingStatus.
+ *
+ *      SAFE TO PASTE IN EITHER ORDER, and safe if it is never pasted at all:
+ *      the check is a GET, so an older script answers its health stamp, which
+ *      carries no `found` and leaves the browser exactly as it behaves today.
+ *      Nothing is written and no row is created either way.
+ *
+ * r55 = "RESERVE" TOOK ~15 SECONDS. PASTE THIS BEFORE THE SITE IS PUSHED.
+ *
+ *      The reservation answered only after the Twilio call and the Gmail send,
+ *      which regularly carried it past the Worker's 12s budget: the browser got
+ *      a 502, waited 1.2s, retried, and only then saw "You're on the schedule".
+ *
+ *      Now, when the Worker asks (notify_deferred), the booking parks the text
+ *      and email in a script property and answers as soon as the sheets are
+ *      written. The Worker then calls back with event_type "booking_notify" in
+ *      the background, and its five-minute cron sweeps up anything missed. Each
+ *      notice is claimed under the lock and sent at most once. See
+ *      handleBookingNotify.
+ *
+ *      EITHER DEPLOY ORDER IS SAFE, and paste-first is still the rule. This
+ *      script defers only when asked, and the Worker calls back only when told
+ *      a notice is pending — so an old Worker with this script, or this Worker
+ *      with the old script, both behave exactly as r54 did.
+ *
+ *      No new script properties to set and no new secrets.
  *
  * r54 = COPY ONLY. NO BEHAVIOUR CHANGES, AND A PASTE IS OPTIONAL.
  *
@@ -1417,14 +1464,31 @@ function routePost(e, parsed) {
        promote themselves. */
     if (eventType === "vendor_write") return handleVendorWrite(data);
 
+    /* r55. The booking's text and email, sent after the customer already has
+       their confirmation. See handleBookingNotify. */
+    if (eventType === "booking_notify") {
+      return handleBookingNotify(data, writeLockHeld, releaseWriteLock);
+    }
+
     if (!isReservation) return handleEvent(ss, data, eventType);
+
+    /* r55. Set by the Worker, never by a browser, and read exactly once: it
+       is a delivery instruction, not booking data, so it must not reach a
+       row or the "dropped fields" log. */
+    const deferNotify = data.notify_deferred === true;
+    delete data.notify_deferred;
 
     const jobs = requireTab(ss, JOBS_TAB);
 
-    /* Idempotency first — a replay must mutate nothing anywhere. */
+    /* Idempotency first — a replay must mutate nothing anywhere.
+
+       notify_pending on a replay is what rescues the text when attempt 1 ran
+       past the Worker's budget: that Worker never saw the answer that would
+       have told it to send, and this is the retry's Worker learning it. */
     if (alreadyWritten(jobs, data.submission_id)) {
       console.log("Duplicate submission_id — no JOBS row, no LEADS mutation: " + data.submission_id);
-      return json({ status: "ok", duplicate: true, submission_id: data.submission_id });
+      return json({ status: "ok", duplicate: true, submission_id: data.submission_id,
+                    notify_pending: hasPendingNotify(data.submission_id) });
     }
 
     /* THE PARTNER SHARE IN FORCE RIGHT NOW, stamped onto this booking so that
@@ -1559,30 +1623,28 @@ function routePost(e, parsed) {
        show two executions, the first long and the second long and almost
        entirely idle. The suite cannot catch any of this — neither the lock nor
        the 12s budget exists in the harness. */
+
+    /* r55. Everything the text and the email need, gathered once. Queued
+       BEFORE the release so a retry that reaches the dedupe can already see
+       it; a script property is not a sheet, and each booking has its own key. */
+    const notice = {
+      data: data, sched: sched, leadId: leadId, leadResult: leadResult,
+      propertyResult: propertyResult, slotResult: slotResult,
+      contactId: (leadResult && leadResult.contact_id) || "",
+      jobId: record.job_id, queuedAt: Date.now(),
+    };
+    const notifyPending = deferNotify && queueBookingNotify(notice);
+
     releaseWriteLock();
 
-    /* r26. The customer's own text, after the row exists and after the dedupe,
-       so a retried submission cannot text anybody twice. Returns a reason
-       rather than throwing; "no consent" and "twilio not configured" are
-       ordinary outcomes and most bookings will report one of them. */
-    var smsResult = "skipped";
-    try {
-      smsResult = sendBookingSms(data, leadResult && leadResult.contact_id, record.job_id);
-    } catch (smsErr) {
-      smsResult = "failed";
-      console.error("booking SMS wrapper failed (booking stands): " + smsErr);
-    }
-    console.log("booking SMS " + record.job_id + ": " + smsResult);
-
-    try {
-      sendReservationEmail(data, sched, leadId, leadResult, propertyResult, slotResult);
-    } catch (mailErr) {
-      console.error("Email send failed (row was still written): " + mailErr);
-    }
+    /* Not deferred — a caller other than the Worker, or a notice too large to
+       park — means the old behaviour exactly: send now, answer after. */
+    if (!notifyPending) deliverBookingNotify(notice);
 
     return json({
       status: "ok",
       duplicate: false,
+      notify_pending: notifyPending,
       submission_id: data.submission_id || "",
       lead_id: leadId,
       job_id: record.job_id,
@@ -1731,8 +1793,58 @@ function routeGet(e) {
   if (p.portal) return handlePortal(p);
   if (p.vendor) return handleVendorPortal(p);
   if (p.property) return handleKnownProperty(p.property);
+  /* r56. "Did that booking land?" — see handleBookingStatus. A GET on purpose:
+     it writes nothing, and on a script older than r56 it falls through to the
+     health stamp below rather than creating anything. */
+  if (p.booking) return handleBookingStatus(p.booking);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-16 r54" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-17 r56" });
+}
+
+
+/**
+ * GET ?booking=<submission_id>  ->  {ok:true, found:<bool>, notify_pending:<bool>}
+ *
+ * THE CHEAP QUESTION. A reservation POST is a dozen Sheets calls, two workbooks
+ * and the script lock; when it overran the Worker's 12s budget the browser was
+ * left with no way to find out that the booking had in fact completed, so it
+ * showed the failure panel over a perfectly good booking. This is the same
+ * question asked for the price of ONE COLUMN READ, and it can be asked
+ * repeatedly while the slow write is still in flight.
+ *
+ * NO LOCK, DELIBERATELY, AND THIS IS THE WHOLE POINT. routePost waits up to 20s
+ * for the script lock before it routes anything, so a status check sent through
+ * doPost would queue behind the very booking it is asking about — the same
+ * structural trap r53 found in the retry. doGet takes no lock, and a read needs
+ * none: a half-written booking reads as not-found, which is the honest answer,
+ * and the next poll two seconds later says yes.
+ *
+ * IT SHARES A PREDICATE WITH THE DEDUPE RATHER THAN RE-IMPLEMENTING ONE.
+ * alreadyWritten() is what a replayed reservation answers duplicate:true on, so
+ * "the screen says confirmed" and "a retry would say duplicate" can never drift
+ * apart. Two opinions about whether a booking exists is two different screens
+ * for one customer.
+ *
+ * NOTHING ABOUT THE CUSTOMER CROSSES THIS BOUNDARY — not a name, a number, an
+ * address, a price or a job_id. A submission_id is a random id the browser
+ * minted for itself, and the answer is one boolean about that id. Someone
+ * guessing ids learns only that a random UUID they invented is not a booking.
+ */
+function handleBookingStatus(submissionId) {
+  var id = String(submissionId || "").trim();
+  if (!NOTIFY_ID_SHAPE.test(id)) return json({ ok: false, error: "bad_submission_id" });
+
+  var jobs = leadsBook().getSheetByName(JOBS_TAB);
+  if (!jobs) return json({ ok: false, error: "unavailable" });
+
+  var found = alreadyWritten(jobs, id);
+
+  /* r55's parked text and email. Reported for the same reason the dedupe
+     reports it: the Worker that asked may be the only one that ever learns a
+     notice is waiting, because the Worker that took the booking gave up
+     before it was answered. */
+  return json({ ok: true, found: found,
+                notify_pending: found && hasPendingNotify(id) });
 }
 
 
@@ -2650,6 +2762,156 @@ function sendBookingSms(data, contactId, jobId) {
     console.error("booking SMS threw for " + jobId + " (booking stands): " + err);
     return "failed";
   }
+}
+
+
+/* ============================================================
+   THE TEXT AND THE EMAIL NO LONGER HOLD UP THE CONFIRMATION  —  r55
+   ============================================================
+
+   THE SYMPTOM (2026-09-17). "Reserve" took ~15 seconds to reach "You're on the
+   schedule". r53 stopped that wait ending on the yellow failure panel, but not
+   the wait itself: this script answered only after the Twilio call and the
+   Gmail send, which routinely pushed it past the Worker's 12s budget, and the
+   browser then sat through a 502 and a retry before it saw the confirmation.
+
+   NOW THE BOOKING ANSWERS AS SOON AS THE SHEETS ARE WRITTEN. When the Worker
+   asks for it (notify_deferred), the reservation parks everything the text and
+   email need in one script property, "notify:<submission_id>", and returns
+   notify_pending:true. The Worker answers the browser, then — in waitUntil, with
+   nobody waiting — POSTs {event_type:"booking_notify", submission_id} back here,
+   and this sends them.
+
+   THREE ROUTES TO THE SAME PARKED NOTICE, AND IT IS SENT AT MOST ONCE:
+     1. the Worker that got the booking's answer (the normal case)
+     2. the Worker of a RETRY — the dedupe reports notify_pending, so a first
+        attempt that ran past its budget still gets its text within seconds
+     3. the five-minute warm cron's sweep, for anything older than a minute
+        (a failed follow-up call, a cold start past the Worker's patience)
+   Each one CLAIMS under the script lock — read, delete, release — and sends
+   only what it claimed. Two callers racing get one send.
+
+   NO SECRET, DELIBERATELY. The only thing either request can do is deliver a
+   notification this script already decided to send, once, a little early. A
+   stranger holding a submission_id gains nothing; a bridge secret would add a
+   paste step and a failure mode to protect nothing.
+
+   THE PARKED NOTICE HOLDS CONTACT DETAILS for the seconds it waits, in script
+   properties — visible only to editors of this project, deleted on claim. It
+   carries no entry code: the booking payload has none. Any customer data added
+   to the payload later is parked with it; keep that in mind.
+
+   FALLS BACK TO SENDING INLINE, i.e. exactly the pre-r55 behaviour, when the
+   caller did not ask, the submission_id is unusable as a key, the notice is
+   larger than one property holds, or the write throws. */
+
+var NOTIFY_PREFIX = "notify:";
+var NOTIFY_MAX_CHARS = 8500;          // one script property value holds 9KB
+var NOTIFY_SWEEP_AGE_MS = 60000;      // leave the Worker's own call time to land
+var NOTIFY_SWEEP_MAX = 10;            // each send is seconds; stay well inside a run
+var NOTIFY_ID_SHAPE = /^[A-Za-z0-9_-]{1,100}$/;
+
+/** Parks a notice. True only when it was parked; never throws. */
+function queueBookingNotify(notice) {
+  try {
+    var id = String((notice.data && notice.data.submission_id) || "");
+    if (!NOTIFY_ID_SHAPE.test(id)) return false;
+    var text = JSON.stringify(notice);
+    if (text.length > NOTIFY_MAX_CHARS) {
+      console.warn("booking notice too large to park (" + text.length + " chars) for " +
+                   notice.jobId + " — sending inline");
+      return false;
+    }
+    PropertiesService.getScriptProperties().setProperty(NOTIFY_PREFIX + id, text);
+    return true;
+  } catch (err) {
+    console.error("booking notice not parked for " + notice.jobId + ", sending inline: " + err);
+    return false;
+  }
+}
+
+function hasPendingNotify(submissionId) {
+  try {
+    var id = String(submissionId || "");
+    return NOTIFY_ID_SHAPE.test(id) &&
+           !!PropertiesService.getScriptProperties().getProperty(NOTIFY_PREFIX + id);
+  } catch (err) {
+    return false;
+  }
+}
+
+/** Sends one notice. Returns reasons safe to log; never throws. */
+function deliverBookingNotify(notice) {
+  /* r26. The customer's own text, after the row exists and after the dedupe,
+     so a retried submission cannot text anybody twice. Returns a reason
+     rather than throwing; "no consent" and "twilio not configured" are
+     ordinary outcomes and most bookings will report one of them. */
+  var sms = "skipped";
+  try {
+    sms = sendBookingSms(notice.data, notice.contactId, notice.jobId);
+  } catch (smsErr) {
+    sms = "failed";
+    console.error("booking SMS wrapper failed (booking stands): " + smsErr);
+  }
+  console.log("booking SMS " + notice.jobId + ": " + sms);
+
+  var email = "sent";
+  try {
+    sendReservationEmail(notice.data, notice.sched, notice.leadId, notice.leadResult,
+                         notice.propertyResult, notice.slotResult);
+  } catch (mailErr) {
+    email = "failed";
+    console.error("Email send failed (row was still written): " + mailErr);
+  }
+  return { sms: sms, email: email };
+}
+
+/**
+ * POST {event_type:"booking_notify", submission_id} — send that one notice.
+ * POST {event_type:"booking_notify", action:"sweep"} — send every notice
+ * parked longer than NOTIFY_SWEEP_AGE_MS.
+ *
+ * Answers counts only: no name, number, address or link leaves this function.
+ */
+function handleBookingNotify(data, writeLockHeld, releaseWriteLock) {
+  /* Without the lock a claim could race another claim. Nothing is lost by
+     refusing: the notice stays parked and the next sweep takes it. */
+  if (!writeLockHeld) return json({ ok: false, error: "busy" });
+
+  var props = PropertiesService.getScriptProperties();
+  var claimed = [];
+  function claim(key) {
+    var text = props.getProperty(key);
+    if (!text) return;
+    props.deleteProperty(key);
+    try { claimed.push(JSON.parse(text)); }
+    catch (err) { console.error("unreadable booking notice discarded: " + key); }
+  }
+
+  if (data.action === "sweep") {
+    var all = props.getProperties();
+    var now = Date.now();
+    Object.keys(all).forEach(function (key) {
+      if (key.indexOf(NOTIFY_PREFIX) !== 0 || claimed.length >= NOTIFY_SWEEP_MAX) return;
+      var queuedAt = 0;
+      try { queuedAt = Number(JSON.parse(all[key]).queuedAt) || 0; } catch (_) {}
+      if (now - queuedAt >= NOTIFY_SWEEP_AGE_MS) claim(key);
+    });
+    if (claimed.length) console.log("notify sweep: " + claimed.length + " late booking notice(s)");
+  } else {
+    var id = String(data.submission_id || "");
+    if (!NOTIFY_ID_SHAPE.test(id)) {
+      releaseWriteLock();
+      return json({ ok: false, error: "bad_submission_id" });
+    }
+    claim(NOTIFY_PREFIX + id);
+  }
+
+  /* Claimed and deleted; the sends touch no sheet, so let the next booking in. */
+  releaseWriteLock();
+
+  claimed.forEach(deliverBookingNotify);
+  return json({ ok: true, sent: claimed.length });
 }
 
 

@@ -108,7 +108,11 @@ const CAN_PRICE = (() => {
    normal range, which is what made the failure INTERMITTENT rather than
    total. 15s clears it, the page shows a skeleton the whole time, and the
    client retries once past that. */
-const UPSTREAM_TIMEOUT_MS = { submit: 12000, slots: 8000, page: 15000 };
+/* `status` is the r56 booking check: one column read upstream, no lock, and a
+   browser that is already past a slow submit asking again every few seconds.
+   Short on purpose — a poll that has not answered in 10s is better replaced by
+   the next poll than waited on. */
+const UPSTREAM_TIMEOUT_MS = { submit: 12000, slots: 8000, page: 15000, status: 10000 };
 
 /* THE WARM PING'S BUDGET IS DELIBERATELY THE OPPOSITE OF THE ONES ABOVE. Those
    are short because a customer is waiting behind them. Nobody is waiting behind
@@ -149,7 +153,8 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
-    if (url.pathname === "/api/submit") return handleSubmit(request, env);
+    if (url.pathname === "/api/submit") return handleSubmit(request, env, ctx);
+    if (url.pathname === "/api/booking-status") return handleBookingStatus(request, env, ctx);
     if (url.pathname === "/api/quote")  return handleQuote(request, env);
     if (url.pathname === "/api/checkout") return handleCheckout(request, env);
     /* Stripe calls this one, not a browser. It is the only route whose caller
@@ -172,7 +177,7 @@ export default {
 /* ============================================================
    POST /api/submit  ->  booking webhook
    ============================================================ */
-async function handleSubmit(request, env) {
+async function handleSubmit(request, env, ctx) {
   if (request.method !== "POST") {
     return json({ status: "error", error: "method_not_allowed" }, 405);
   }
@@ -209,13 +214,18 @@ async function handleSubmit(request, env) {
     console.log("price authenticated: " + (audit.submission_id || "no id"));
   }
 
+  /* r55. Ask the webhook to answer once the sheets are written and leave the
+     text and email to us — but only when there is a waitUntil to send them
+     from. See sendBookingNotify. */
+  const canDefer = !!(ctx && typeof ctx.waitUntil === "function");
+
   const upstream = await relay(env.WEBHOOK_URL, {
     method: "POST",
     /* text/plain deliberately: Apps Script reads e.postData.contents either
        way, and it keeps the upstream request simple. The BROWSER now sends
        real JSON to us — this is only how we talk to Google. */
     headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body,
+    body: canDefer ? withDeferredNotify(body) : body,
   }, UPSTREAM_TIMEOUT_MS.submit);
 
   if (!upstream.ok) {
@@ -227,6 +237,14 @@ async function handleSubmit(request, env) {
                   detail: upstream.error }, 502);
   }
 
+  if (canDefer) {
+    let reply = null;
+    try { reply = JSON.parse(upstream.text); } catch (_) { /* passed through below */ }
+    if (reply && reply.status === "ok" && reply.notify_pending === true && reply.submission_id) {
+      ctx.waitUntil(sendBookingNotify(env, String(reply.submission_id)));
+    }
+  }
+
   /* Pass the webhook's own JSON straight through — it carries status,
      duplicate, job_id, lead_action, slot_action. */
   return new Response(upstream.text, {
@@ -234,6 +252,122 @@ async function handleSubmit(request, env) {
     headers: { "Content-Type": "application/json; charset=utf-8",
                "Cache-Control": "no-store" },
   });
+}
+
+
+/* ============================================================
+   THE BOOKING'S TEXT AND EMAIL, AFTER THE CUSTOMER IS CONFIRMED  —  r55
+   ============================================================
+
+   "Reserve" used to take ~15s: the webhook answered only after Twilio and
+   Gmail, which pushed it past the 12s submit budget, so the browser sat
+   through a 502 and a retry before "You're on the schedule". Now the webhook
+   parks the text and email and answers once the sheets are written; this
+   sends them from waitUntil, where nobody is waiting.
+
+   NOTHING HERE CAN MAKE A BOOKING FAIL OR A TEXT GO OUT TWICE. The webhook
+   claims each notice under its lock and sends it at most once, and a call that
+   never lands is picked up by the five-minute sweep in warmUpstreams. The
+   budget is the warm ping's, not the submit one: absorbing a cold start is the
+   point, and waitUntil allows 30s. */
+function withDeferredNotify(body) {
+  try {
+    const data = JSON.parse(body);
+    if (!data || typeof data !== "object" || Array.isArray(data)) return body;
+    data.notify_deferred = true;
+    return JSON.stringify(data);
+  } catch (_) {
+    return body;             // the webhook reports an unparseable body itself
+  }
+}
+
+/* ============================================================
+   GET /api/booking-status?id=<submission_id>   ->   did that booking land?
+   ============================================================
+
+   THE ROUTE THAT STOPS A GOOD BOOKING SHOWING THE FAILURE PANEL.  r56
+
+   /api/submit is a write with a 12s budget, and when it overruns the browser
+   learns nothing — not "it failed", only "I did not hear back". For most of
+   this project's life those were treated as the same thing, so a booking that
+   had fully succeeded (row, text, email) could still end on the yellow panel.
+
+   This is the other question. It relays one column read that takes no script
+   lock upstream, so it answers in about a second EVEN WHILE the slow write is
+   still running. The browser polls it after a slow submit and shows the
+   confirmation the moment the row exists.
+
+   ALWAYS 200, NEVER A 502. Every answer this route can give means one of two
+   things to the caller: "the booking is there" or "I still don't know". An
+   unreachable upstream is the second, and the caller's response to it is to
+   ask again shortly, not to give up — so a status code that reads as an
+   outage would be actively misleading.
+
+   NOTHING IS WRITTEN AND NOTHING CAN BE. The upstream is a GET.
+   ============================================================ */
+async function handleBookingStatus(request, env, ctx) {
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return json({ ok: false, error: "method_not_allowed" }, 405);
+  }
+  if (!env.WEBHOOK_URL) return json({ ok: false, error: "not_configured" });
+
+  const id = new URL(request.url).searchParams.get("id") || "";
+  /* The shape a browser's crypto.randomUUID() makes, and the same shape the
+     webhook keys a parked notice on. Rejected here so a malformed poll never
+     costs an upstream round trip. */
+  if (!/^[A-Za-z0-9_-]{1,100}$/.test(id)) {
+    return json({ ok: false, error: "bad_submission_id" });
+  }
+
+  const upstream = await relay(
+    env.WEBHOOK_URL + "?booking=" + encodeURIComponent(id),
+    { method: "GET" }, UPSTREAM_TIMEOUT_MS.status);
+
+  if (!upstream.ok) {
+    /* Not an error the customer sees: their next poll is a second or two away.
+       Logged because a run of these is what a genuinely down upstream looks
+       like. A submission_id is a random client id, not a person. */
+    console.warn("booking status " + id + " unanswered: " + upstream.error);
+    return json({ ok: false, error: "upstream_unreachable" });
+  }
+
+  let reply = null;
+  try { reply = JSON.parse(upstream.text); } catch (_) { /* reported below */ }
+
+  /* A webhook older than r56 does not know `booking` and answers its health
+     stamp instead — well-formed JSON with no `found` in it. Say so out loud
+     rather than reporting a cheerful found:false forever: an un-pasted script
+     is the one failure here that looks exactly like a booking that never
+     landed, and it is the founder's to fix, not the customer's. */
+  if (!reply || typeof reply.found !== "boolean") {
+    console.error("booking status: upstream has no ?booking route — paste " +
+                  "apps-script/webhook.gs r56 or later into Leads MASTER.");
+    return json({ ok: false, error: "upstream_stale" });
+  }
+
+  /* r55's parked text and email. If we are the first caller to hear that a
+     notice is waiting — which is exactly the case this route exists for, since
+     the Worker that took the booking gave up before it was answered — send it
+     now rather than leaving it to the five-minute sweep. */
+  if (reply.found === true && reply.notify_pending === true &&
+      ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil(sendBookingNotify(env, id));
+  }
+
+  return json({ ok: true, found: reply.found });
+}
+
+
+async function sendBookingNotify(env, submissionId) {
+  const res = await relay(env.WEBHOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify({ event_type: "booking_notify", submission_id: submissionId }),
+  }, WARM_TIMEOUT_MS);
+  /* A submission_id is a random client id, not a person. Error level on
+     failure: the sweep will send it late, and this line says why it was late. */
+  if (res.ok) console.log("booking notify " + submissionId + ": " + res.text);
+  else console.error("booking notify " + submissionId + " failed, the sweep will retry: " + res.error);
 }
 
 
@@ -2017,7 +2151,24 @@ async function warmUpstreams(env) {
   await Promise.allSettled([
     warmOne(env.AVAILABILITY_URL, "availability"),
     warmOne(env.WEBHOOK_URL, "webhook"),
+    sweepBookingNotify(env),
   ]);
+}
+
+/**
+ * r55. The backstop for sendBookingNotify: any booking text or email parked
+ * for over a minute is sent now. A POST, unlike the pings, because it can send
+ * messages — but only messages a booking already decided to send, each once.
+ */
+async function sweepBookingNotify(env) {
+  if (!env.WEBHOOK_URL) return;
+  const res = await relay(env.WEBHOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify({ event_type: "booking_notify", action: "sweep" }),
+  }, WARM_TIMEOUT_MS);
+  if (!res.ok) console.error("notify sweep failed: " + res.error);
+  else if (!/"sent":0\b/.test(res.text)) console.log("notify sweep: " + res.text);
 }
 
 /**

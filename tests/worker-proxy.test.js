@@ -185,6 +185,202 @@ console.log('\n=== 4. submit guards ===');
     noCfg.status === 500 && noCfgBody.status === 'error', noCfgBody);
 }
 
+console.log('\n=== 4b. r55: the text and email go out AFTER the browser has its answer ===');
+{
+  const makeCtx = () => {
+    const pending = [];
+    return { pending, waitUntil: (p) => pending.push(p),
+             settle: () => Promise.allSettled(pending) };
+  };
+  const pendingReply = '{"status":"ok","duplicate":false,"notify_pending":true,"submission_id":"sub-55"}';
+
+  /* ---- the webhook parked a notice: the Worker sends for it, in the background ---- */
+  {
+    const { worker, calls } = loadWorker(ok(pendingReply));
+    const ctx = makeCtx();
+    const res = await worker.fetch(post('{"submission_id":"sub-55","name":"x"}'), ENV, ctx);
+    const body = await res.text();
+
+    const first = calls.find(c => c.target);
+    t('the booking asks the webhook to defer its notifications',
+      JSON.parse(first.init.body).notify_deferred === true, first.init.body);
+    t('and otherwise relays the booking as sent',
+      JSON.parse(first.init.body).submission_id === 'sub-55' &&
+      JSON.parse(first.init.body).name === 'x');
+    t('the browser still gets the webhook reply verbatim', body === pendingReply, body);
+    t('the follow-up is queued in waitUntil, not awaited before answering',
+      ctx.pending.length === 1, ctx.pending.length);
+
+    await ctx.settle();
+    const notify = calls.filter(c => c.target)[1];
+    const nb = notify && JSON.parse(notify.init.body);
+    t('it POSTs booking_notify for that submission to the webhook',
+      notify && notify.target === ENV.WEBHOOK_URL && nb.event_type === 'booking_notify' &&
+      nb.submission_id === 'sub-55' && !nb.action, nb);
+    t('and carries nothing else about the customer',
+      nb && Object.keys(nb).sort().join() === 'event_type,submission_id', nb);
+  }
+
+  /* ---- nothing parked (an old webhook, or a notice sent inline): no follow-up ---- */
+  for (const [label, reply] of [
+    ['a reply without notify_pending', '{"status":"ok","duplicate":false,"submission_id":"a"}'],
+    ['notify_pending false',           '{"status":"ok","notify_pending":false,"submission_id":"a"}'],
+    ['an error reply',                 '{"status":"error","notify_pending":true,"submission_id":"a"}'],
+    ['a non-JSON reply',               'not json'],
+  ]) {
+    const { worker, calls } = loadWorker(ok(reply));
+    const ctx = makeCtx();
+    await worker.fetch(post('{"submission_id":"a"}'), ENV, ctx);
+    await ctx.settle();
+    t(label + ' -> no follow-up call', calls.filter(c => c.target).length === 1 &&
+      ctx.pending.length === 0, calls.filter(c => c.target).length);
+  }
+
+  /* ---- a dead follow-up is a log line; the sweep takes it later ---- */
+  {
+    let n = 0;
+    const { worker, calls } = loadWorker(async () => (++n === 1
+      ? new Response(pendingReply, { status: 200 })
+      : (() => { throw new Error('ETIMEDOUT'); })()));
+    const ctx = makeCtx();
+    const res = await worker.fetch(post('{"submission_id":"sub-55"}'), ENV, ctx);
+    const settled = await ctx.settle();
+    t('a failed follow-up does not touch the confirmed answer', res.status === 200, res.status);
+    t('and resolves rather than rejecting', settled.every(s => s.status === 'fulfilled'));
+    t('and is logged at error level',
+      calls.some(c => c.log && /booking notify .* failed/.test(c.log)));
+  }
+
+  /* ---- no waitUntil: nothing to send from, so the webhook must send inline ---- */
+  {
+    const { worker, calls } = loadWorker(ok(pendingReply));
+    await worker.fetch(post('{"submission_id":"sub-55"}'), ENV);
+    t('without a ctx the body is not asked to defer',
+      calls.find(c => c.target).init.body === '{"submission_id":"sub-55"}');
+  }
+}
+
+console.log('\n=== 4c. r56: GET /api/booking-status — the cheap question behind the slow write ===');
+{
+  const makeCtx = () => {
+    const pending = [];
+    return { pending, waitUntil: (p) => pending.push(p),
+             settle: () => Promise.allSettled(pending) };
+  };
+  const status = (id) => new Request(
+    'https://servecleaning.com/api/booking-status?id=' + id, { method: 'GET' });
+
+  /* ---- the shape of the upstream call: a READ, and nothing else ---- */
+  {
+    const { worker, calls } = loadWorker(ok('{"ok":true,"found":true,"notify_pending":false}'));
+    const res  = await worker.fetch(status('sub-56'), ENV);
+    const body = JSON.parse(await res.text());
+    const call = calls.find(c => c.target);
+
+    t('answers found:true', res.status === 200 && body.ok === true && body.found === true, body);
+    t('asks the webhook with ?booking=, on the WEBHOOK_URL from env',
+      call.target === ENV.WEBHOOK_URL + '?booking=sub-56', call.target);
+    /* The reason this route can be polled at all: doGet takes no script lock,
+       so it answers while the reservation's own write is still running. A POST
+       would queue behind the very booking it is asking about — the trap r53
+       found in the retry. */
+    t('and asks with a GET, which cannot write and cannot take the lock',
+      call.init.method === 'GET' && !call.init.body, call.init.method);
+    t('never cached — a stale "not found" would strand a real booking',
+      /no-store/.test(res.headers.get('Cache-Control')));
+  }
+
+  /* ---- found:false is a real answer and must survive the trip ---- */
+  {
+    const { worker } = loadWorker(ok('{"ok":true,"found":false}'));
+    const body = JSON.parse(await (await worker.fetch(status('sub-56'), ENV)).text());
+    t('a booking that is not there answers found:false', body.ok === true && body.found === false, body);
+  }
+
+  /* ---- "I don't know" must never read as "it failed" ----
+     Every answer here means either "the booking is there" or "still don't
+     know", and the caller's response to the second is to ask again shortly.
+     A 502 would read as an outage and stop the poll on a live booking. */
+  for (const [label, impl] of [['upstream down', boom('ETIMEDOUT')],
+                               ['upstream 500',  http(500)]]) {
+    const { worker } = loadWorker(impl);
+    const r = await worker.fetch(status('sub-56'), ENV);
+    const b = JSON.parse(await r.text());
+    t(label + ' -> HTTP 200, ok:false, and never found:true',
+      r.status === 200 && b.ok === false && b.found !== true, { code: r.status, body: b });
+  }
+
+  /* ---- a webhook older than r56 answers its health stamp, which has no `found` ---- */
+  {
+    const stale = '{"ok":true,"service":"serve-booking-webhook","version":"2026-09-17 r55"}';
+    const { worker, calls } = loadWorker(ok(stale));
+    const r = await worker.fetch(status('sub-56'), ENV);
+    const b = JSON.parse(await r.text());
+    t('an un-pasted script never reads as a confirmed booking', b.found !== true, b);
+    t('and never as a definite "not there" either', b.ok === false, b);
+    /* This is the one failure here that looks exactly like a booking that
+       never landed, and it is fixed by pasting, not by waiting. */
+    t('and says out loud that the script needs pasting',
+      calls.some(c => c.log && /paste apps-script\/webhook\.gs r56/.test(c.log)),
+      calls.filter(c => c.log).map(c => c.log));
+  }
+
+  /* ---- r55's parked notice: whoever first hears it is waiting, sends it ---- */
+  {
+    const { worker, calls } = loadWorker(ok('{"ok":true,"found":true,"notify_pending":true}'));
+    const ctx = makeCtx();
+    const res = await worker.fetch(status('sub-56'), ENV, ctx);
+    t('the answer is not held up by the send', res.status === 200 && ctx.pending.length === 1,
+      ctx.pending.length);
+    await ctx.settle();
+    const notify = calls.filter(c => c.target)[1];
+    const nb = notify && JSON.parse(notify.init.body);
+    t('it POSTs booking_notify for that submission',
+      nb && nb.event_type === 'booking_notify' && nb.submission_id === 'sub-56', nb);
+    t('and still carries nothing else about the customer',
+      nb && Object.keys(nb).sort().join() === 'event_type,submission_id', nb);
+  }
+
+  /* ---- nothing to send, or nowhere to send it from ---- */
+  for (const [label, reply, ctxOn] of [
+    ['notify_pending without found', '{"ok":true,"found":false,"notify_pending":true}', true],
+    ['no notify_pending',            '{"ok":true,"found":true}',                       true],
+    ['found but no waitUntil',       '{"ok":true,"found":true,"notify_pending":true}', false],
+  ]) {
+    const { worker, calls } = loadWorker(ok(reply));
+    const ctx = ctxOn ? makeCtx() : undefined;
+    await worker.fetch(status('sub-56'), ENV, ctx);
+    if (ctx) await ctx.settle();
+    t(label + ' -> no notify call', calls.filter(c => c.target).length === 1,
+      calls.filter(c => c.target).length);
+  }
+
+  /* ---- guards: a malformed poll must not cost an upstream round trip ---- */
+  {
+    for (const bad of ['', 'has space', 'a'.repeat(101), '../etc', 'a&b']) {
+      const { worker, calls } = loadWorker(ok('{"ok":true,"found":true}'));
+      const r = await worker.fetch(new Request(
+        'https://servecleaning.com/api/booking-status?id=' + encodeURIComponent(bad),
+        { method: 'GET' }), ENV);
+      const b = JSON.parse(await r.text());
+      t('a malformed id (' + JSON.stringify(bad.slice(0, 12)) + ') is refused without an upstream call',
+        b.ok === false && b.found !== true && calls.filter(c => c.target).length === 0, b);
+    }
+
+    const { worker, calls } = loadWorker(ok('{"ok":true,"found":true}'));
+    const wrong = await worker.fetch(new Request(
+      'https://servecleaning.com/api/booking-status?id=sub-56', { method: 'POST', body: '{}' }), ENV);
+    t('POST to the status route is rejected', wrong.status === 405, wrong.status);
+    t('and never touches upstream', calls.filter(c => c.target).length === 0);
+
+    const { worker: w2 } = loadWorker(ok('{"ok":true,"found":true}'));
+    const noCfg = await w2.fetch(status('sub-56'), { ASSETS });
+    const nb = JSON.parse(await noCfg.text());
+    t('unconfigured webhook answers ok:false rather than found:true',
+      noCfg.status === 200 && nb.ok === false && nb.found !== true, nb);
+  }
+}
+
 console.log('\n=== 5. GET /api/slots — degrades, never blocks booking ===');
 {
   const feed = '{"ok":true,"count":2,"slots":[{"date":"2026-08-07","time":"12:00 PM","open":1}]}';
@@ -231,8 +427,16 @@ console.log('\n=== 6. the front end and the Worker agree on the paths ===');
   const site = fs.readFileSync(path.join(REPO_ROOT, 'script.js'), 'utf8');
   const sheets = /const SHEETS_URL\s*=\s*'([^']+)'/.exec(site);
   const avail  = /const AVAILABILITY_SOURCE_URL\s*=\s*'([^']+)'/.exec(site);
+  const bstat  = /const BOOKING_STATUS_URL\s*=\s*'([^']+)'/.exec(site);
   t('SHEETS_URL is the same-origin path', sheets && sheets[1] === '/api/submit', sheets && sheets[1]);
   t('AVAILABILITY_SOURCE_URL is the same-origin path', avail && avail[1] === '/api/slots', avail && avail[1]);
+  /* r56. The path the site polls has to be the path the Worker routes, or the
+     watch silently never confirms and every slow booking ends on the failure
+     panel — which is the bug it was written to fix. */
+  t('BOOKING_STATUS_URL is the same-origin path',
+    bstat && bstat[1] === '/api/booking-status', bstat && bstat[1]);
+  t('and the Worker routes exactly that path',
+    SRC.includes('url.pathname === "/api/booking-status"'));
   /* A live endpoint always carries a protocol. Prose mentions of the bare host
      in comments are fine and worth keeping — what must never come back is a
      fetchable URL the browser could read out of the publicly served JS. */
@@ -268,6 +472,58 @@ console.log('\n=== 7. the failure UI exists and is reachable ===');
     /if \(result\.confirmed\) \{[\s\S]{0,80}setView\('confirmed'\)/.test(site));
   t('an unconfirmed booking routes to the failure view',
     /showReserveFailure\(p, result\.error\)/.test(site));
+
+  /* ---- r56: the failure panel means "not in the sheet", not "no reply" ----
+
+     THE LIVE BUG, 2026-09-17. A booking completed in full — row written, text
+     delivered, email delivered — and the customer was shown "your booking
+     could not be confirmed", because both POSTs ran past the Worker's 12s
+     budget and a POST that does not come back carries NO information about
+     whether the booking happened. These pin the second question that replaced
+     the guess. */
+  t('a slow POST starts a watch on the sheet rather than concluding failure',
+    /watchBooking\(payload\.submission_id,/.test(site));
+  t('the watch asks the status route, by submission_id',
+    /BOOKING_STATUS_URL \+ '\?id=' \+ encodeURIComponent\(submissionId\)/.test(site));
+  /* A poll that errors resolves false meaning "don't know". If that ever
+     becomes "absent", one flaky poll condemns a live booking. */
+  t('a failed poll ends the poll, never the watch',
+    /\.catch\(\(\) => \{ clearTimeout\(timer\); resolve\(false\); \}\)/.test(site));
+  t('only the deadline ends the watch',
+    /if \(Date\.now\(\) >= deadline\) return done\(false\);/.test(site));
+
+  const watchMs    = Number((/const RESERVE_WATCH_MS\s*=\s*(\d+)/.exec(site)    || [, NaN])[1]);
+  const retryMs    = Number((/const RESERVE_RETRY_DELAY_MS\s*=\s*(\d+)/.exec(site) || [, NaN])[1]);
+  const postMs     = Number((/const RESERVE_CONFIRM_TIMEOUT_MS\s*=\s*(\d+)/.exec(site) || [, NaN])[1]);
+  const intervalMs = Number((/const RESERVE_WATCH_INTERVAL_MS\s*=\s*(\d+)/.exec(site) || [, NaN])[1]);
+  t('every reservation budget was found',
+    [watchMs, retryMs, postMs, intervalMs].every(Number.isFinite),
+    { watchMs, retryMs, postMs, intervalMs });
+  /* THE LOAD-BEARING INEQUALITY. The replay can only ever say "yes"; only the
+     watch may say "no". That is true only while the watch outlives the replay
+     — otherwise the watch gives up first and the replay's silence decides the
+     screen again, which is precisely the old bug. */
+  t('the watch outlives the replay, so the replay can never decide failure',
+    watchMs > retryMs + postMs, { watchMs, replayEndsAt: retryMs + postMs });
+  t('and polls often enough to be worth asking', intervalMs <= 5000, intervalMs);
+
+  /* A refusal is an ANSWER. Every code in this set is produced by the Worker
+     BEFORE it relays anything, so no row is on its way and watching for one
+     would only delay the same failure panel by half a minute. The ambiguous
+     case must NOT be in there — putting upstream_unreachable in this set would
+     restore the original bug exactly. */
+  const refusals = (/const RESERVE_REFUSALS = \{([\s\S]*?)\};/.exec(site) || [, ''])[1];
+  t('a definite refusal skips the watch', /if \(RESERVE_REFUSALS\[first\.error\]\)/.test(site));
+  t('price_mismatch is treated as a definite refusal', /price_mismatch/.test(refusals), refusals.trim());
+  t('but a timeout is NOT — that is the ambiguous case the watch exists for',
+    !/upstream_unreachable/.test(refusals), refusals.trim());
+  /* Every code named there must be one the Worker actually emits, or the
+     branch is dead and a real refusal still waits out the watch. */
+  const emitted = (SRC.match(/error:\s*"(\w+)"/g) || []).map(s => /"(\w+)"/.exec(s)[1]);
+  const named = (refusals.match(/(\w+):\s*1/g) || []).map(s => /(\w+):/.exec(s)[1]);
+  t('and every refusal code named is one the Worker really sends',
+    named.length > 0 && named.every(c => emitted.includes(c)),
+    { named, missing: named.filter(c => !emitted.includes(c)) });
 }
 
 /* ============================================================
@@ -1139,8 +1395,14 @@ console.log('\n=== CRON TRIGGERS — warm the upstreams, never delete by acciden
     /* The webhook backs /api/submit, /api/portal, /api/job and /api/vendor, so
        it is the more expensive of the two to leave cold. */
     t('and the booking webhook as well', targets.includes(ENV.WEBHOOK_URL), targets);
-    t('both are GETs, which write nothing',
-      calls.filter(c => c.target).every(c => !c.init || c.init.method === 'GET'));
+    /* r55. The one POST is the booking-notify sweep, which can only send
+       notices a booking already parked. Everything else still writes nothing. */
+    const posts = calls.filter(c => c.target && c.init && c.init.method !== 'GET');
+    t('the pings are GETs, and the only POST is the notify sweep',
+      posts.length === 1 && posts[0].target === ENV.WEBHOOK_URL &&
+      JSON.parse(posts[0].init.body).event_type === 'booking_notify' &&
+      JSON.parse(posts[0].init.body).action === 'sweep',
+      posts.map(p => p.init.body));
     /* THE ASSERTION THAT KEEPS THIS SAFE. cleanupPhotoStorage deletes objects
        from R2; running it every five minutes is the accident this branch
        exists to prevent. */
@@ -1203,9 +1465,10 @@ console.log('\n=== CRON TRIGGERS — warm the upstreams, never delete by acciden
        (!url) return`, an undefined URL still reaches fetch — and a target of
        undefined is filtered out of targetsOf, so the list alone would look
        identical while a junk request went out every five minutes. */
+    /* Two calls, both to the webhook: its ping and the r55 notify sweep. */
     t('a missing feed URL still warms the other upstream, and only it',
-      targetsOf(calls).join() === ENV.WEBHOOK_URL &&
-      calls.filter(c => 'target' in c).length === 1,
+      targetsOf(calls).every(u => u === ENV.WEBHOOK_URL) &&
+      calls.filter(c => 'target' in c).length === 2,
       { targets: targetsOf(calls), fetches: calls.filter(c => 'target' in c).length });
   }
 
