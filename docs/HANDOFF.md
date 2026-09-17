@@ -15,11 +15,14 @@ except where a later section supersedes them.
 
 ## Current work — 2026-09-17, Claude Code: r56, a booking that succeeded can no longer show the failure panel
 
-**LOCAL EDITS ONLY until the founder pastes.** Files: `apps-script/webhook.gs`
-(now r56), `src/worker.js`, `script.js`, `tests/worker-proxy.test.js`,
-`tests/reservation-lock-release.test.js`, `docs/SCHEMA.md`, this entry.
-This entry supersedes the r55 one below it; **r55 is still unpasted and ships
-with r56 in the same file.**
+**SITE PUSHED AND DEPLOYED (`6eb76d4`). APPS SCRIPT NOT PASTED — that paste is
+the remaining step and it is the one that fixes the bug.** Files:
+`apps-script/webhook.gs` (now r56), `src/worker.js`, `script.js`,
+`tests/worker-proxy.test.js`, `tests/reservation-lock-release.test.js`,
+`docs/SCHEMA.md`, this entry. This entry supersedes the r55 one below it;
+**r55 was never pasted either and ships with r56 in the same file.**
+(`AGENTS.md` / `CLAUDE.md` and two untracked images were already modified when
+this session started — left alone, not mine, still uncommitted.)
 
 **Founder report, and it is the second time:** a test booking took a long time,
 **the text and the email both arrived**, and the screen still said "your booking
@@ -65,13 +68,32 @@ upstream, a stale script read as "not there", notify without `found`, a watch
 shorter than the replay, a failed poll read as "absent", concluding failure
 instead of watching, plus six on the Apps Script half.
 
-**NOT checked:** anything live. Nothing is pasted, nothing is pushed, and no
-real booking has been made against r56.
+**VERIFIED IN PRODUCTION** (commit `6eb76d4`, Workers Build completed success):
+
+| probe | result |
+|---|---|
+| `GET /api/booking-status?id=probe-not-a-real-booking` | `{"ok":false,"error":"upstream_stale"}` — **the un-pasted-script path, live and behaving exactly as designed.** Never a false `found`. |
+| same, while the container was cold | `upstream_unreachable` at 10.2s ×3, then `upstream_stale` at 8.5s, then **1.75s warm** |
+| `?id=has%20space` | `{"ok":false,"error":"bad_submission_id"}` in 0.19s — refused without an upstream round trip |
+| `POST` to the route | `405` |
+
+**The cold/warm spread is the number to remember: 8.5s cold, 1.75s warm.** It
+does not threaten the watch, because by the time a watch starts the reservation
+POST has already warmed that container — but it is why the status budget is 10s
+and the watch is 30s rather than both being tight.
+
+**STILL NOT checked:** the pasted path. `found:true` has never been returned by
+the live script, because r56 is not pasted — every probe above is the fallback.
+No real booking has been made against r56.
 
 **Next action — the paste is what actually fixes it:**
 1. Paste `apps-script/webhook.gs` into Leads MASTER → Extensions → Apps Script
    and **deploy a new version**. Confirm `/exec` answers `2026-09-17 r56`.
-2. Push the site.
+   Quickest independent check, no Google login needed: `curl -s
+   "https://servecleaning.com/api/booking-status?id=probe-not-a-real-booking"`
+   answers `upstream_stale` before the paste and `{"ok":true,"found":false}`
+   after it.
+2. ~~Push the site.~~ Done — `6eb76d4`, build completed success.
 3. Test booking. Expect it to confirm faster (r55 drops Twilio + Gmail off the
    critical path) and, if it is still slow, to confirm anyway via the watch —
    the console says `Reservation confirmed by watching the sheet.` when it did.
