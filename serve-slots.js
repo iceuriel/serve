@@ -33,6 +33,18 @@
     var HORIZON_DAYS = 21;
     var TIMEOUT_MS   = 8000;
 
+    /* How many DAYS WITH OPEN TIMES the agenda shows before it asks. Days, not
+       slots: a day with six times and a day with one cost the same heading and
+       the same line of chips, and it is the stack of days that runs the page
+       long. Not calendar days either — the agenda only ever draws days that
+       have something open, so this counts what is actually on screen.
+
+       SEVEN IS A WEEK, which is the window a customer is usually choosing
+       inside anyway. It is a display rule and nothing more: every slot the feed
+       published is already in the DOM, filtered by the horizon rules above and
+       reachable in one click. Nothing here narrows what is bookable. */
+    var VISIBLE_DAYS = 7;
+
     /* "2026-07-25" -> a LOCAL Date. Never new Date(str): that parses as UTC
        midnight, which is the previous day in Boston, and a slot published for
        the 25th would be filtered out on the 25th. */
@@ -109,17 +121,26 @@
      * Omitted, no listener is attached at all — which is what a caller with its
      * own delegated click handler needs, and attaching one anyway would mean
      * two handlers fighting over the same click.
+     *
+     * PAST THE SEVENTH DAY THE AGENDA FOLDS. The extra days are BUILT AND
+     * HIDDEN, never withheld: their chips carry the same listeners and answer
+     * the same queries as the visible ones, so revealing them is one property
+     * flip and no re-render. Building them lazily would mean a chip that
+     * exists in two versions — one wired, one not — which is the shape of a
+     * slot a customer can press without anything happening.
      */
     function picker(slots, onPick) {
         var wrap = document.createElement('div');
         wrap.className = 'slotpick';
 
         var currentDate = null, rowEl = null;
+        var days = [];
         (slots || []).forEach(function (s) {
             if (s.date !== currentDate) {
                 currentDate = s.date;
                 var day = document.createElement('div');
                 day.className = 'scheduler-day';
+                days.push(day);
                 var head = document.createElement('div');
                 head.className = 'scheduler-day__head';
                 head.textContent = formatSlotDate(s.date);
@@ -150,11 +171,46 @@
             rowEl.appendChild(chip);
         });
 
+        /* Only fold when there is something to fold. Exactly VISIBLE_DAYS days
+           leaves `rest` empty and the agenda is drawn whole, with no button
+           offering nothing. */
+        var rest = days.slice(VISIBLE_DAYS);
+        if (rest.length) {
+            rest.forEach(function (d) { d.hidden = true; });
+
+            var more = document.createElement('button');
+            /* TYPE="BUTTON" IS LOAD-BEARING. On the booking page this agenda
+               lives inside <form id="reserve-form">, where a button with no
+               type is a SUBMIT button — "show more days" would try to reserve
+               the visit. The chips above declare it for the same reason. */
+            more.type = 'button';
+            more.className = 'slotpick__more';
+            /* Say the number. "Show more" leaves a customer guessing whether
+               it is worth a click; "Show 9 more days" is the reason to click,
+               and it is also how somebody scanning for a date three weeks out
+               knows the page has one. */
+            more.textContent = 'Show ' + rest.length + ' more ' +
+                (rest.length === 1 ? 'day' : 'days');
+            more.setAttribute('aria-expanded', 'false');
+
+            /* ONE WAY ON PURPOSE. A collapse would have to decide what happens
+               to a time the customer already picked down there — hide their
+               own selection, or silently drop it — and neither is worth the
+               few hundred pixels back. */
+            more.addEventListener('click', function () {
+                rest.forEach(function (d) { d.hidden = false; });
+                more.setAttribute('aria-expanded', 'true');
+                more.hidden = true;
+            });
+            wrap.appendChild(more);
+        }
+
         return wrap;
     }
 
     root.ServeSlots = {
         HORIZON_DAYS:   HORIZON_DAYS,
+        VISIBLE_DAYS:   VISIBLE_DAYS,
         filterSlots:    filterSlots,
         parseSlotDate:  parseSlotDate,
         formatSlotDate: formatSlotDate,

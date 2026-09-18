@@ -1771,6 +1771,41 @@ a {
     color: #fff;
 }
 
+/* "Show N more days" — the folded half of the agenda, one click away.
+   DASHED, AND NOT SHAPED LIKE A CHIP. It sits directly under a row of solid
+   bordered chips that are all pressable times; if it read as one more chip,
+   the first click would be somebody trying to book it. Full width and dashed
+   says "the list continues past here" instead.
+
+   Not an underlined text link either, the way .scheduler-fallback-link and
+   .plan__other are. Those are escape hatches for a customer the agenda failed.
+   This one is the rest of the agenda, and it has to be findable at a glance. */
+.slotpick__more {
+    display: block;
+    width: 100%;
+    margin-top: 0.875rem;
+    padding: 10px 14px;
+    font-family: var(--flow-sans);
+    font-size: 0.9rem;
+    color: var(--color-text-muted);
+    background: #fff;
+    border: 1px dashed var(--color-border);
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.slotpick__more:hover {
+    border-color: #cbd5e1;
+    background: #f8fafc;
+    color: var(--color-dark);
+}
+
+.slotpick__more:focus-visible {
+    outline: 2px solid var(--color-dark);
+    outline-offset: 2px;
+}
+
 .scheduler-fallback-line {
     font-family: var(--flow-sans);
     font-size: 0.95rem;

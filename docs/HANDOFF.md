@@ -13,7 +13,69 @@ except where a later section supersedes them.
 
 ---
 
-## Current work — 2026-09-18, Claude Code: a confirmed plan was reported as a failure
+## Current work — 2026-09-18, Claude Code: the agenda folds after seven days
+
+**Site only. No Apps Script paste.** `webhook.gs` stays at **r57**.
+`serve-slots.js` is **r59**; `style.css` gained one block.
+
+**Why.** The founder is adding a lot more AVAILABILITY. The agenda draws
+vertically — one heading plus one row of chips per day — so a fuller feed makes
+the time picker the whole page, and on a phone the customer scrolls past the
+booking button to reach the end of a list they were never going to read.
+
+**What changed.** `ServeSlots.picker()` now shows the first **seven days that
+have open times** and puts the rest behind one button reading *"Show N more
+days"*. Days, not slots: a day with six times and a day with one cost the same
+heading and the same row, and it is the stack of days that runs the page long.
+Not calendar days either — only days with something open are ever drawn.
+
+**One change, four surfaces.** Every place Serve shows live times goes through
+that one function, so this lands on all of them at once:
+
+| Surface | Where |
+| --- | --- |
+| Booking form, step 3 | `script.js:1499` (`renderSchedulerDays`) |
+| Portal — confirm a recurring plan | `portal.js:759` |
+| Portal — start / change a plan | `portal.js:1163` |
+| Portal — move a visit | `portal.js:1362` |
+
+`/j` and `/v` never show live slots and are untouched.
+
+**The property that makes hiding safe:** the folded days are **built and
+hidden, never withheld**. Their chips carry the same listeners and answer the
+same `querySelectorAll` as the visible ones, so revealing is one property flip
+and no re-render. A future "optimisation" that builds the tail lazily would
+ship a chip a customer can press with nothing happening — `tests/
+slot-agenda-fold.test.js` F6 presses a folded chip *before* any reveal and is
+the test that would catch it.
+
+**Two traps worth knowing about, both now pinned by tests:**
+
+- The booking agenda lives inside `<form id="reserve-form">`, so the reveal
+  button **must** declare `type="button"`. Without it, "show more days" is a
+  submit button and tries to reserve the visit.
+- `script.js` routes agenda clicks through `e.target.closest('.slot-chip')`.
+  The button must not carry that class or revealing would also pick a time.
+
+**Reveal is one-way on purpose.** A collapse would have to decide what happens
+to a time already picked down there — hide the customer's own selection, or
+silently drop it — and neither is worth the pixels back.
+
+**Folding is display only.** It narrows nothing: what is *bookable* is still
+decided by `filterSlots` and `HORIZON_DAYS`, and every published slot is in the
+DOM either way.
+
+**Checked:** all **36 test files pass**; the new file is 10 new assertions
+across the boundary cases (3 days, exactly 7, 8, 21, empty/null feed).
+**10 mutations run, 10 killed** — including the two traps above, the
+off-by-one, and the lazy-tail shape. **Not checked:** not rendered in a
+browser — the Chrome extension was not connected this session — so the *look*
+of `.slotpick__more` is unverified; its CSS variables were confirmed to exist
+and it reuses the agenda's own tokens.
+
+---
+
+## Previous — 2026-09-18, Claude Code: a confirmed plan was reported as a failure
 
 **Site only. No Apps Script paste, so no deploy-order hazard.** `webhook.gs`
 stays at **r57**; nothing upstream changed. `portal.js` is **r58**.
