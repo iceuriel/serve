@@ -111,6 +111,11 @@ the two are compared through a new **`sameTime()`** normaliser. Compared as they
 arrive, the guard would be false forever and never fire once — the same bug
 already shipped here in the r53 slot check.
 
+**The founder ratified leaving those two alone** (2026-09-18): "we can leave the
+left alone ones left alone for now." Not an oversight to be tidied up by the
+next agent — revisit only when `movePlan` carries the plan's time, or when a
+customer actually reports a note that failed to save.
+
 **Why `plan_change` is left alone.** Changing the *time* keeps the frequency, so
 the only fact the model carries — the cadence — is **already true before the
 write**, and asking would report success without having checked anything. That
