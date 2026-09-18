@@ -62,6 +62,24 @@ first asked, a write that genuinely failed, an unreachable account, and a real
 `bad_slot` refusal still being reported at once. **8 mutations, 8 killed** —
 every load-bearing line goes red when broken.
 
+### Shipped and verified in production — 2026-09-18
+
+Commit **`7c498e2`**, pushed to `master`. In order, and each one actually run:
+
+1. **Before the push**, `GET https://servecleaning.com/portal.js` contained
+   **none** of `SETTLE_MS`, `unheard`, `askTheAccount` — the old code was live,
+   which is what makes the check below mean something.
+2. **Workers Builds check run on `7c498e2`: `completed success`.** Confirmed via
+   `gh api`, because a push with **no check run means no deploy** and looks
+   identical to a successful one from the terminal.
+3. **The bytes actually shipped.** A green build is not evidence of that, so the
+   live file was fetched again and diffed against `git show 7c498e2:portal.js`
+   — **identical**, line endings aside. All six markers present.
+
+Not done, and not claimed: nothing was confirmed through a real portal in a
+browser, and no live plan was confirmed to watch the new path run — that would
+book a real visit and send a real customer email.
+
 ### ⚠️ STILL UNFIXED — THE SAME HOLE EXISTS ON THE SIBLING WRITES
 
 Only `plan_confirm` was fixed, because that is the one that was reported and the
