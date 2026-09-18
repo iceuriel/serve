@@ -24,6 +24,24 @@
     /* The same feed the booking form reads, through the same Worker route. */
     var SLOTS = '/api/slots';
 
+    /* THE EARLIER / LATER FALLBACK, NAMED ONCE. Three cards on this page offer
+       it when the feed comes back empty, and the words are a promise about when
+       somebody turns up — two copies is how one card starts promising a window
+       the others do not. Same reason the horizon rules live in serve-slots.js. */
+    var PREF_NAMES = {
+        earlier: ['Earlier in the day', 'Typically 8:00 AM – 12:00 PM'],
+        later:   ['Later in the day', 'Typically 12:00 PM – 5:00 PM'],
+    };
+
+    /* Deselect every slot chip under `root`. A preference and a slot answer the
+       same question, so choosing one must visibly clear the other. */
+    function clearChips(root) {
+        (root.querySelectorAll('.slot-chip') || []).forEach(function (c) {
+            c.className = 'slot-chip';
+            c.setAttribute('aria-pressed', 'false');
+        });
+    }
+
     var stateEl = document.getElementById('p-state');
     var navEl   = document.getElementById('p-nav');
     var bodyEl  = document.getElementById('p-body');
@@ -510,7 +528,7 @@
         if (typeof ServeSlots === 'undefined') return null;
 
         var box    = el('div', 'plan__confirm');
-        var picked = { date: '', time: '' };
+        var picked = { date: '', time: '', pref: '' };
 
         var cta = el('button', 'plan__cta', 'Choose a time');
         cta.type = 'button';
@@ -545,6 +563,47 @@
             box.appendChild(sameWrap);
         }
 
+        /* EARLIER / LATER — the same fallback the booking form and the move
+           plan card already offer, and for the same reason. An empty feed is
+           ordinary: the founder refills AVAILABILITY weekly, so there are days
+           with nothing open on screen and a customer who still wants to book.
+           Sending them to the phone loses the ones who will not call, and the
+           server has always been able to take a preference — bookPlanVisit
+           writes `time_preference` whenever the schedule has no clock time.
+           This card was simply the one surface that never asked. */
+        var prefWrap = el('div', 'plan__prefs');
+        prefWrap.hidden = true;
+        box.appendChild(prefWrap);
+
+        function drawPrefs() {
+            prefWrap.textContent = '';
+            ['earlier', 'later'].forEach(function (k) {
+                var b = el('button', 'plan__pref' + (picked.pref === k ? ' is-selected' : ''));
+                b.type = 'button';
+                b.setAttribute('aria-pressed', picked.pref === k ? 'true' : 'false');
+                b.setAttribute('data-pref', k);
+                b.appendChild(el('span', 'plan__optname', PREF_NAMES[k][0]));
+                b.appendChild(el('span', 'plan__optprice', PREF_NAMES[k][1]));
+                b.addEventListener('click', function () {
+                    /* A preference and a slot are two answers to one question,
+                       so choosing either clears the other. Sending both would
+                       leave the server deciding which the customer meant. */
+                    picked.pref = k; picked.date = ''; picked.time = '';
+                    clearChips(pickWrap);
+                    chosen.hidden = false;
+                    chosen.textContent = 'Your first ' + plan.frequency + ' visit: ' +
+                        PREF_NAMES[k][0].toLowerCase() +
+                        ' — we will call to set the day.';
+                    if (sameWrap) sameWrap.hidden = false;
+                    row.hidden = false;
+                    status.textContent = '';
+                    status.className = 'tk-save';
+                    drawPrefs();
+                });
+                prefWrap.appendChild(b);
+            });
+        }
+
         var row = el('div', 'plan__row');
         /* Two buttons, two weights. Choosing a time is exploratory and can be
            undone by choosing another; this one books a visit. */
@@ -556,6 +615,11 @@
         row.hidden = true;
         box.appendChild(row);
 
+        /* Built now, revealed later. drawPrefs closes over `row` and `status`,
+           so it cannot run before they exist — and a prefWrap left empty until
+           first click is a hidden box with nothing in it to reveal. */
+        drawPrefs();
+
         cta.addEventListener('click', function () {
             cta.disabled = true;
             pickWrap.hidden = false;
@@ -566,16 +630,25 @@
                 cta.hidden = true;
                 /* An empty feed is an ordinary outcome, not an error screen:
                    unreachable, slow, or genuinely nothing open all land here,
-                   and all of them mean the same thing to the customer. */
+                   and all of them mean the same thing to the customer.
+
+                   IT IS NO LONGER A DEAD END. The customer still wants this
+                   plan; the only thing missing is a clock time, and earlier /
+                   later is an answer Serve can act on. Asking them to phone us
+                   loses every customer who will not phone — and the ones who
+                   do arrive as a voicemail instead of a row in JOBS. */
                 if (!slots.length) {
                     pickWrap.appendChild(el('p', 'plan__body',
-                        'We have no open times on screen right now. Call or email us ' +
-                        'below and we will find one with you.'));
+                        'We have no open times on screen right now. Choose earlier ' +
+                        'or later in the day and we will call to set the day.'));
+                    prefWrap.hidden = false;
                     return;
                 }
                 pickWrap.appendChild(ServeSlots.picker(slots, function (date, time) {
                     picked.date = date;
                     picked.time = time;
+                    picked.pref = '';
+                    drawPrefs();
                     chosen.hidden = false;
                     chosen.textContent = 'Your first ' + plan.frequency + ' visit: ' +
                         (prettyDate(date) || date) + ' at ' + time;
@@ -584,22 +657,38 @@
                     status.textContent = '';
                     status.className = 'tk-save';
                 }));
+                /* A full feed still may not contain a time that works. The
+                   same escape hatch the booking form gives, one click away
+                   rather than on screen competing with the real times. */
+                var other = el('button', 'plan__other',
+                    'None of these work? Choose earlier or later in the day');
+                other.type = 'button';
+                other.addEventListener('click', function () {
+                    prefWrap.hidden = false;
+                    other.hidden = true;
+                });
+                pickWrap.appendChild(other);
             });
         });
 
         go.addEventListener('click', function () {
-            if (!picked.date || !picked.time) return;
+            /* A slot OR a preference — never neither, and the branch below
+               never sends both. */
+            if (!(picked.date && picked.time) && !picked.pref) return;
             go.disabled = true;
             status.textContent = 'Booking…';
             status.className = 'tk-save';
 
-            postWrite({
-                kind:          'plan_confirm',
-                plan_id:       plan.planId,
-                slot_date:     picked.date,
-                slot_time:     picked.time,
-                same_provider: !!(sameBox && sameBox.checked),
-            })
+            var payload = { kind: 'plan_confirm', plan_id: plan.planId };
+            if (picked.date && picked.time) {
+                payload.slot_date = picked.date;
+                payload.slot_time = picked.time;
+            } else {
+                payload.time_preference = picked.pref;
+            }
+            payload.same_provider = !!(sameBox && sameBox.checked);
+
+            postWrite(payload)
             .then(function (d) {
                 if (d && d.ok) {
                     status.textContent = 'Booked';
@@ -650,10 +739,7 @@
     var QUOTE = '/api/quote';
     var PLAN_NAMES = { weekly: 'Every week', biweekly: 'Every 2 weeks', monthly: 'Every month' };
     var PLAN_ORDER = ['weekly', 'biweekly', 'monthly'];
-    var PREF_NAMES = {
-        earlier: ['Earlier in the day', 'Typically 8:00 AM – 12:00 PM'],
-        later:   ['Later in the day', 'Typically 12:00 PM – 5:00 PM'],
-    };
+    /* PREF_NAMES and clearChips are shared with the plan card — see the top. */
 
     /* Page state that must survive a live repaint: whether the saved plan is
        being changed, and the prices already fetched for this home. */
@@ -874,12 +960,6 @@
         var prefWrap = el('div', 'mplan__prefs');
         prefWrap.hidden = true;
 
-        function clearChips(root) {
-            (root.querySelectorAll('.slot-chip') || []).forEach(function (c) {
-                c.className = 'slot-chip';
-                c.setAttribute('aria-pressed', 'false');
-            });
-        }
         function drawPrefs() {
             prefWrap.textContent = '';
             ['earlier', 'later'].forEach(function (k) {

@@ -678,6 +678,13 @@ carry an offset and `-04:00` does not sort against `-05:00`.
 written when the customer confirms. A one-off reschedule moves that visit only;
 the next one is counted from the anchor, not from the visit that moved.
 
+**BOTH ARE BLANK ON A PLAN CONFIRMED WITH A PREFERENCE**, and the plan is still
+`confirmed` with a real visit behind it. A customer who answers "earlier in the
+day" rather than picking a slot has given no clock time to count a cadence from,
+so none is invented; the beat starts when dispatch sets the day and writes one.
+`plan_confirm` has accepted a preference since the portal stopped dead-ending on
+an empty feed — `changeMovePlan` has cleared the anchor this way since r45.
+
 **`preferred_vendor_id`** records a request for the same partner as last time.
 It is a preference for dispatch, not a guarantee, and it is never shown to the
 customer as one. **Nothing reads it yet** — dispatch is a human's, and this is

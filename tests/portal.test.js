@@ -1501,6 +1501,61 @@ t('and a date that is not a date',
   confirm({ plan_id: 'PLN-TIME', slot_date: 'next week' }).error === 'bad_slot');
 t('neither booked anything', jobsRows().length === beforeJunk);
 
+/* ---- A SLOT **OR** A PREFERENCE ----
+   On 2026-09-18 AVAILABILITY had no open row on or after that day: every open
+   slot in the sheet was in the past and every future row was booked or held.
+   The feed correctly published nothing, and the portal's plan card had no way
+   through at all — it showed a phone number and stopped. That is a lost
+   booking from a customer who had already chosen a plan and a price.
+
+   The two answers the booking form has always taken are a slot from the feed
+   and earlier/later; `bookPlanVisit` could always write either. This handler
+   alone demanded a clock time. A preference is a weaker answer, not an invalid
+   one: the visit is booked and dispatch calls to set the day. */
+onlyPlan();
+pushPlan({ plan_id: 'PLN-PREF' });
+const beforePref = jobsRows().length;
+const CP = confirm({ plan_id: 'PLN-PREF', slot_date: '', slot_time: '',
+                     time_preference: 'later' });
+
+t('a preference instead of a slot confirms the plan', CP.ok === true, CP);
+t('and books exactly one visit', jobsRows().length === beforePref + 1,
+  jobsRows().length - beforePref);
+const PREFJOB = String(CP.job_id || '');
+t('a real recurring visit, at the price the plan held',
+  jobCell(PREFJOB, 'service_type') === 'Recurring clean' &&
+  Number(jobCell(PREFJOB, 'quoted_price')) === 111,
+  [jobCell(PREFJOB, 'service_type'), jobCell(PREFJOB, 'quoted_price')]);
+/* NO DAY IS INVENTED. The customer said "later in the day" and nothing more;
+   writing a scheduled_date here would be a promise nobody made. */
+t('with no day guessed on its behalf',
+  jobCell(PREFJOB, 'scheduled_date') === '', jobCell(PREFJOB, 'scheduled_date'));
+/* start_time carries the WINDOW, in the same words a preference booking off
+   the website has always written there — the convention a dispatcher reading
+   the JOBS tab already knows, not a second one invented for this path. */
+t('and the window in the words the rest of the system uses',
+  jobCell(PREFJOB, 'start_time') === 'Later in the day (typically 12:00 PM - 5:00 PM)',
+  jobCell(PREFJOB, 'start_time'));
+/* THE ANCHOR CLEARS, exactly as changeMovePlan does for a preference: there is
+   no clock time to count a cadence from yet. Writing one would invent a
+   schedule nobody agreed to. */
+t('and the anchor stays empty — a cadence needs a time to beat from',
+  planCell('PLN-PREF', 'anchor_date') === '' && planCell('PLN-PREF', 'anchor_time') === '',
+  [planCell('PLN-PREF', 'anchor_date'), planCell('PLN-PREF', 'anchor_time')]);
+t('though the plan is genuinely confirmed',
+  planCell('PLN-PREF', 'status') === 'confirmed', planCell('PLN-PREF', 'status'));
+
+/* Neither answer is still refused — the loosening is exactly two words wide. */
+onlyPlan();
+pushPlan({ plan_id: 'PLN-NEITHER' });
+const beforeNone = jobsRows().length;
+t('no slot and no preference is still refused',
+  confirm({ plan_id: 'PLN-NEITHER', slot_date: '', slot_time: '' }).error === 'bad_slot');
+t('and a preference that is neither earlier nor later',
+  confirm({ plan_id: 'PLN-NEITHER', slot_date: '', slot_time: '',
+            time_preference: 'whenever' }).error === 'bad_slot');
+t('neither of those booked anything', jobsRows().length === beforeNone);
+
 /* ---- the one day on which the job_id could collide ----
    THE SUFFIX ON THE SUBMISSION ID IS LOAD-BEARING, and only a confirmation on
    the origin booking's OWN DAY can prove it. A job_id is the date plus the

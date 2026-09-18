@@ -1,7 +1,31 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-17  ·  master  ·  r56 — the browser can ask whether a booking landed
+ * VERSION STAMP:  2026-09-18  ·  master  ·  r57 — a plan can be confirmed without an open slot
+ *
+ * r57 = THE PORTAL'S PLAN CARD NO LONGER DEAD-ENDS WHEN THE FEED IS EMPTY.
+ *       INCLUDES r56 BELOW — this is one paste, not two.
+ *
+ *       PASTE THIS BEFORE THE SITE IS PUSHED. The browser begins sending
+ *       `time_preference` on `plan_confirm` as soon as the site ships, and a
+ *       script still demanding a slot answers `bad_slot` to every one of them.
+ *
+ *       On 2026-09-18 AVAILABILITY held no open row on or after that day —
+ *       every open slot was in the past, every future row booked or held — so
+ *       the feed published nothing, correctly. A customer who had already
+ *       chosen a cadence and accepted a price pressed "Choose a time" and was
+ *       shown a phone number and nothing else.
+ *
+ *       `confirmRecurringPlan` now takes a slot OR earlier/later, the same two
+ *       answers `readMovePlanChoice` has always taken. Barely any of this is
+ *       new plumbing: `bookPlanVisit` already wrote `time_preference` for a
+ *       schedule with no clock time, `makeJobId` already handled an undated
+ *       booking, `bookAvailabilitySlot` already skipped a non-slot. This one
+ *       handler demanded a clock time and nothing else did.
+ *
+ *       THE ANCHOR CLEARS for a preference, as changeMovePlan has done since
+ *       r45. No clock time means no cadence to count from, and writing a
+ *       guessed one would invent a schedule nobody agreed to.
  *
  * r56 = A BOOKING THAT SUCCEEDED CAN NO LONGER SHOW THE FAILURE PANEL.
  *
@@ -1798,7 +1822,7 @@ function routeGet(e) {
      health stamp below rather than creating anything. */
   if (p.booking) return handleBookingStatus(p.booking);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-17 r56" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-18 r57" });
 }
 
 
@@ -4109,14 +4133,31 @@ function confirmRecurringPlan(ss, contact, data) {
 
   /* THE TIME IS VALIDATED, NOT MERELY PASSED ALONG. An unreadable time matches
      no AVAILABILITY row, consumes nothing, and leaves a customer holding a
-     confirmation for a visit no cleaner can see. */
+     confirmation for a visit no cleaner can see.
+
+     A SLOT FROM THE FEED **OR** A PREFERENCE — exactly the two answers the
+     booking form and the move-plan card have always taken, and the two
+     `bookPlanVisit` has always been able to write. This handler alone demanded
+     a clock time, so on any day AVAILABILITY has nothing open the portal's plan
+     card could offer no way through at all. A preference is a weaker answer,
+     not an invalid one: it books the visit and dispatch calls to set the day. */
   var slotDate = String(data.slot_date || "").trim();
   var slotTime = String(data.slot_time || "").trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(slotDate) || !PLAN_TIME_SHAPE.test(slotTime)) {
+  var pref     = String(data.time_preference || "").trim().toLowerCase();
+  var sched;
+
+  if (slotDate || slotTime) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(slotDate) || !PLAN_TIME_SHAPE.test(slotTime)) {
+      return json({ ok: false, error: "bad_slot" });
+    }
+    sched = normalizeSchedule({ slot_date: slotDate, slot_time: slotTime });
+    if (sched.shape !== "slot") return json({ ok: false, error: "bad_slot" });
+  } else if (pref === "earlier" || pref === "later") {
+    sched = normalizeSchedule({ time_preference: pref });
+  } else {
+    /* Neither — the same answer an unreadable slot gets. */
     return json({ ok: false, error: "bad_slot" });
   }
-  var sched = normalizeSchedule({ slot_date: slotDate, slot_time: slotTime });
-  if (sched.shape !== "slot") return json({ ok: false, error: "bad_slot" });
 
   /* The booking this plan came from carries the home, the size and the people.
      It must belong to them too — a plan row is not permission to read a job. */
@@ -4140,6 +4181,13 @@ function confirmRecurringPlan(ss, contact, data) {
        window: the number on screen when they chose is the number they pay. */
     price: found.row.quoted_price,
     sched: sched,
+    /* Passed for the same reason startMovePlan passes it: it keeps the
+       SYNTHESISED PAYLOAD an accurate description of the booking. Nothing
+       reads it back today — bookPlanVisit takes the already-normalised `sched`
+       and buildJobRecord works off that — so a mutation dropping this line
+       breaks no test, and that is recorded rather than papered over. It earns
+       its place the day a column added to buildJobRecord reads the payload. */
+    preference: sched.shape === "preference" ? pref : "",
     submissionId: planSubmissionId(planId),
   });
 
@@ -4150,12 +4198,17 @@ function confirmRecurringPlan(ss, contact, data) {
   var record = booked.record, payload = booked.payload, slotResult = booked.slotResult;
 
   /* THE ANCHOR. Every later visit is counted from this date and time, not from
-     whatever the most recent visit happened to be moved to. See SCHEMA. */
+     whatever the most recent visit happened to be moved to. See SCHEMA.
+
+     A PREFERENCE CLEARS IT, exactly as changeMovePlan does: there is no clock
+     time to count a cadence from yet. The plan is confirmed and the first visit
+     is real; the beat starts once dispatch sets the day. Writing a guessed
+     anchor here would invent a schedule nobody agreed to. */
   try {
     setPlanCells(sheet, found, {
       status:              "confirmed",
-      anchor_date:         sched.date,
-      anchor_time:         sched.time,
+      anchor_date:         sched.shape === "slot" ? sched.date : "",
+      anchor_time:         sched.shape === "slot" ? sched.time : "",
       confirmed_job_id:    record.job_id,
       preferred_vendor_id: preferredVendor,
     });

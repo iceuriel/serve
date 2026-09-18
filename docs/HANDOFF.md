@@ -6,10 +6,96 @@ assistant with no access to this repo. Self-contained on purpose.
 **Companion doc:** `/docs/SCHEMA.md` — authoritative for every column's meaning
 and who writes it. This file is the narrative; that file is the contract.
 
-**Latest session: 2026-09-17.** Jump to
+**Latest session: 2026-09-18.** Jump to
 [what changed on 2026-09-08 / 09](#session-2026-09-08--09) for the current
 state. The sections below it describe earlier builds and remain accurate
 except where a later section supersedes them.
+
+---
+
+## Current work — 2026-09-18, Claude Code: the plan card dead-ended on an empty feed, and AVAILABILITY is empty
+
+> ## ⚠️ ACTION FOR THE FOUNDER: **AVAILABILITY HAS NO OPEN ROW ON OR AFTER TODAY.**
+>
+> This is not a website fault and no code change fixes it. In Ops MASTER →
+> `AVAILABILITY`, every row marked `open` is **9/14, 9/15, 9/16, 9/17 — all in
+> the past**. Every row from 9/18 to 9/29 is `booked`, except 9/26 which is
+> `held`. So the feed correctly publishes nothing and **every surface that
+> offers a time shows none** — the booking form and all three portal cards.
+>
+> **Verified from production:** `GET /api/slots` →
+> `{"ok":true,"version":"2026-09-12 avail r3","count":0,"slots":[]}`. The relay
+> reached Apps Script, the tab's headers are intact (no `skipped_rows`) and both
+> timezones are right (no `warning`) — the sheet genuinely has nothing open.
+>
+> **The fix is the weekly routine** the OPS_DASHBOARD tab already describes:
+> type the next three weeks of open slots into `AVAILABILITY`, one row per exact
+> time, `8:00 AM` shaped. Nothing below removes the need to do that.
+
+**The bug worth fixing was what the page did about it.** The founder opened a
+test customer's `/h`, pressed **Choose a time** on a *Not booked yet* weekly
+plan, and got "We have no open times on screen right now. Call or email us" —
+**a dead end**, on a card where the customer had already chosen a cadence and
+accepted a price. The move-plan card and the booking form have always degraded
+to **earlier / later** instead; this one card never did.
+
+Files touched: `portal.js`, `apps-script/webhook.gs`, `style.css`,
+`tests/portal-render.test.js`, `tests/portal.test.js`, `docs/SCHEMA.md`, this
+entry.
+
+### ⚠️ THIS SPANS BOTH — DEPLOY THE SCRIPT **BEFORE** PUSHING THE SITE
+
+`webhook.gs` is now **r57** (r56 was still outstanding; **this supersedes it —
+paste once and both land**). The browser starts sending `time_preference` on
+`plan_confirm` the moment the site ships, and a script that still demands a slot
+answers `bad_slot` to every one of them. Site first = a button that fails for
+exactly the customers it was added to rescue.
+
+### What changed
+
+**Client (`portal.js`).** The plan card's empty-feed branch now reveals
+earlier / later instead of a phone number, and a full feed gets the booking
+form's own `None of these work?` escape hatch. A slot and a preference are two
+answers to one question, so choosing either **clears the other** — in what is
+posted and in what the customer sees. `PREF_NAMES` and `clearChips` moved to
+module scope and are now shared with the move-plan card rather than duplicated:
+the words are a promise about when somebody turns up, and two copies is how one
+card starts promising a window the other does not.
+
+**Server (`webhook.gs`).** `confirmRecurringPlan` accepts a slot **or**
+`earlier`/`later`, mirroring `readMovePlanChoice`. **Almost none of this was new
+plumbing** — `bookPlanVisit` has always written `time_preference` when the
+schedule carries no clock time, `makeJobId` has always handled an undated
+booking, and `bookAvailabilitySlot` already returns `skipped` for a non-slot.
+This one handler simply demanded a clock time. **The anchor clears for a
+preference**, exactly as `changeMovePlan` has since r45: no clock time, no
+cadence to beat from, and inventing one would be a schedule nobody agreed to.
+
+**Deliberately NOT changed: the reschedule card** (`Change time` on a booked
+visit) still says call us on an empty feed. Moving a *confirmed* visit to
+"earlier or later, we will call you" would take a customer who has a real time
+and leave them with none — a worse outcome than the phone call. The two cases
+look alike and are not.
+
+### Checked
+
+- `node tests/run-all.js` — **all 35 files pass.**
+- **10 deliberate mutations, 9 killed.** Restoring the dead end, posting a blank
+  slot beside the preference, dropping either "clears the other" rule, refusing
+  the preference server-side again, accepting *any* preference string, letting
+  through neither answer, and inventing an anchor — each turns the suite red.
+- **The survivor is recorded, not papered over:** dropping `preference` on the
+  way to `bookPlanVisit` breaks nothing, because that path derives everything
+  from the already-normalised `sched` and nothing re-normalises the payload. The
+  line is kept for consistency with `startMovePlan` and says so in a comment.
+- **Rendered in a real browser**, not just asserted: the built `_site` served
+  against a stub `/api/slots` returning `count: 0`. The two buttons draw and
+  reflow at 520px; choosing one selects it, says "Your first weekly visit:
+  earlier in the day — we will call to set the day", and reveals **Confirm
+  weekly plan**.
+- **NOT deployed and NOT pushed.** No Apps Script paste, no `git push`, and
+  nothing verified against production beyond the `/api/slots` and `/api/health`
+  reads quoted above.
 
 ---
 

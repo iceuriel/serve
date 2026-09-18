@@ -345,19 +345,114 @@ const PRETTY = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][D.getDay()] +
 
   /* An unreachable feed, a slow one, one answering ok:false and one with
      genuinely nothing open all arrive here as the same empty list — and they
-     all mean the same thing to the customer. */
+     all mean the same thing to the customer.
+
+     AN EMPTY FEED IS ORDINARY, AND IT MUST NOT BE A DEAD END. The founder
+     refills AVAILABILITY by hand each week, so "nothing open on screen" is a
+     state this card meets often — and on 2026-09-18 it met it for real, with
+     every open row in the sheet already in the past. Until then the card's
+     whole answer was "call us", which loses every customer who will not phone
+     and turns the ones who do into a voicemail instead of a row in JOBS. */
   const F = await boot(model(), { slots: [] });
   click(F.body, 'plan__cta');
   await F.settle();
 
   t('it says so plainly rather than showing an empty box',
     byClass(F.body, 'plan__body').some(n => n._text.indexOf('no open times') !== -1), true);
+  /* The POINT of the release: a way forward on the page itself. */
+  t('and offers earlier / later rather than only a phone number',
+    byClass(F.body, 'plan__pref').map(n => n.getAttribute('data-pref')),
+    ['earlier', 'later']);
+  t('revealed, not left hidden behind a disclosure nobody opens',
+    (byClass(F.body, 'plan__prefs')[0] || {}).hidden, false);
   /* The BUTTON's own hidden flag is never set — its row is what is revealed
      when a time is chosen, so the row is what proves it cannot be reached. */
-  t('and offers no confirm control that could not work',
+  t('with no confirm control until one is chosen',
     (byClass(F.body, 'plan__row')[0] || {}).hidden, true);
-  t('nothing was requested', F.posts, []);
+  t('nothing was requested merely by looking', F.posts, []);
+
+  /* CHOOSING ONE BOOKS THE PLAN. */
+  click(F.body, 'plan__pref');
+  await F.settle();
+
+  t('choosing a preference arms the confirm button',
+    (byClass(F.body, 'plan__row')[0] || {}).hidden, false);
+  t('and says what was chosen, in the customer\'s own terms',
+    byClass(F.body, 'plan__chosen').some(n => /earlier in the day/i.test(n._text)), true);
+
+  click(F.body, 'plan__go');
+  await F.settle();
+
+  t('confirming sends exactly one request', F.posts.length, 1);
+  /* A PREFERENCE, AND NO SLOT. Sending both would leave the server deciding
+     which of two answers the customer meant; sending a blank slot_date is how
+     `bad_slot` came back for somebody who chose perfectly clearly. */
+  t('carrying the preference and no slot at all',
+    F.posts[0], { event_type: 'portal_write', contact_id: 'CON-1', t: 'tok',
+                  kind: 'plan_confirm', plan_id: 'PLN-20260910-1',
+                  time_preference: 'earlier', same_provider: false });
   t('and nothing threw', F.warns, []);
+
+  head('F2. A full feed still offers the escape hatch');
+
+  /* Six open times and none of them work is an ordinary Tuesday. The booking
+     form has always offered this; the plan card did not. One click away rather
+     than on screen competing with the real times. */
+  const F2 = await boot(model());
+  click(F2.body, 'plan__cta');
+  await F2.settle();
+
+  t('the way out is offered', byClass(F2.body, 'plan__other').length, 1);
+  t('but stays out of the way until asked for',
+    (byClass(F2.body, 'plan__prefs')[0] || {}).hidden, true);
+
+  click(F2.body, 'plan__other');
+  await F2.settle();
+
+  t('asking for it reveals the choice',
+    (byClass(F2.body, 'plan__prefs')[0] || {}).hidden, false);
+
+  /* A SLOT AND A PREFERENCE ARE TWO ANSWERS TO ONE QUESTION. Whichever was
+     chosen last is the one that gets sent, and the other must be cleared —
+     both in what is posted and in what the customer can see. */
+  click(F2.body, 'slot-chip');
+  await F2.settle();
+  click(F2.body, 'plan__pref');
+  await F2.settle();
+  click(F2.body, 'plan__go');
+  await F2.settle();
+
+  t('a preference chosen after a slot replaces it',
+    F2.posts[0], { event_type: 'portal_write', contact_id: 'CON-1', t: 'tok',
+                   kind: 'plan_confirm', plan_id: 'PLN-20260910-1',
+                   time_preference: 'earlier', same_provider: false });
+
+  const F3 = await boot(model());
+  click(F3.body, 'plan__cta');
+  await F3.settle();
+  click(F3.body, 'plan__other');
+  await F3.settle();
+  click(F3.body, 'plan__pref');
+  await F3.settle();
+  click(F3.body, 'slot-chip');
+  await F3.settle();
+
+  /* Asserted BEFORE confirming: a successful confirm re-reads the account and
+     the whole card goes away, so anything checked after it is checking a page
+     that no longer has one. */
+  t('the abandoned preference is visibly deselected',
+    byClass(F3.body, 'plan__pref').map(n => n.getAttribute('aria-pressed')),
+    ['false', 'false']);
+
+  click(F3.body, 'plan__go');
+  await F3.settle();
+
+  t('and a slot chosen after a preference replaces that',
+    F3.posts[0], { event_type: 'portal_write', contact_id: 'CON-1', t: 'tok',
+                   kind: 'plan_confirm', plan_id: 'PLN-20260910-1',
+                   slot_date: isoOf(SOON), slot_time: '9:00 AM',
+                   same_provider: false });
+  t('and nothing threw', F3.warns, []);
 
   head('G. r43 — the two controls, and what they ask before acting');
 

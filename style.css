@@ -4792,12 +4792,14 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
     font-size: 0.85rem;
     color: var(--color-text-muted);
 }
+.plan__prefs,
 .mplan__prefs {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
     gap: 0.5rem;
     margin-top: 0.5rem;
 }
+.plan__pref,
 .mplan__opt,
 .mplan__pref,
 .mplan__keep {
@@ -4816,18 +4818,23 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
     cursor: pointer;
 }
 .mplan__keep { font-size: 0.85rem; font-weight: 600; margin-top: 0.75rem; }
+.plan__pref:hover,
 .mplan__opt:hover,
 .mplan__pref:hover,
 .mplan__keep:hover { border-color: var(--color-dark); }
+.plan__pref.is-selected,
 .mplan__opt.is-selected,
 .mplan__pref.is-selected,
 .mplan__keep.is-selected {
     border-color: var(--color-dark);
     box-shadow: inset 0 0 0 1px var(--color-dark);
 }
+.plan__optname,
 .mplan__optname { font-size: 0.88rem; font-weight: 700; }
+.plan__optprice,
 .mplan__optprice { font-size: 0.8rem; color: var(--color-text-muted); }
 
+.plan__other,
 .mplan__other,
 .mplan__cancel,
 .mplan__retry {
@@ -4841,6 +4848,7 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
     text-decoration: underline;
     cursor: pointer;
 }
+.plan__other:hover,
 .mplan__other:hover,
 .mplan__cancel:hover,
 .mplan__retry:hover { color: var(--color-dark); }
