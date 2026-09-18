@@ -320,6 +320,72 @@
             .catch(function () { return false; });
     }
 
+    /* ========================================================
+       A SLOW WRITE IS NOT A FAILED WRITE  —  r58
+       ========================================================
+       The founder confirmed a plan in a test portal, watched it spin, and was
+       told it did not go through — while the confirmation email was already on
+       its way and the plan was already booked. Nothing was wrong with the
+       booking. The Worker gives a portal write 12 seconds
+       (UPSTREAM_TIMEOUT_MS.submit) and then answers 502; Apps Script never
+       hears that it stopped listening and carries on writing. A plan confirm
+       opens the second workbook, books the slot, writes JOBS, updates the plan
+       and sends the mail — and a cold start alone can eat the whole budget
+       before any of that begins.
+
+       This is r56's lesson applied to the portal: no latency budget can be made
+       generous enough to be right every time, so stop guessing from the round
+       trip and ASK THE ACCOUNT. The question is already built — the same portal
+       GET this page loads itself with — and doGet takes no script lock, so it
+       answers WHILE the slow write is still running.
+
+       THE PREDICATE IS THE SERVER'S OWN. clientRecurringPlan offers a plan only
+       while it is PENDING, so a confirmed plan stops being offered. "The offer
+       is gone" and "the write landed" cannot drift apart — the same reason r56
+       shares alreadyWritten() with the dedupe rather than re-deciding.
+
+       IMMEDIATELY, THEN BACKING OFF. Twelve seconds have already passed by the
+       time the first question is asked, so it is often answered at once; the
+       rest cover a write that is still finishing. ======================== */
+    var SETTLE_MS = [0, 2000, 3000, 5000];
+
+    /* THE ONE ERROR THAT IS NOT AN ANSWER. The Worker returns it when it gave
+       up waiting, or could not reach the script at all; either way the write it
+       was carrying may have completed perfectly. A reply with no error code at
+       all is the same thing — this page could not read it. Every other code is
+       the script's own considered reply, and is the truth. */
+    function unheard(d) {
+        return !d || (!d.ok && (!d.error || d.error === 'upstream_unreachable'));
+    }
+
+    /* The account as it stands now, WITHOUT painting it. reload() repaints,
+       which is right after a confirmation and wrong while one is still in
+       doubt: repainting mid-question throws away the time the customer picked
+       and the question they are waiting on. */
+    function fetchModel() {
+        return fetch(LOAD)
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                return (d && d.ok === true && d.view === 'portal') ? d : null;
+            })
+            .catch(function () { return null; });
+    }
+
+    /* Ask, up to SETTLE_MS.length times, whether `landed` is yet true of the
+       account. Resolves true once it is — with `model` replaced and ready to
+       paint — and false when the attempts run out. A read that fails is not an
+       answer either; it simply costs one attempt. */
+    function settle(landed, i) {
+        var at = i || 0;
+        return new Promise(function (go) { setTimeout(go, SETTLE_MS[at]); })
+            .then(fetchModel)
+            .then(function (d) {
+                if (d && landed(d)) { model = d; return true; }
+                if (at + 1 >= SETTLE_MS.length) return false;
+                return settle(landed, at + 1);
+            });
+    }
+
     function save(payload, statusEl, btn) {
         statusEl.textContent = 'Saving…';
         statusEl.className = 'tk-save';
@@ -688,22 +754,42 @@
             }
             payload.same_provider = !!(sameBox && sameBox.checked);
 
-            postWrite(payload)
-            .then(function (d) {
-                if (d && d.ok) {
+            /* Booked — however this browser came to hear it. */
+            function booked() {
+                status.textContent = 'Booked';
+                status.className = 'tk-save is-ok';
+                return reload();
+            }
+            function refused(code) {
+                go.disabled = false;
+                status.textContent = planError(code);
+                status.className = 'tk-save is-bad';
+            }
+            /* No answer is not a no. See A SLOW WRITE IS NOT A FAILED WRITE. */
+            function askTheAccount() {
+                status.textContent = 'Still working on it…';
+                status.className = 'tk-save';
+                return settle(function (d) {
+                    return !(d.plan && d.plan.planId === plan.planId);
+                }).then(function (landed) {
+                    if (!landed) return refused('');
                     status.textContent = 'Booked';
                     status.className = 'tk-save is-ok';
-                    return reload();
-                }
-                go.disabled = false;
-                status.textContent = planError(d && d.error);
-                status.className = 'tk-save is-bad';
+                    paint();
+                });
+            }
+
+            postWrite(payload)
+            .then(function (d) {
+                /* `already_confirmed` is a SUCCESS this browser did not hear
+                   the first time — the plan IS booked. Showing it in red over a
+                   plan that exists is how a customer who pressed Confirm twice
+                   ends up phoning to ask which screen to believe. */
+                if (d && (d.ok || d.error === 'already_confirmed')) return booked();
+                if (unheard(d)) return askTheAccount();
+                return refused(d.error);
             })
-            .catch(function () {
-                go.disabled = false;
-                status.textContent = 'That did not go through. Please try again.';
-                status.className = 'tk-save is-bad';
-            });
+            .catch(askTheAccount);
         });
 
         return box;

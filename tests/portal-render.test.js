@@ -166,7 +166,12 @@ async function boot(model, opts) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve(
           { ok: true, slots: opts.slots || FEED }) });
       }
-      return Promise.resolve({ ok: true, json: () => Promise.resolve(served) });
+      /* A FUNCTION when the answer must CHANGE between reads. r58 asks the
+         account more than once precisely because the write it is asking about
+         may still be running, and a fixture that is already settled on the
+         first read cannot express that. */
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(
+        typeof served === 'function' ? served() : served) });
     },
   };
   box.window = box;
@@ -193,8 +198,11 @@ async function boot(model, opts) {
     for (let i = 0; i < 3; i++) await new Promise(r => setImmediate(r));
   };
   await settle();
+  /* `box` is handed back for the same reason opts.clock exists: r58's confirm
+     waits between attempts, and a test that actually waited would spend ten
+     real seconds proving the browser is patient. */
   return { body: els['p-body'] || node('div'), state: els['p-state'] || node('div'),
-           warns, posts, settle, slotGets, quotes };
+           warns, posts, settle, slotGets, quotes, box };
 }
 
 /* --- reading the rendered tree. Every lookup degrades rather than throws:
@@ -453,6 +461,150 @@ const PRETTY = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][D.getDay()] +
                    slot_date: isoOf(SOON), slot_time: '9:00 AM',
                    same_provider: false });
   t('and nothing threw', F3.warns, []);
+
+  head('F4. r58 — a slow confirm is not a failed confirm');
+
+  /* THE BUG THE FOUNDER HIT ON 2026-09-18, in a test portal. The plan was
+     confirmed: the JOBS row was written, the plan was marked booked and the
+     confirmation email arrived. The card said it did not go through.
+
+     Nothing was wrong with the booking. The Worker gives a portal write twelve
+     seconds (UPSTREAM_TIMEOUT_MS.submit) and then answers 502, and Apps Script
+     never hears that it stopped listening — so it finishes the write nobody is
+     waiting for any more. This page used to read that silence as a refusal.
+
+     THE ACCOUNT IS THE ONLY HONEST WITNESS, and it is already reachable: the
+     next read of it no longer offers the plan, because clientRecurringPlan
+     offers PENDING plans only. */
+  const F4 = await boot(model(), { reply: { ok: false, error: 'upstream_unreachable' } });
+  click(F4.body, 'plan__cta');
+  await F4.settle();
+  click(F4.body, 'slot-chip');
+  await F4.settle();
+  click(F4.body, 'plan__go');
+  /* ONE REAL TICK, and the real schedule. That the first question is asked
+     with no delay at all is half the point — twelve seconds have already gone
+     by, and the answer is usually waiting. F6 below collapses time; this one
+     must not. */
+  await new Promise((r) => setTimeout(r, 20));
+  await F4.settle();
+
+  t('a Worker that stopped listening is not reported as a refusal',
+    byClass(F4.body, 'tk-save').map(n => n._text).filter(Boolean), []);
+  t('the card gives way to the booking that really was made',
+    byClass(F4.body, 'plan').length, 0);
+  /* Asking is a READ. A second confirm would be a second plan. */
+  t('and it asked rather than sending the booking twice', F4.posts.length, 1);
+  t('and nothing threw', F4.warns, []);
+
+  /* THE SECOND HALF OF THE SAME BUG. Somebody told "that did not go through"
+     presses it again, and the script — correctly — refuses the duplicate.
+     `already_confirmed` was then printed in red over a plan that IS booked,
+     which is how a customer ends up phoning to ask which screen to believe. */
+  const F5 = await boot(model(), { reply: { ok: false, error: 'already_confirmed' } });
+  click(F5.body, 'plan__cta');
+  await F5.settle();
+  click(F5.body, 'slot-chip');
+  await F5.settle();
+  click(F5.body, 'plan__go');
+  await F5.settle();
+
+  t('"already booked" is shown as the success it is, not an error',
+    byClass(F5.body, 'tk-save').map(n => n._text).filter(Boolean), []);
+  t('and the booked plan stops being offered', byClass(F5.body, 'plan').length, 0);
+  t('and nothing threw', F5.warns, []);
+
+  /* THE CASE THAT ACTUALLY HAPPENS. The Worker gave up at twelve seconds
+     because the write was SLOW, so at the moment of the first question it is
+     very often still running — the plan is still pending, and the honest
+     answer is "not yet". One question would report a failure here. Asking
+     again is the whole reason there is a schedule and not a single poll. */
+  let reads = 0;
+  const F6a = await boot(model(), {
+    reply: { ok: false, error: 'upstream_unreachable' },
+    after: () => (++reads >= 2 ? model({ plan: null }) : model()),
+  });
+  click(F6a.body, 'plan__cta');
+  await F6a.settle();
+  click(F6a.body, 'slot-chip');
+  await F6a.settle();
+  F6a.box.setTimeout = (fn) => setImmediate(fn);
+  click(F6a.body, 'plan__go');
+  for (let i = 0; i < 8; i++) await F6a.settle();
+
+  t('a write still finishing is waited for, not written off',
+    byClass(F6a.body, 'plan').length, 0);
+  t('and it took more than one question to find out', reads >= 2, true);
+  t('while the customer was told it was still working, never that it failed',
+    byClass(F6a.body, 'tk-save').map(n => n._text).filter(Boolean), []);
+  t('and nothing threw', F6a.warns, []);
+
+  /* A WRITE THAT REALLY DID FAIL STILL SAYS SO. The account is asked, the
+     answers run out, and the customer is told the truth — late, but true. The
+     failure here is that this case might be swallowed into a cheerful screen,
+     which would be the original bug pointing the other way. */
+  const F6 = await boot(model(), {
+    reply: { ok: false, error: 'upstream_unreachable' },
+    after: model(),                     // the plan is still pending, every time
+  });
+  click(F6.body, 'plan__cta');
+  await F6.settle();
+  click(F6.body, 'slot-chip');
+  await F6.settle();
+  /* Time, collapsed — see boot's `box`. */
+  F6.box.setTimeout = (fn) => setImmediate(fn);
+  click(F6.body, 'plan__go');
+  for (let i = 0; i < 12; i++) await F6.settle();
+
+  t('a write that truly did not land is still reported as a failure',
+    byClass(F6.body, 'tk-save').map(n => n._text).filter(Boolean),
+    ['That did not go through. Please try again.']);
+  t('the card stays, so the customer can try again',
+    byClass(F6.body, 'plan').length, 1);
+  t('and asking never turned into booking again', F6.posts.length, 1);
+  t('and nothing threw', F6.warns, []);
+
+  /* A READ THAT FAILED IS NOT AN ANSWER EITHER. An account that cannot be
+     reached carries no `plan` — and "no plan offered" is the very signal that
+     means the confirm landed. Taken at face value, an outage on the read would
+     congratulate the customer on a booking that does not exist, which is the
+     original bug inverted and worse. */
+  const F6b = await boot(model(), {
+    reply: { ok: false, error: 'upstream_unreachable' },
+    after: () => ({ ok: false, error: 'upstream_unreachable' }),
+  });
+  click(F6b.body, 'plan__cta');
+  await F6b.settle();
+  click(F6b.body, 'slot-chip');
+  await F6b.settle();
+  F6b.box.setTimeout = (fn) => setImmediate(fn);
+  click(F6b.body, 'plan__go');
+  for (let i = 0; i < 12; i++) await F6b.settle();
+
+  t('an unreachable account is never read as a completed booking',
+    byClass(F6b.body, 'plan').length, 1);
+  t('and the customer is told the truth instead',
+    byClass(F6b.body, 'tk-save').map(n => n._text).filter(Boolean),
+    ['That did not go through. Please try again.']);
+  t('and nothing threw', F6b.warns, []);
+
+  /* A REFUSAL THE SCRIPT ACTUALLY MADE IS NOT AMBIGUOUS, and must not be
+     softened into "still working on it". The customer needs to pick another
+     time, and every second spent politely re-asking is a second the slot they
+     want is being taken by somebody else. */
+  const F7 = await boot(model(), { reply: { ok: false, error: 'bad_slot' } });
+  click(F7.body, 'plan__cta');
+  await F7.settle();
+  click(F7.body, 'slot-chip');
+  await F7.settle();
+  click(F7.body, 'plan__go');
+  await F7.settle();
+
+  t('a real refusal is reported at once, in its own words',
+    byClass(F7.body, 'tk-save').map(n => n._text).filter(Boolean),
+    ['That time is no longer available. Please pick another.']);
+  t('without re-reading the account to second-guess it', F7.posts.length, 1);
+  t('and nothing threw', F7.warns, []);
 
   head('G. r43 — the two controls, and what they ask before acting');
 

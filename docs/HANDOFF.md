@@ -13,7 +13,68 @@ except where a later section supersedes them.
 
 ---
 
-## Current work — 2026-09-18, Claude Code: the plan card dead-ended on an empty feed, and AVAILABILITY is empty
+## Current work — 2026-09-18, Claude Code: a confirmed plan was reported as a failure
+
+**Site only. No Apps Script paste, so no deploy-order hazard.** `webhook.gs`
+stays at **r57**; nothing upstream changed. `portal.js` is **r58**.
+
+**What the founder saw.** In a test portal (Tyler), the plan card's times loaded
+fine this time, a time was chosen, **Confirm** was pressed — it span, then said
+**"That did not go through."** The confirmation email then arrived, and the
+portal showed the plan as booked. The booking was perfect; only the reporting
+was wrong.
+
+**Why.** Nothing failed. The Worker gives a portal write **12 seconds**
+(`UPSTREAM_TIMEOUT_MS.submit`, `worker.js:535`) and then returns 502 — and
+**Apps Script never hears that it stopped listening**, so it finishes the write
+nobody is waiting for any more. A `plan_confirm` opens the second workbook,
+books the AVAILABILITY slot, writes JOBS, updates `RECURRING_PLANS` and sends
+the mail; per what was measured on 9/17 a **cold start alone can exceed 15s**,
+so the budget can be gone before any of that starts. The browser had no way to
+tell "refused" from "not heard", and printed a refusal.
+
+This is exactly the hole **r56** closed for the booking form. The portal's plan
+card never got that treatment.
+
+**Second half of the same bug:** pressing Confirm again made the script answer
+`already_confirmed` — correct — which the page rendered as a **red error over a
+plan that is genuinely booked**.
+
+**The fix — ask the account, don't guess from the round trip.** r56's
+conclusion holds: no latency budget can be made generous enough to be right
+every time. The question was already built — the portal `GET` this page loads
+itself with — and **`doGet` takes no script lock**, so it answers *while the
+slow write is still running*. The predicate is the server's own:
+`clientRecurringPlan` offers a plan only while it is **pending**, so "the offer
+is gone" and "the write landed" cannot drift apart. Attempts run at
+**0, +2s, +3s, +5s** — immediately first, because 12 seconds have already
+passed. `already_confirmed` is now treated as the success it is.
+
+A failure is still reported as a failure: if the attempts run out with the plan
+still pending — or the account cannot be read at all — the customer is told the
+truth. An unreadable account is never mistaken for a completed booking.
+
+Files touched: `portal.js`, `tests/portal-render.test.js`, this entry.
+
+**Checked:** all 35 test files pass. Six new render sections (F4–F7) cover the
+timed-out-but-landed case, `already_confirmed`, a write still finishing when
+first asked, a write that genuinely failed, an unreachable account, and a real
+`bad_slot` refusal still being reported at once. **8 mutations, 8 killed** —
+every load-bearing line goes red when broken.
+
+### ⚠️ STILL UNFIXED — THE SAME HOLE EXISTS ON THE SIBLING WRITES
+
+Only `plan_confirm` was fixed, because that is the one that was reported and the
+one where the customer is told a *booking* failed. The identical false-failure
+is still possible on **`reschedule`**, **`cancel`**, **`plan_start` /
+`plan_change`** (the move-plan card) and the note/access `save()` — all go
+through the same 12s budget. Each needs its own "did it land" predicate, which
+is why they were not swept in blind. `unheard()`, `fetchModel()` and `settle()`
+in `portal.js` are written to be reused.
+
+---
+
+## 2026-09-18, Claude Code: the plan card dead-ended on an empty feed, and AVAILABILITY is empty
 
 > ## ⚠️ ACTION FOR THE FOUNDER: **AVAILABILITY HAS NO OPEN ROW ON OR AFTER TODAY.**
 >
