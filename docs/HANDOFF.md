@@ -93,9 +93,33 @@ look alike and are not.
   reflow at 520px; choosing one selects it, says "Your first weekly visit:
   earlier in the day — we will call to set the day", and reveals **Confirm
   weekly plan**.
-- **NOT deployed and NOT pushed.** No Apps Script paste, no `git push`, and
-  nothing verified against production beyond the `/api/slots` and `/api/health`
-  reads quoted above.
+### Shipped and verified in production, 2026-09-18
+
+**Deployed in the right order, and each half probed rather than assumed:**
+
+1. **Apps Script pasted and deployed by the founder FIRST.** Probed:
+   `GET <WEBHOOK_URL>` (with `-sL`, since `/exec` answers 302 with an empty
+   body) → `{"ok":true,"service":"serve-booking-webhook","version":"2026-09-18 r57"}`.
+   **A paste is not a deployment** — this probe is what distinguishes them, and
+   it is the check to run before shipping any site change that depends on a
+   script change.
+2. **Then pushed** (`fdeabbc`). Workers Builds check run on that commit:
+   **completed success** — confirmed with `gh` before probing, because a push
+   with no check run means no deploy.
+3. **Then confirmed the deployed asset actually carries the change**, not just
+   that the build went green: `GET https://servecleaning.com/portal.js` contains
+   `plan__pref`, `plan__other` and `time_preference`. A green build is not
+   evidence the bytes shipped.
+
+**The sheet was refilled by the founder in the same session.** `/api/slots` now
+answers `count: 4` — 9/30, 10/1, 10/2, 10/3, **all at 3:30 PM**.
+
+> **Worth watching:** nothing is open for the next 12 days, and **every open
+> slot in the whole 21-day horizon is 3:30 PM**. A customer who wants a morning
+> clean has nothing to pick, so the earlier/later path added above is now
+> carrying real traffic rather than sitting behind a rare edge case.
+
+`stripe_mode` still reads `LIVE` — unchanged by any of this.
 
 ---
 
