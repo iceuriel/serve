@@ -386,6 +386,52 @@
             });
     }
 
+    /* THE AMBIGUOUS BRANCH, NAMED ONCE. Ask the account whether `landed` has
+       become true, then say so — or report the honest failure the caller hands
+       in. Every caller keeps its OWN words: moving a visit, cancelling one and
+       booking a plan do not succeed in the same sentence, and a shared message
+       here is how one of them starts telling a customer the wrong thing. */
+    function askTheAccount(landed, statusEl, okText, lost) {
+        statusEl.textContent = 'Still working on it…';
+        statusEl.className = 'tk-save';
+        return settle(landed).then(function (yes) {
+            if (!yes) return lost();
+            statusEl.textContent = okText;
+            statusEl.className = 'tk-save is-ok';
+            paint();
+        });
+    }
+
+    /* This booking as the account now reports it, or null. */
+    function bookingIn(d, jobId) {
+        var list = (d && d.bookings) || [];
+        for (var i = 0; i < list.length; i++) {
+            if (list[i] && list[i].bookingId === jobId) return list[i];
+        }
+        return null;
+    }
+
+    /* "9:00 AM ET" AND "9:00 AM" ARE THE SAME TIME. The account returns a
+       DISPLAY string — timeCellText appends ET so that a cleaner reading a
+       phone in another timezone cannot misread it — while the feed returns the
+       raw one. Comparing the two as they arrive is false FOREVER, which is how
+       a guard that reads perfectly never fires once; that exact bug has already
+       been shipped here, in the r53 slot check. Normalised on both sides.
+
+       THE BLANK CHECK IS UNREACHABLE TODAY AND KEPT ANYWAY. Its only caller
+       refuses to send without a time, so the second argument is never blank and
+       a mutation deleting `!!norm(a)` kills no test — that is recorded rather
+       than papered over. It stays because two blanks answering "the same time?"
+       with yes is the kind of wrong this helper must never be, and the next
+       caller does not inherit that guarantee from this one. */
+    function sameTime(a, b) {
+        var norm = function (s) {
+            return String(s || '').replace(/\s*\bET\b\.?\s*$/i, '')
+                                  .replace(/\s+/g, ' ').trim().toUpperCase();
+        };
+        return !!norm(a) && norm(a) === norm(b);
+    }
+
     function save(payload, statusEl, btn) {
         statusEl.textContent = 'Saving…';
         statusEl.className = 'tk-save';
@@ -765,18 +811,13 @@
                 status.textContent = planError(code);
                 status.className = 'tk-save is-bad';
             }
-            /* No answer is not a no. See A SLOW WRITE IS NOT A FAILED WRITE. */
-            function askTheAccount() {
-                status.textContent = 'Still working on it…';
-                status.className = 'tk-save';
-                return settle(function (d) {
+            /* No answer is not a no. See A SLOW WRITE IS NOT A FAILED WRITE.
+               A plan is offered only while it is PENDING, so the offer going
+               away IS the confirmation. */
+            function ask() {
+                return askTheAccount(function (d) {
                     return !(d.plan && d.plan.planId === plan.planId);
-                }).then(function (landed) {
-                    if (!landed) return refused('');
-                    status.textContent = 'Booked';
-                    status.className = 'tk-save is-ok';
-                    paint();
-                });
+                }, status, 'Booked', function () { refused(''); });
             }
 
             postWrite(payload)
@@ -786,10 +827,10 @@
                    plan that exists is how a customer who pressed Confirm twice
                    ends up phoning to ask which screen to believe. */
                 if (d && (d.ok || d.error === 'already_confirmed')) return booked();
-                if (unheard(d)) return askTheAccount();
+                if (unheard(d)) return ask();
                 return refused(d.error);
             })
-            .catch(askTheAccount);
+            .catch(ask);
         });
 
         return box;
@@ -1144,6 +1185,31 @@
             if (pick.date && pick.time) { payload.slot_date = pick.date; payload.slot_time = pick.time; }
             else if (pick.pref)         { payload.time_preference = pick.pref; }
 
+            function lost(code) {
+                go.disabled = false;
+                status.textContent = movePlanError(code);
+                status.className = 'tk-save is-bad';
+            }
+
+            /* r58, FOR plan_start ONLY. Starting a plan flips this box from
+               `choose` to `saved`, which is an unambiguous reading — and
+               movePlanEditing is already false on that path, so the repaint
+               shows the plan rather than the chooser.
+
+               A plan_change is deliberately NOT asked about. Changing the TIME
+               leaves the frequency alone, so "the plan says what I asked for"
+               is already true BEFORE the write and would report success
+               without having checked anything — the one failure worse than the
+               one r58 fixes. The model carries no plan time to test instead,
+               so there is nothing honest to ask, and it keeps the old
+               behaviour until there is. */
+            function ask() {
+                if (saved) return lost('');
+                return askTheAccount(function (d) {
+                    return !!(d.movePlan && d.movePlan.state === 'saved');
+                }, status, 'Booked', function () { lost(''); });
+            }
+
             postWrite(payload)
             .then(function (d) {
                 if (d && d.ok) {
@@ -1168,15 +1234,10 @@
                     status.className = 'tk-save is-bad';
                     return;
                 }
-                go.disabled = false;
-                status.textContent = movePlanError(d && d.error);
-                status.className = 'tk-save is-bad';
+                if (unheard(d)) return ask();
+                lost(d.error);
             })
-            .catch(function () {
-                go.disabled = false;
-                status.textContent = 'That did not go through. Please try again.';
-                status.className = 'tk-save is-bad';
-            });
+            .catch(function () { ask(); });
         });
 
         go.hidden = true;
@@ -1314,6 +1375,17 @@
             status.textContent = 'Moving…';
             status.className = 'tk-save';
 
+            /* r58. The visit has moved when the account says it sits on the
+               date and time that were asked for — read through sameTime,
+               because the account's copy carries ET and the feed's does not. */
+            function ask() {
+                return askTheAccount(function (d) {
+                    var row = bookingIn(d, b.bookingId);
+                    return !!row && row.date === picked.date &&
+                           sameTime(row.time, picked.time);
+                }, status, 'Moved', function () { failed(go); });
+            }
+
             postWrite({ kind: 'reschedule', job_id: b.bookingId,
                         slot_date: picked.date, slot_time: picked.time })
             .then(function (d) {
@@ -1322,9 +1394,10 @@
                     status.className = 'tk-save is-ok';
                     return reload();
                 }
-                failed(go, d && d.error);
+                if (unheard(d)) return ask();
+                failed(go, d.error);
             })
-            .catch(function () { failed(go); });
+            .catch(ask);
         });
 
         /* Asking is not doing. Opening the confirm step sends nothing. */
@@ -1345,6 +1418,18 @@
             status.textContent = 'Cancelling…';
             status.className = 'tk-save';
 
+            /* r58. `cancelled` is a FIELD, not a spelling of job_status the
+               browser has to interpret — which is exactly why it can be trusted
+               as the answer here. A customer wrongly told the cancellation
+               failed either phones us or, worse, assumes a cleaner is still
+               coming and stays home for one who is not. */
+            function ask() {
+                return askTheAccount(function (d) {
+                    var row = bookingIn(d, b.bookingId);
+                    return !!row && row.cancelled === true;
+                }, status, 'Cancelled', function () { failed(yes); });
+            }
+
             postWrite({ kind: 'cancel', job_id: b.bookingId })
             .then(function (d) {
                 if (d && d.ok) {
@@ -1352,9 +1437,10 @@
                     status.className = 'tk-save is-ok';
                     return reload();
                 }
-                failed(yes, d && d.error);
+                if (unheard(d)) return ask();
+                failed(yes, d.error);
             })
-            .catch(function () { failed(yes); });
+            .catch(ask);
         });
 
         return wrap;

@@ -18,6 +18,10 @@ except where a later section supersedes them.
 **Site only. No Apps Script paste, so no deploy-order hazard.** `webhook.gs`
 stays at **r57**; nothing upstream changed. `portal.js` is **r58**.
 
+> Shipped in two pushes: `7c498e2` fixed the reported plan card, and a second
+> push extended the same treatment to cancel, move and plan-start. Both are
+> recorded below.
+
 **What the founder saw.** In a test portal (Tyler), the plan card's times loaded
 fine this time, a time was chosen, **Confirm** was pressed — it span, then said
 **"That did not go through."** The confirmation email then arrived, and the
@@ -80,15 +84,45 @@ Not done, and not claimed: nothing was confirmed through a real portal in a
 browser, and no live plan was confirmed to watch the new path run — that would
 book a real visit and send a real customer email.
 
-### ⚠️ STILL UNFIXED — THE SAME HOLE EXISTS ON THE SIBLING WRITES
+### The sibling writes — three more fixed, two deliberately not
 
-Only `plan_confirm` was fixed, because that is the one that was reported and the
-one where the customer is told a *booking* failed. The identical false-failure
-is still possible on **`reschedule`**, **`cancel`**, **`plan_start` /
-`plan_change`** (the move-plan card) and the note/access `save()` — all go
-through the same 12s budget. Each needs its own "did it land" predicate, which
-is why they were not swept in blind. `unheard()`, `fetchModel()` and `settle()`
-in `portal.js` are written to be reused.
+Every portal write shares the same 12s budget, so every one of them could
+report a completed write as a failure. `askTheAccount()` was factored out of
+the plan card and each surface given **its own** question, because "did it
+land" is a different fact each time and a shared guess is worse than none.
+
+| Write | Asked about? | The question |
+|---|---|---|
+| `plan_confirm` | **yes** | the plan stops being offered (pending only) |
+| `cancel` | **yes** | `bookings[].cancelled === true` |
+| `reschedule` | **yes** | the booking sits on the requested date **and** time |
+| `plan_start` | **yes** | `movePlan.state` flips `choose` → `saved` |
+| `plan_change` | **no** | — nothing honest to ask; see below |
+| note / access `save()` | **no** | — lower stakes, shared helper |
+
+**`reschedule` carries the known trap.** The account returns the time as a
+DISPLAY string (`timeCellText` appends ` ET`) while the feed returns it raw, so
+the two are compared through a new **`sameTime()`** normaliser. Compared as they
+arrive, the guard would be false forever and never fire once — the same bug
+already shipped here in the r53 slot check.
+
+**Why `plan_change` is left alone.** Changing the *time* keeps the frequency, so
+the only fact the model carries — the cadence — is **already true before the
+write**, and asking would report success without having checked anything. That
+is the failure r58 exists to prevent, pointing the other way. The model exposes
+no plan time to test instead. A test pins this decision so it is not quietly
+"improved" later; the day `movePlan` carries the plan's time, it can be asked
+about properly.
+
+**The dangerous direction is tested too.** A cancellation that did *not* land
+must never read as done — somebody who believes a visit is called off and is
+wrong gets a cleaner at the door. Section N asserts both directions for cancel,
+move and plan start.
+
+**Checked:** all 35 test files pass. **16 mutations run, 15 killed.** The single
+survivor is the unreachable blank-guard inside `sameTime()` — its only caller
+refuses to send without a time, so no test can reach it; it is kept anyway and
+the reason is recorded in the code rather than papered over.
 
 ---
 

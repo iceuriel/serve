@@ -963,6 +963,177 @@ const PRETTY = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][D.getDay()] +
   t('no notes, no block', [notesOn(M2.body, 'SRV-1'), notesOn(M2.body, 'SRV-0')], [[], []]);
   t('and section M did not throw', [].concat(M1.warns, M2.warns), []);
 
+  head('N. r58 — the same honesty on the other slow writes');
+
+  /* The plan card was the one that was REPORTED, but every portal write shares
+     the Worker's 12s budget, so every one of them can be told a completed write
+     failed. Each surface gets its OWN question, because "did it land" is a
+     different fact each time and a shared guess is worse than none. */
+
+  /* ---- CANCELLING. The highest-stakes of the three: somebody wrongly told the
+          cancellation failed either phones us, or assumes a cleaner is still
+          coming and waits in for one who is not. `cancelled` is a real boolean
+          on the row, built so the browser never has to read job_status. ---- */
+  const cancelled = model({ plan: null });
+  cancelled.bookings[0] = Object.assign({}, cancelled.bookings[0], { cancelled: true });
+  const N1 = await boot(model({ plan: null }), {
+    reply: { ok: false, error: 'upstream_unreachable' },
+    after: cancelled,
+  });
+  click(N1.body, 'sched__btn--quiet');
+  click(N1.body, 'sched__yes');
+  await new Promise((r) => setTimeout(r, 20));
+  await N1.settle();
+
+  /* Asserted on the REPAINTED page, like section D: once the answer is in, the
+     card is rebuilt from the account and the status line it was written on no
+     longer exists. What matters is that the visit now reads as called off and
+     no failure was ever shown. */
+  t('a cancellation that landed repaints as called off',
+    [byClass(N1.body, 'pb--cancelled').length, textOf(N1.body, 'pb__tag')], [1, 'Cancelled']);
+  t('and no failure was left on screen',
+    byClass(N1.body, 'tk-save').map(n => n._text).filter(Boolean), []);
+  t('and it asked rather than cancelling twice', N1.posts.length, 1);
+  t('and nothing threw', N1.warns, []);
+
+  /* AND THE DANGEROUS DIRECTION. A cancellation that did NOT land must never
+     be reported as done — somebody who believes a visit is called off and is
+     wrong gets a cleaner at the door, which is worse than any error message.
+     The account still showing a live booking is the whole answer. */
+  const N1b = await boot(model({ plan: null }), {
+    reply: { ok: false, error: 'upstream_unreachable' },
+    after: model({ plan: null }),                    // still very much booked
+  });
+  click(N1b.body, 'sched__btn--quiet');
+  N1b.box.setTimeout = (fn) => setImmediate(fn);
+  click(N1b.body, 'sched__yes');
+  for (let i = 0; i < 12; i++) await N1b.settle();
+
+  t('a cancellation that did NOT land is never reported as done',
+    byClass(N1b.body, 'tk-save').map(n => n._text).filter(Boolean),
+    ['That did not go through. Please try again.']);
+  t('and the visit is still shown as happening',
+    byClass(N1b.body, 'pb--cancelled').length, 0);
+  t('and nothing threw', N1b.warns, []);
+
+  /* ---- MOVING A VISIT, AND THE TRAP IN IT. The account returns the time as a
+          DISPLAY string with ET appended; the feed returns it raw. Comparing
+          them as they arrive is false forever — a guard that reads perfectly
+          and never fires once. That bug has shipped here before. ---- */
+  const moved = model({ plan: null });
+  moved.bookings[0] = Object.assign({}, moved.bookings[0],
+    { date: isoOf(SOON), time: '9:00 AM ET' });      // as the sheet really answers
+  const N2 = await boot(model({ plan: null }), {
+    reply: { ok: false, error: 'upstream_unreachable' },
+    after: moved,
+  });
+  click(N2.body, 'sched__btn');
+  await N2.settle();
+  click(N2.body, 'slot-chip');
+  await N2.settle();
+  click(N2.body, 'sched__move');
+  await new Promise((r) => setTimeout(r, 20));
+  await N2.settle();
+
+  t('a move that landed is recognised through the ET the sheet appends',
+    byClass(N2.body, 'tk-save').map(n => n._text).filter(Boolean), []);
+  t('and the visit repaints on the time that was asked for',
+    textOf(N2.body, 'pb__when'), prettyOf(SOON) + ' · 9:00 AM ET');
+  t('and it asked rather than moving the visit twice', N2.posts.length, 1);
+  t('and nothing threw', N2.warns, []);
+
+  /* THE PREDICATE MUST NOT BE MERELY LOOSE. A visit that came back sitting on
+     some OTHER time is not the move that was asked for, and calling it one
+     would report a success that never happened — the failure r58 exists to
+     prevent, pointing the other way. */
+  const elsewhere = model({ plan: null });
+  elsewhere.bookings[0] = Object.assign({}, elsewhere.bookings[0],
+    { date: isoOf(SOON), time: '1:00 PM ET' });
+  const N3 = await boot(model({ plan: null }), {
+    reply: { ok: false, error: 'upstream_unreachable' },
+    after: elsewhere,
+  });
+  click(N3.body, 'sched__btn');
+  await N3.settle();
+  click(N3.body, 'slot-chip');                       // 9:00 AM
+  await N3.settle();
+  N3.box.setTimeout = (fn) => setImmediate(fn);
+  click(N3.body, 'sched__move');
+  for (let i = 0; i < 12; i++) await N3.settle();
+
+  t('a visit found on a different time is NOT called a successful move',
+    byClass(N3.body, 'tk-save').map(n => n._text).filter(Boolean),
+    ['That did not go through. Please try again.']);
+  t('and nothing threw', N3.warns, []);
+
+  /* ---- STARTING A PLAN AFTER A MOVE. `choose` becoming `saved` is
+          unambiguous, so this one can be asked about. ---- */
+  const N4 = await boot(moveModel(CHOOSE), {
+    reply: { ok: false, error: 'upstream_unreachable' },
+    after: moveModel(SAVED, { bookings: [VISIT] }),
+  });
+  tap(opt(N4.body, 'biweekly'));
+  await N4.settle();
+  click(N4.body, 'slot-chip');
+  await N4.settle();
+  click(N4.body, 'mplan__go');
+  await new Promise((r) => setTimeout(r, 20));
+  await N4.settle();
+
+  t('a plan started after a move leaves no failure on screen',
+    byClass(N4.body, 'tk-save').map(n => n._text).filter(Boolean), []);
+  t('and it repaints as the plan, not the chooser',
+    /mplan--saved/.test((byClass(N4.body, 'mplan')[0] || {}).className || ''), true);
+  t('and it asked rather than starting two plans', N4.posts.length, 1);
+  t('and nothing threw', N4.warns, []);
+
+  /* AND THE DANGEROUS DIRECTION AGAIN: a box still saying `choose` means no
+     plan was started, however long the write took. */
+  const N4b = await boot(moveModel(CHOOSE), {
+    reply: { ok: false, error: 'upstream_unreachable' },
+    after: moveModel(CHOOSE),                        // nothing was ever saved
+  });
+  tap(opt(N4b.body, 'biweekly'));
+  await N4b.settle();
+  click(N4b.body, 'slot-chip');
+  await N4b.settle();
+  N4b.box.setTimeout = (fn) => setImmediate(fn);
+  click(N4b.body, 'mplan__go');
+  for (let i = 0; i < 12; i++) await N4b.settle();
+
+  t('a plan that was never started is not reported as booked',
+    byClass(N4b.body, 'tk-save').map(n => n._text).filter(Boolean),
+    ['That did not go through. Please try again.']);
+  t('and nothing threw', N4b.warns, []);
+
+  /* ---- CHANGING AN EXISTING PLAN IS DELIBERATELY LEFT ALONE, and this pins
+          that decision so it is not quietly "improved" later. Changing the TIME
+          keeps the frequency, so the only fact the model exposes is already
+          true before the write; asking would report success without checking
+          anything. Until the model carries the plan's time, the old behaviour
+          is the honest one. ---- */
+  let planReads = 0;
+  const N5 = await boot(moveModel(SAVED, { bookings: [VISIT] }), {
+    reply: { ok: false, error: 'upstream_unreachable' },
+    after: () => { planReads++; return moveModel(SAVED, { bookings: [VISIT] }); },
+  });
+  click(N5.body, 'mplan__edit');
+  await N5.settle();
+  /* THE EXACT HAZARD: the TIME is changed and the cadence deliberately left
+     alone, so "the plan is biweekly" — the only fact the model carries — is
+     already true before the write ever happens. */
+  click(N5.body, 'slot-chip');
+  await N5.settle();
+  click(N5.body, 'mplan__go');
+  await new Promise((r) => setTimeout(r, 20));
+  await N5.settle();
+
+  t('a plan CHANGE is still reported honestly rather than guessed at',
+    byClass(N5.body, 'tk-save').map(n => n._text).filter(Boolean),
+    ['That did not go through. Please try again.']);
+  t('and the account is not asked a question it cannot answer', planReads, 0);
+  t('and nothing threw', N5.warns, []);
+
   console.log('\n' + (bad ? bad + ' FAILURES' : 'all portal-render checks passed'));
   process.exit(bad ? 1 : 0);
 })();
