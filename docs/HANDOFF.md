@@ -84,6 +84,11 @@ Not done, and not claimed: nothing was confirmed through a real portal in a
 browser, and no live plan was confirmed to watch the new path run — that would
 book a real visit and send a real customer email.
 
+**The sibling writes shipped the same way** in commit **`dc1bd5a`**: Workers
+Builds `success`, and the served `portal.js` diffs **identical** against
+`git show dc1bd5a:portal.js`. `sameTime`, `bookingIn` and `askTheAccount` are
+all present in the deployed file.
+
 ### The sibling writes — three more fixed, two deliberately not
 
 Every portal write shares the same 12s budget, so every one of them could
