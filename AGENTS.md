@@ -1,5 +1,50 @@
 # AGENTS.md — Serve Website Development Guide
 
+## Shared continuity — Codex and Claude Code (2026-09-09)
+
+Both agents cover the full Serve remit. The founder switches between them for
+usage availability; there is no permanent split of responsibilities. Continue
+the latest authorized work from the shared record rather than starting over.
+
+At the start of a session, and again when resuming after the other agent worked:
+1. Read the newest entry in `docs/HANDOFF.md`, then `docs/SCHEMA.md` for the
+   current system and data contracts.
+2. Read `../.agent-memory/MEMORY.md` relative to this repository root. It is
+   the shared PRIVATE memory outside the website repo: business direction,
+   durable decisions, working preferences, and pointers to older private notes.
+   If it is unavailable in another checkout, report that gap; do not invent
+   context or copy private strategy into tracked files.
+3. Inspect the current branch, recent commits, and working-tree diff. Existing
+   changes may belong to the founder or the other agent. Preserve them and
+   re-read a file before editing if it may have changed since inspection.
+4. Continue the recorded task within the user's authorization. Ask only when
+   an unresolved business decision or conflicting concurrent work requires it.
+
+During and at the end of meaningful work:
+- Keep a short current-work entry near the top of HANDOFF: agent, objective,
+  affected files, completed work, remaining work, blockers, and the next action.
+  Checkpoint before a long operation or a switch, not only at final completion.
+- Record what was actually checked and its result. Distinguish local edits,
+  commits, pushes, Apps Script deployments, sheet changes, and production
+  verification; never equate one with another or claim an unrun check passed.
+- Update SCHEMA alongside any column or ownership change. Update shared private
+  memory for durable business decisions and preferences; do not store secrets,
+  customer data, access codes, or signed links in either handoff or memory.
+- Keep this continuity section identical in AGENTS.md and CLAUDE.md. Apply any
+  other shared project-rule change to both files in the same pass.
+- Agent-specific memories are indexes or supplements, not competing system
+  histories. Put facts the other agent needs in the shared records. Older
+  notes are historical when superseded; user instructions and verified current
+  evidence take precedence, and unresolved contradictions must be called out.
+- If both agents are active, record who is touching which files. Do not overwrite
+  another agent's active edits. A note is coordination, not a file lock.
+- Give a short plan, complete the authorized work, then summarize the outcome.
+  Routine engineering decisions are yours; new prices, margins, payout terms,
+  service coverage, and customer promises remain the founder's decisions.
+
+These files provide continuity through saved context. They do not synchronize
+live conversations or prove the other agent has already read an update.
+
 ## Project Overview
 Serve is a startup home cleaning business serving the Greater Boston area. The website is currently an early-stage MVP and should be improved into a polished, professional, high-converting landing page.
 
