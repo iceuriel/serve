@@ -940,8 +940,40 @@ const PRETTY = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][D.getDay()] +
   t('nobody else sees a plan box, or asks the engine anything',
     [byClass(L7.body, 'mplan').length, L7.quotes.length], [0, 0]);
 
+  /* ---- r59: the same box, worded for a one-time deep clean ---- */
+  /* The server decides WHO is asked; `kind` decides only what the box calls
+     the clean it follows. Saying "after your move" to somebody who booked a
+     deep clean is the whole failure this guards against. */
+  const DEEP_BOOKING = { bookingId: 'SRV-D', serviceLabel: 'First Clean',
+    serviceCode: 'CLEAN_DEEP', date: AFTER, time: '9:00 AM', price: 420, paid: false,
+    completed: '', rooms: [], partner: null };
+  const deepModel = (mp) => model({ plan: null, movePlan: mp, bookings: [DEEP_BOOKING] });
+  const DEEP_CHOOSE = Object.assign({}, CHOOSE, { kind: 'deep', jobId: 'SRV-D',
+    samePartner: true });
+
+  const L8 = await boot(deepModel(DEEP_CHOOSE));
+  t('a one-time deep clean sees the same box', byClass(L8.body, 'mplan').length, 1);
+  t('worded for the clean they actually had', textOf(L8.body, 'mplan__tag'),
+    'After your deep clean');
+  t('and the same-company line names that clean too',
+    all(L8.body).map(n => n._text).filter(s => s && /same cleaning company/.test(s)),
+    ['Ask for the same cleaning company as your deep clean']);
+
+  /* THE OLD SCRIPT'S ANSWER. A webhook older than r59 sends no `kind` at all,
+     and the box must still work — reading slightly wrong beats going blank. */
+  const L9 = await boot(moveModel(Object.assign({}, CHOOSE, { samePartner: true })));
+  t('no kind at all falls back to the move wording', textOf(L9.body, 'mplan__tag'),
+    'After your move');
+
+  const L10 = await boot(deepModel(Object.assign({}, DEEP_CHOOSE, { state: 'saved',
+    planId: 'PLN-D', frequency: 'biweekly', price: 210, visitId: '', sameAsked: true })));
+  t('a saved deep-clean plan says which clean it followed',
+    all(L10.body).map(n => n._text).filter(s => s && /same cleaning company/.test(s)),
+    ['You asked for the same cleaning company as your deep clean.']);
+
   t('and none of section L threw',
-    [].concat(L1.warns, L2.warns, L3.warns, L4.warns, L5.warns, L6.warns, L7.warns), []);
+    [].concat(L1.warns, L2.warns, L3.warns, L4.warns, L5.warns, L6.warns, L7.warns,
+              L8.warns, L9.warns, L10.warns), []);
 
   head('M. r48: notes the cleaner left, on the customer\'s own bookings');
 

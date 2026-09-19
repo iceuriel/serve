@@ -2026,11 +2026,24 @@ head('25. r45 — a plan after a move');
 
   lead('mover@example.com', 'CON-MOVE');
   lead('first@example.com', 'CON-FIRST');
+  lead('solo@example.com',  'CON-SOLO');
   lead('gone@example.com',  'CON-GONE');
   const MOVE = 'SRV-20261010-MOVE01';
   job(MOVE, 'mover@example.com');
+  /* A first clean sold WITH a cadence. r38 wrote this customer a pending offer
+     at booking time, so this box must leave them alone — two boxes asking the
+     same question is the thing planBasisKind exists to prevent. The frequency
+     is what makes it r38's: createRecurringPlan returns "no cadence" without
+     one and never writes a row at all. */
   job('SRV-20260930-FIRST1', 'first@example.com',
-      { service_type: 'First Clean', property_id: 'PROP-FIRST', vendor_id: '' });
+      { service_type: 'First Clean', frequency: 'weekly',
+        property_id: 'PROP-FIRST', vendor_id: '' });
+  /* r59's customer: a first clean, answered "Just once". Nothing offered them
+     a plan at booking and nothing ever asked again — until this box. */
+  const SOLO = 'SRV-20260930-SOLO01';
+  job(SOLO, 'solo@example.com',
+      { service_type: 'First Clean', frequency: 'once', property_id: 'PROP-SOLO',
+        address: '4 Follen St', unit: '', scheduled_date: '2026-09-30' });
   job('SRV-20261012-GONE01', 'gone@example.com',
       { job_status: 'cancelled', property_id: 'PROP-GONE' });
 
@@ -2047,12 +2060,45 @@ head('25. r45 — a plan after a move');
   t('a previous company exists, so it may be asked for', mp.samePartner === true);
   t('the box is a whitelist — exactly these keys',
     JSON.stringify(Object.keys(mp).sort()) ===
-    JSON.stringify(['after','home','jobId','propertyLabel','samePartner','state']), Object.keys(mp));
+    JSON.stringify(['after','home','jobId','kind','propertyLabel','samePartner','state']), Object.keys(mp));
+  t('it says which clean the plan follows', mp.kind === 'move', mp.kind);
   t('no vendor id reaches the browser in it', !JSON.stringify(mp).includes('VEN-'));
   t('reading the portal asked the engine nothing — prices are the browser\'s fetch',
     quoteCalls.length === 0, quoteCalls.length);
-  t('a first-clean customer gets no move box', MGET('CON-FIRST').movePlan === null);
+
+  /* ---- r59: who else the box asks, and who it must still leave alone ---- */
+  /* THE POINT OF r59. A deep clean answered "Just once" is the second group
+     the booking form never offers a cadence to. */
+  const SP = MGET('CON-SOLO').movePlan || {};
+  t('a ONE-TIME deep clean is asked too', SP.state === 'choose', MGET('CON-SOLO').movePlan);
+  t('on their deep clean', SP.jobId === SOLO, SP.jobId);
+  t('and the box knows which kind it is', SP.kind === 'deep', SP.kind);
+  t('naming their home, not the mover\'s', SP.propertyLabel === '4 Follen St', SP.propertyLabel);
+  t('the deep clean is the date the first plan visit must follow',
+    SP.after === '2026-09-30', SP.after);
+  t('same whitelist, no extra keys for the new kind',
+    JSON.stringify(Object.keys(SP).sort()) ===
+    JSON.stringify(['after','home','jobId','kind','propertyLabel','samePartner','state']), Object.keys(SP));
+
+  /* THE BOUNDARY THAT KEEPS TWO OFFERS APART. This customer bought the same
+     service, and the ONLY difference is that they chose a cadence — which
+     means r38 already wrote them a pending offer card. */
+  t('a first clean sold WITH a cadence is left to r38\'s offer card',
+    MGET('CON-FIRST').movePlan === null, MGET('CON-FIRST').movePlan);
   t('nor does a move that was called off', MGET('CON-GONE').movePlan === null);
+
+  /* A BLANK frequency cell is not a cadence. Old JOBS rows predate the column
+     being filled, and an operator retyping a row can empty it — neither is a
+     recurring plan, and reading blank as one would silently drop those
+     customers out of the box forever. */
+  lead('blank@example.com', 'CON-BLANK');
+  job('SRV-20260929-BLANK1', 'blank@example.com',
+      { service_type: 'First Clean', frequency: '', property_id: 'PROP-BLANK',
+        scheduled_date: '2026-09-29' });
+  const BP = MGET('CON-BLANK').movePlan || {};
+  t('a deep clean with a BLANK frequency is asked too', BP.state === 'choose',
+    MGET('CON-BLANK').movePlan);
+  t('and is treated as the deep-clean kind', BP.kind === 'deep', BP.kind);
 
   const start = (over, cid) => MPOST(Object.assign({ kind: 'plan_start', job_id: MOVE,
     frequency: 'biweekly', shown_price: 210, slot_date: '2026-10-24', slot_time: '1:00 PM',
@@ -2062,7 +2108,10 @@ head('25. r45 — a plan after a move');
   /* ---- refusals, each writing nothing ---- */
   t('another customer cannot start a plan on this move',
     start({}, 'CON-FIRST').error === 'not_found');
-  t('a first clean cannot start a move plan',
+  /* The gate the portal drew the box from, enforced again on the write. A
+     first clean WITH a cadence is r38's, and pressing this button on it must
+     fail the same way it would for somebody else's booking. */
+  t('a first clean sold with a cadence cannot start a plan here',
     start({ job_id: 'SRV-20260930-FIRST1' }, 'CON-FIRST').error === 'not_found');
   t('a cancelled move cannot either',
     start({ job_id: 'SRV-20261012-GONE01' }, 'CON-GONE').error === 'not_found');
@@ -2144,7 +2193,8 @@ head('25. r45 — a plan after a move');
   t('and that the same company was asked for, as a yes', sp.sameAsked === true);
   t('the saved box is a whitelist too',
     JSON.stringify(Object.keys(sp).sort()) === JSON.stringify(['after','frequency','home','jobId',
-      'planId','price','propertyLabel','sameAsked','samePartner','state','visitId']), Object.keys(sp));
+      'kind','planId','price','propertyLabel','sameAsked','samePartner','state','visitId']),
+    Object.keys(sp));
   t('still with no vendor id', !JSON.stringify(sp).includes('VEN-'));
   t('the visit is in their bookings, upcoming',
     (V1.bookings || []).some(b => b.bookingId === VISIT && !b.completed && !b.cancelled));
@@ -2185,12 +2235,16 @@ head('25. r45 — a plan after a move');
   t('and it was not touched', planC('PLN-MISKEYED', 'anchor_date') === '' &&
     rows('JOBS').length === jobsAtStart + 1);
 
-  /* A FIRST-CLEAN PLAN HOLDS WHAT IT WAS QUOTED. Its row belongs to the right
-     customer and is confirmed; the only thing wrong is where it came from. */
+  /* A PLAN OFFERED AT BOOKING HOLDS WHAT IT WAS QUOTED. Its row belongs to the
+     right customer and is confirmed; the only thing wrong is where it came
+     from. Its origin carries a CADENCE, which is what makes it an r38 offer —
+     createRecurringPlan cannot produce one without it. r59 keys the refusal on
+     that, not on the service, so this row is refused while a plan started from
+     the box on a one-off deep clean re-prices normally. */
   M.tabs.RECURRING_PLANS.appendRow(PLAN_H.map(k => ({ plan_id: 'PLN-FIRSTQ', lead_id: 'first@example.com',
     origin_job_id: 'SRV-20260930-FIRST1', frequency: 'weekly', quoted_price: 111,
     status: 'confirmed' })[k] || ''));
-  t('a first-clean plan cannot be re-priced from the move box',
+  t('a plan offered at booking cannot be re-priced from this box',
     change({ plan_id: 'PLN-FIRSTQ', frequency: 'monthly', shown_price: 260 }, 'CON-FIRST').error === 'not_found');
 
   slot('2026-10-31', '9:00 AM', 'VEN-SLOT2');
@@ -2284,6 +2338,63 @@ head('25. r45 — a plan after a move');
   t('r38 still never OFFERS a move a plan at booking',
     MB.createRecurringPlan(M.ss, { frequency_selected: 'weekly', service_type: 'move_out' },
       { job_id: 'SRV-X', lead_id: 'x' }, {}) === 'not a first clean');
+
+  /* ================================================================
+     r59 — a one-time deep clean books a plan, end to end
+     ================================================================
+
+     Seeing the box is not booking a visit. This runs the whole write for the
+     new kind of customer: the JOBS row, the plan row, the price from the
+     engine, and the change that re-prices it afterwards — the last one being
+     exactly what plan_change must NOT refuse, since the refusal above is for
+     plans offered at booking and this plan was not one. */
+  slot('2026-10-05', '10:00 AM', 'VEN-SOLO');
+  const jobsBeforeSolo = rows('JOBS').length;
+  quoteCalls.length = 0;
+
+  t('the upkeep cannot start before the deep clean',
+    MPOST({ kind: 'plan_start', job_id: SOLO, frequency: 'weekly', shown_price: 180,
+      slot_date: '2026-09-29', slot_time: '10:00 AM' }, 'CON-SOLO').error === 'too_early');
+  t('nor on the day of it',
+    MPOST({ kind: 'plan_start', job_id: SOLO, frequency: 'weekly', shown_price: 180,
+      slot_date: '2026-09-30', slot_time: '10:00 AM' }, 'CON-SOLO').error === 'too_early');
+  t('and neither refusal wrote a job', rows('JOBS').length === jobsBeforeSolo);
+
+  const SOLOSTART = MPOST({ kind: 'plan_start', job_id: SOLO, frequency: 'biweekly',
+    shown_price: 210, slot_date: '2026-10-05', slot_time: '10:00 AM',
+    same_provider: true }, 'CON-SOLO');
+  t('a one-time deep clean can start a plan', SOLOSTART.ok === true, SOLOSTART);
+  t('which wrote one real visit', rows('JOBS').length === jobsBeforeSolo + 1);
+  t('priced by the ENGINE, not by the browser',
+    Number(jobC(SOLOSTART.job_id, 'quoted_price')) === 210,
+    jobC(SOLOSTART.job_id, 'quoted_price'));
+  t('the engine was asked for THIS home', quoteCalls.length === 1 &&
+    quoteCalls[0].zip === '02116' && quoteCalls[0].bedrooms === 3,
+    quoteCalls[0]);
+  t('the plan row is confirmed straight away',
+    planC('PLN-20260930-SOLO01', 'status') === 'confirmed',
+    planC('PLN-20260930-SOLO01', 'status'));
+  t('it points at the deep clean it follows',
+    planC('PLN-20260930-SOLO01', 'origin_job_id') === SOLO);
+  t('the slot it took is marked booked',
+    slotC('2026-10-05', '10:00 AM', 'status') === 'booked');
+  t('and the same company was asked for',
+    planC('PLN-20260930-SOLO01', 'preferred_vendor_id') === 'VEN-MOVE',
+    planC('PLN-20260930-SOLO01', 'preferred_vendor_id'));
+
+  const SOLOVIEW = MGET('CON-SOLO').movePlan || {};
+  t('the box now shows their saved plan', SOLOVIEW.state === 'saved', SOLOVIEW.state);
+  t('still saying which clean it followed', SOLOVIEW.kind === 'deep', SOLOVIEW.kind);
+  t('at the price it was booked at', SOLOVIEW.price === 210, SOLOVIEW.price);
+
+  /* THE OTHER HALF OF THE BOUNDARY. A plan this box started was priced by the
+     engine, so changing the cadence re-prices it — unlike PLN-FIRSTQ above. */
+  const SOLOCHANGE = MPOST({ kind: 'plan_change', plan_id: 'PLN-20260930-SOLO01',
+    frequency: 'monthly', shown_price: 260, time_preference: 'later' }, 'CON-SOLO');
+  t('and a plan STARTED here can still be re-priced', SOLOCHANGE.ok === true, SOLOCHANGE);
+  t('to the engine\'s number for the new cadence',
+    Number(planC('PLN-20260930-SOLO01', 'quoted_price')) === 260,
+    planC('PLN-20260930-SOLO01', 'quoted_price'));
 }
 
 /* ------------------------------------------------------------------ */

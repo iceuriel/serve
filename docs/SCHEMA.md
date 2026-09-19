@@ -799,30 +799,47 @@ what it meant would lock customers out of their own bookings.
 A move can never land sooner than the feed allows regardless: `/api/slots`
 publishes nothing inside `MIN_LEAD_HOURS` (18), inherited from availability.gs.
 
-### A plan after a move — `plan_start` and `plan_change` (r45)
+### A plan after a clean with no plan — `plan_start` and `plan_change` (r45, widened r59)
 
-**No new column and no new tab.** A move plan is a `RECURRING_PLANS` row whose
-`origin_job_id` is a move-in / move-out booking (`CLEAN_MOVEOUT`). r38's
-`createRecurringPlan` still never *offers* a move a plan at booking time; the
-portal asks instead, and choosing books.
+**No new column and no new tab.** The plan is a `RECURRING_PLANS` row whose
+`origin_job_id` is the booking it follows.
 
-**The portal model gains `movePlan`** — a whitelist, null for everybody who has
-not booked a move. The booking it belongs to is the newest move booking that
+**WHO IS ASKED — `planBasisKind()`, the one predicate (r59).** Three places
+decide (the portal box, `plan_start`, `plan_change`) and they all read this, so
+they cannot drift into a box whose button always fails.
+
+| the booking | kind | why |
+|---|---|---|
+| move in / move out (`CLEAN_MOVEOUT`) | `move` | the form never offers a move a cadence |
+| deep clean (`CLEAN_DEEP`) sold as **"once"** or blank | `deep` | r59. Same gap: nothing offered them a plan and nothing asked again |
+| deep clean sold **with a cadence** | `""` | r38 already wrote them a pending offer; this box must not ask a second time |
+| anything else | `""` | |
+
+**The cadence test is what keeps the two offers apart.** A blank `frequency`
+counts as "once" — an old row or an operator's edit is not a recurring plan.
+
+r38's `createRecurringPlan` still never *offers* a move a plan at booking time
+(`serviceCodeOf` returns `CLEAN_MOVEOUT` whatever the frequency says, so it
+answers "not a first clean"); the portal asks instead, and choosing books.
+
+**The portal model gains `movePlan`** — a whitelist, null for everybody with no
+eligible booking. The booking it belongs to is the newest eligible booking that
 already has a plan, or failing that the newest one not cancelled.
 
 | key | meaning |
 |---|---|
 | `state` | `choose` (no plan yet) or `saved` (a confirmed plan) |
-| `jobId` | the move booking |
+| `kind` | r59. `move` or `deep` — the browser picks WORDS with it and nothing else. Absent from a script older than r59, and portal.js falls back to the move wording |
+| `jobId` | the booking the plan follows |
 | `propertyLabel` | address and unit of that booking — the plan is for THIS home |
-| `after` | the move booking's date; the first plan visit must be later. Blank for a preference booking |
+| `after` | that booking's date; the first plan visit must be later. Blank for a preference booking |
 | `home` | `{ zip, bedrooms, bathrooms, levels }` — exactly what the engine prices the recurring track from, built once in `homeSpecFor()` |
-| `samePartner` | boolean: the move booking has a vendor, so "same company" can be asked |
+| `samePartner` | boolean: that booking has a vendor, so "same company" can be asked |
 | `planId`, `frequency`, `price`, `visitId`, `sameAsked` | `saved` only. `price` is the plan row's `quoted_price`; `visitId` its `confirmed_job_id`; `sameAsked` a boolean — the vendor id never leaves the server |
 
 **THE PRICE IS THE PRICING ENGINE'S, NOT THE BROWSER'S.** Apps Script has no copy
 of `pricing-engine.js`. It calls `POST https://servecleaning.com/api/quote`
-(`PRICING_QUOTE_URL`) with the home from the move booking and reads
+(`PRICING_QUOTE_URL`) with the home from that booking and reads
 `recurring.{weekly,biweekly,monthly}` — `computeQuote().freqSteady`, which
 does not depend on service, condition or add-ons. The portal displays prices
 from the same endpoint. The browser sends back `shown_price` only so that a

@@ -13,7 +13,77 @@ except where a later section supersedes them.
 
 ---
 
-## Current work — 2026-09-19, Claude Code: the customer finally gets an email
+## Current work — 2026-09-19, Claude Code: the plan box also asks one-off deep cleans
+
+**BOTH SURFACES. `webhook.gs` goes to r59 and `portal.js` changes with it —
+PASTE THE SCRIPT FIRST.** portal.js starts reading `movePlan.kind` to word the
+box. Pushing the site first is not fatal here (the copy falls back to the move
+wording, which is only *wrong*, not broken) but it means a deep-clean customer
+is told "after your move" until the paste lands.
+
+**What the founder asked for.** Move-in / move-out customers get a box in
+their portal offering a recurring plan, because the booking form never offers
+them a cadence. Do the same for people who book a first/deep clean and answer
+**"Just once"** — priced from the specs they already entered.
+
+**Why that is the same feature and not a new one.** r45's reasoning was never
+about moves: it is about *anybody who finished a clean with no plan attached*.
+The booking form produces exactly two such groups, and this was the second one.
+Nothing had ever asked them again.
+
+**Eligibility is now one predicate, `planBasisKind()`**, returning `move`,
+`deep` or `""`. Three places decide — the portal box, `plan_start` and
+`plan_change` — and all three read it, so they cannot drift into a box whose
+button always fails.
+
+**The cadence test is the load-bearing part.** A deep clean sold WITH a cadence
+already has r38's pending offer card, so it is not a basis here; a deep clean
+sold as "once" has no plan row at all and this box is the only thing that asks.
+Get that test wrong and one customer is asked the same question by two
+different boxes. A blank `frequency` counts as "once" — an old row or an
+operator's edit is not a recurring plan.
+
+**A subtlety worth not re-deriving:** `plan_change` still refuses to re-price a
+plan that was *offered at booking*, because that one holds its quoted price.
+The right test for that turned out to be the same `planBasisKind` — not a
+move/deep distinction — because an r38 plan's origin booking always carries a
+cadence and therefore always scores `""`. The line is **where the price came
+from**, and the predicate draws it exactly.
+
+**Test fixtures had to be corrected, not just extended.** `PLN-FIRSTQ` paired
+an r38-style plan with a *one-off* origin booking — a combination
+`createRecurringPlan` can never produce, since it returns "no cadence" without
+one. It passed before only because eligibility keyed on service type alone. The
+first-clean fixture now carries `frequency: 'weekly'`, which is what makes it
+genuinely r38's, and a separate one-off fixture covers r59.
+
+**Checked:** all **37 test files pass**. **14 mutations run, 14 killed** — 9 on
+the predicate and its gates (cadence test dropped, deep cleans excluded, every
+frequency treated as one-off, blank no longer one-off, each gate reverted to
+move-only, `kind` withheld, `kind` hardcoded, cancelled bookings re-admitted)
+and 5 on the copy layer (kind ignored, fallback flipped, each of the three
+strings reverted). Both files restored byte-identical after each run. The new
+portal.test.js section books a plan **end to end** for a one-off deep clean —
+JOBS row, plan row, engine price, slot marked booked — and then re-prices it,
+which is the half of the boundary the r38 refusal must not block.
+
+**The first mutation pass left one survivor** — "a blank frequency stops
+counting as one-off" — because no fixture had a blank frequency. That case is
+now covered, and the second pass killed 9/9.
+
+**Not checked:** nothing is deployed and **nothing was rendered in a browser**.
+The Chrome extension was not connected, so the deep-clean wording is verified
+through portal-render.test.js's DOM harness only. No real customer has been
+shown this box.
+
+**Next action:** paste `apps-script/webhook.gs` (r59), confirm `doGet` reports
+r59, then push. Then open a real portal for a customer whose only booking is a
+one-time deep clean and confirm the box appears and says "After your deep
+clean".
+
+---
+
+## Previous — 2026-09-19, Claude Code: the customer finally gets an email
 
 **BOTH SURFACES. `webhook.gs` goes to r58 and the site changes with it —
 PASTE THE SCRIPT FIRST.** The site ships promising a confirmation email with a

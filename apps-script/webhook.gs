@@ -1,7 +1,35 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-19  ·  master  ·  r58 — the customer gets their own confirmation email
+ * VERSION STAMP:  2026-09-19  ·  master  ·  r59 — the plan box also asks one-off deep cleans
+ *
+ * r59 = THE PORTAL'S PLAN BOX NOW ASKS ONE-TIME DEEP-CLEAN CUSTOMERS TOO.
+ *       INCLUDES r58 BELOW — this is one paste, not two.
+ *
+ *       PASTE THIS BEFORE THE SITE IS PUSHED. portal.js starts reading
+ *       `movePlan.kind` to word the box, and a script that does not send it
+ *       leaves the copy on its move-clean wording for a deep-clean customer.
+ *
+ *       r45 built this box for move-in / move-out on the reasoning that the
+ *       booking form never offers those customers a cadence, so the portal has
+ *       to ask instead. That reasoning was never about moves: the form makes a
+ *       second group of exactly the same shape — somebody who picks a first /
+ *       deep clean and answers "Just once". They finished a clean with no plan
+ *       attached and nothing ever asked them again.
+ *
+ *       ELIGIBILITY IS NOW planBasisKind(), one predicate read by all three
+ *       places that decide — the box, plan_start and plan_change. They cannot
+ *       drift apart into a box whose button always fails.
+ *
+ *       THE CADENCE TEST IS WHAT KEEPS TWO OFFERS APART. A deep clean sold
+ *       WITH a cadence already has r38's pending offer card; it is not a basis
+ *       here. A deep clean sold as "once" has no plan row at all, and this box
+ *       is the only thing that asks. See the comment above planBasisKind.
+ *
+ *       plan_change still refuses a plan that was OFFERED AT BOOKING, because
+ *       that one holds its quoted price. The test for that is the same
+ *       predicate — not a move/deep distinction — for the reason written at
+ *       the call site.
  *
  * r58 = EVERY BOOKING NOW EMAILS THE CUSTOMER, WITH THEIR PORTAL LINK.
  *
@@ -1848,7 +1876,7 @@ function routeGet(e) {
      health stamp below rather than creating anything. */
   if (p.booking) return handleBookingStatus(p.booking);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-19 r58" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-19 r59" });
 }
 
 
@@ -4552,8 +4580,59 @@ var MOVE_PLAN_FREQUENCIES = ["weekly", "biweekly", "monthly"];
    form signs its quotes at; see handleQuote in src/worker.js. */
 var PRICING_QUOTE_URL = "https://servecleaning.com/api/quote";
 
+/* ------------------------------------------------------------
+   WHO THIS BOX IS FOR  —  widened in r59
+   ------------------------------------------------------------
+
+   r45 built this for move-in / move-out, on the reasoning that the booking
+   form never offers those customers a cadence, so the portal has to ask
+   instead. THAT REASONING WAS NEVER ABOUT MOVES. It is about anybody who
+   finished a clean with no plan attached, and the booking form produces a
+   second group exactly like that: somebody who picks a first/deep clean and
+   answers "Just once".
+
+   THE TWO OFFERS MUST NOT BOTH APPEAR, and they cannot, by construction:
+
+     deep clean + a cadence   createRecurringPlan writes a PENDING plan at
+                              booking time, and the portal shows r38's card.
+                              Not a basis here — the cadence disqualifies it.
+     deep clean + "once"      no plan row exists, r38 shows nothing, and this
+                              box is the only thing that asks. r59's case.
+     move (any cadence)       serviceCodeOf returns CLEAN_MOVEOUT whatever the
+                              frequency says, so r38 skips it as "not a first
+                              clean". Unchanged from r45.
+
+   So the cadence test below is not a detail — it is the whole thing keeping
+   one customer from being asked the same question twice by two different
+   boxes. A "once" that arrives as "" counts: a blank frequency cell is an
+   old row or an operator's edit, and neither is a recurring plan.
+
+   The KIND travels to the browser because the copy differs — "after your
+   move" is wrong for somebody who just had a deep clean — but every rule
+   below this point is identical for both, deliberately. */
+
+var PLAN_BASIS_MOVE = "move";
+var PLAN_BASIS_DEEP = "deep";
+
+/** "once", blank, or an operator's wording of the same thing. */
+function isOneOffFrequency(v) {
+  var s = String(v || "").trim().toLowerCase();
+  return s === "" || s === "once" || s === "one-time" || s === "one time" ||
+         s === "just once";
+}
+
+/** "move", "deep", or "" for a booking this box must not be offered on. */
+function planBasisKind(b) {
+  if (!b) return "";
+  if (b.serviceCode === "CLEAN_MOVEOUT") return PLAN_BASIS_MOVE;
+  if (b.serviceCode === "CLEAN_DEEP" && isOneOffFrequency(b.frequency)) {
+    return PLAN_BASIS_DEEP;
+  }
+  return "";
+}
+
 function isMoveBooking(b) {
-  return !!b && b.serviceCode === "CLEAN_MOVEOUT";
+  return planBasisKind(b) === PLAN_BASIS_MOVE;
 }
 
 /**
@@ -4652,13 +4731,14 @@ function movePlanForPortal(ss, bookings) {
     var table = readTable(ss, RECURRING_PLANS_TAB);
     if (!table) return null;   // nowhere to record a plan, so nothing to offer
 
-    var basis = null, planRow = null;
+    var basis = null, planRow = null, kind = "";
     for (var i = 0; i < (bookings || []).length; i++) {
       var b = bookings[i];
-      if (!isMoveBooking(b)) continue;
+      var k = planBasisKind(b);
+      if (!k) continue;
       var row = planRowIn(table, planIdFor(b.bookingId));
-      if (row) { basis = b; planRow = row; break; }
-      if (!bookingIsCancelled(b)) { basis = b; break; }
+      if (row) { basis = b; planRow = row; kind = k; break; }
+      if (!bookingIsCancelled(b)) { basis = b; kind = k; break; }
     }
     if (!basis) return null;
 
@@ -4668,6 +4748,10 @@ function movePlanForPortal(ss, bookings) {
     var date = String(basis.scheduledDate || "").trim();
     var out = {
       state:         "choose",
+      /* r59. Which kind of clean this plan follows, so the portal can say so.
+         The browser chooses WORDS with it and nothing else — every rule that
+         decides what may be booked is on this side. */
+      kind:          kind,
       jobId:         basis.bookingId,
       propertyLabel: [basis.address, basis.unit].filter(Boolean).join(", "),
       /* The first plan visit is after the move clean. Blank when the move
@@ -4750,8 +4834,11 @@ function startMovePlan(ss, contact, bookings, data) {
   for (var i = 0; i < bookings.length; i++) {
     if (bookings[i].bookingId === jobId) { basis = bookings[i]; break; }
   }
-  /* Not theirs, not a move, or called off — the same answer as "no such job". */
-  if (!basis || !isMoveBooking(basis) || bookingIsCancelled(basis)) {
+  /* Not theirs, not a clean this box is offered on, or called off — the same
+     answer as "no such job". r59: the eligibility test is planBasisKind, and
+     it is the SAME predicate the portal drew the box from. If these two ever
+     disagree, a customer is shown a box whose button always fails. */
+  if (!basis || !planBasisKind(basis) || bookingIsCancelled(basis)) {
     return json({ ok: false, error: "not_found" });
   }
 
@@ -4858,10 +4945,23 @@ function changeMovePlan(ss, contact, bookings, data) {
     if (bookings[i].bookingId === originId) basis = bookings[i];
     if (visitId && bookings[i].bookingId === visitId) visit = bookings[i];
   }
-  /* A first-clean plan holds the price it was QUOTED. Re-pricing it from here
-     would break r38's promise, so only a plan that came from a move changes
-     here. */
-  if (!basis || !isMoveBooking(basis)) return json({ ok: false, error: "not_found" });
+  /* A plan OFFERED AT BOOKING holds the price it was QUOTED. Re-pricing it
+     from here would break r38's promise, so it cannot be changed here.
+
+     r59: the line is NOT "move versus deep clean", it is WHERE THE PRICE CAME
+     FROM — and planBasisKind draws exactly that line, which is why it is the
+     test rather than a new flag:
+
+       r38's offer   origin is a deep clean sold WITH a cadence, so the kind is
+                     "" and this returns not_found. Price is the quote.
+       this box      origin is a move, or a deep clean sold as "once". Both
+                     were priced by the engine through movePlanPrices, and both
+                     re-price the same way when the cadence changes.
+
+     A plan whose origin booking has since been edited out of eligibility
+     (someone typing a cadence onto a one-off JOBS row) stops being changeable
+     from the portal. That is the safe direction to fail. */
+  if (!basis || !planBasisKind(basis)) return json({ ok: false, error: "not_found" });
 
   var choice = readMovePlanChoice(data, basis, true);
   if (choice.error) return json({ ok: false, error: choice.error });
@@ -5017,16 +5117,28 @@ function sendMovePlanEmail(ctx) {
     "Serve Plan " + verb + " — " + (b.customerName || "Unknown") + " · " + ctx.frequency +
       (flags.length ? " · " + flags.join(" · ") : ""),
     warn +
-    (ctx.what === "started"
-      ? "A move-in / move-out customer chose a recurring plan in their portal.\n" +
-        "THIS IS A REAL BOOKING — the first plan visit is on JOBS.\n\n"
-      : ctx.what === "next visit"
-        ? "A move-plan customer booked their next visit from the plan box.\n\n"
-        : "A move-plan customer changed their plan in their portal.\n\n") +
+    /* r59. Which clean the plan follows, read off the basis rather than
+       assumed — this box serves move customers AND one-off deep cleans now,
+       and an operator reading "move-in / move-out" about a deep-clean
+       customer would go looking for a move that does not exist. */
+    (planBasisKind(b) === PLAN_BASIS_DEEP
+      ? (ctx.what === "started"
+          ? "A one-time deep-clean customer chose a recurring plan in their portal.\n" +
+            "THIS IS A REAL BOOKING — the first plan visit is on JOBS.\n\n"
+          : ctx.what === "next visit"
+            ? "A deep-clean-plan customer booked their next visit from the plan box.\n\n"
+            : "A deep-clean-plan customer changed their plan in their portal.\n\n")
+      : (ctx.what === "started"
+          ? "A move-in / move-out customer chose a recurring plan in their portal.\n" +
+            "THIS IS A REAL BOOKING — the first plan visit is on JOBS.\n\n"
+          : ctx.what === "next visit"
+            ? "A move-plan customer booked their next visit from the plan box.\n\n"
+            : "A move-plan customer changed their plan in their portal.\n\n")) +
     "— WHAT —\n" +
     "Plan:      " + ctx.planId + " (" + ctx.frequency +
       (ctx.oldFrequency && ctx.oldFrequency !== ctx.frequency ? ", was " + ctx.oldFrequency : "") + ")\n" +
-    "After:     " + b.bookingId + " (move in / move out)\n" +
+    "After:     " + b.bookingId +
+      (planBasisKind(b) === PLAN_BASIS_DEEP ? " (one-time deep clean)" : " (move in / move out)") + "\n" +
     "job_id:    " + ctx.jobId + "\n" +
     "Price:     " + money(ctx.price) + " per visit, from the pricing engine\n" +
     "Address:   " + (b.address || "") + (isSet(b.unit) ? ", " + b.unit : "") + "\n" +
@@ -5039,7 +5151,9 @@ function sendMovePlanEmail(ctx) {
       : "When:      (time unchanged)\n") +
     "\n— WHAT THEY ASKED FOR —\n" +
     (ctx.preferredVendor
-      ? "THE SAME COMPANY AS THE MOVE CLEAN: " + ctx.preferredVendor + "\n" +
+      ? "THE SAME COMPANY AS THE " +
+        (planBasisKind(b) === PLAN_BASIS_DEEP ? "DEEP CLEAN" : "MOVE CLEAN") + ": " +
+        ctx.preferredVendor + "\n" +
         "A preference, not a guarantee. Assign it yourself.\n"
       : "(no company preference)\n") +
     "\n" + ticketBlock(ctx.jobId, ctx.contactId, slot.vendorId, slot.action));

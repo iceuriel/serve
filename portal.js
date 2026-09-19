@@ -865,6 +865,20 @@
        ======================================================== */
     var QUOTE = '/api/quote';
     var PLAN_NAMES = { weekly: 'Every week', biweekly: 'Every 2 weeks', monthly: 'Every month' };
+
+    /* r59. The box asks two kinds of customer now — somebody who booked a move,
+       and somebody who booked a one-time deep clean — and only the WORDS
+       differ. The server sends `kind`; every rule about what may be booked
+       stays on that side.
+
+       DEFAULTS TO THE MOVE WORDING when `kind` is missing, which is what a
+       script older than r59 sends. That is the harmless direction: the box
+       still works and only reads slightly wrong, instead of going blank. */
+    function planWords(mp) {
+        return (mp && mp.kind === 'deep')
+            ? { basis: 'deep clean', tag: 'After your deep clean' }
+            : { basis: 'move clean', tag: 'After your move' };
+    }
     var PLAN_ORDER = ['weekly', 'biweekly', 'monthly'];
     /* PREF_NAMES and clearChips are shared with the plan card — see the top. */
 
@@ -936,7 +950,8 @@
             : 'No visit on the calendar right now.'));
         if (mp.sameAsked) {
             wrap.appendChild(el('div', 'mplan__note',
-                'You asked for the same cleaning company as your move clean.'));
+                'You asked for the same cleaning company as your ' +
+                planWords(mp).basis + '.'));
         }
 
         var edit = el('button', 'mplan__edit', visit ? 'Change plan or time' : 'Book your next visit');
@@ -956,7 +971,7 @@
                      date: '', time: '', pref: '', keep: !!visit };
         var prices = null;
 
-        wrap.appendChild(el('div', 'mplan__tag', saved ? 'Change your plan' : 'After your move'));
+        wrap.appendChild(el('div', 'mplan__tag', saved ? 'Change your plan' : planWords(mp).tag));
         wrap.appendChild(el('div', 'mplan__title', 'Keep your home clean with a recurring plan'));
         if (mp.propertyLabel) wrap.appendChild(el('div', 'mplan__home', 'For ' + mp.propertyLabel));
         wrap.appendChild(el('p', 'mplan__body',
@@ -978,7 +993,7 @@
             sameBox.type = 'checkbox';
             lbl.appendChild(sameBox);
             lbl.appendChild(el('span', null,
-                'Ask for the same cleaning company as your move clean'));
+                'Ask for the same cleaning company as your ' + planWords(mp).basis));
             sameWrap.appendChild(lbl);
             sameWrap.appendChild(el('div', 'plan__samenote',
                 'We pass this on when we assign the visit. It is a request, not a guarantee.'));
@@ -1148,7 +1163,8 @@
             slotWrap.textContent = 'Loading times…';
             loadSlots().then(function (slots) {
                 slotWrap.textContent = '';
-                /* The upkeep starts AFTER the move clean — the server refuses
+                /* The upkeep starts AFTER the clean the plan follows — the move
+                   clean, or the one-time deep clean — and the server refuses
                    anything else, so nothing else is offered. */
                 var after = String(mp.after || '');
                 var usable = (slots || []).filter(function (s) { return !after || s.date > after; });
@@ -1187,7 +1203,7 @@
 
             function lost(code) {
                 go.disabled = false;
-                status.textContent = movePlanError(code);
+                status.textContent = movePlanError(code, mp);
                 status.className = 'tk-save is-bad';
             }
 
@@ -1244,8 +1260,11 @@
         showPrices();
     }
 
-    function movePlanError(code) {
-        if (code === 'too_early')         return 'Please pick a day after your move clean.';
+    /* `mp` so "after your move clean" is not said to a deep-clean customer —
+       this is the one error message that names the clean the plan follows. */
+    function movePlanError(code, mp) {
+        if (code === 'too_early')         return 'Please pick a day after your ' +
+                                                 planWords(mp).basis + '.';
         if (code === 'bad_slot')          return 'That time is no longer available. Please pick another.';
         if (code === 'already_confirmed') return 'You already have a plan for this home. Refresh to see it.';
         if (code === 'price_unavailable') return 'We could not confirm the price just now. Please try again.';
