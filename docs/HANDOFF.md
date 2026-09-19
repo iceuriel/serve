@@ -72,16 +72,30 @@ after each. The consent block was **rendered in headless Chrome at 760px and
 512px** — hierarchy reads, checked state is more distinct than before, no
 overflow at either width.
 
-**Not checked:** nothing is deployed. `webhook.gs` r58 is **not pasted**, the
-site is **not pushed**, and no real email has been sent — the customer email
-has never run against live MailApp, only the harness stub. The Chrome
-extension was not connected, so the block was rendered through a generated
-preview page built from the real markup and the real stylesheet, not through
-the booking flow itself.
+**DEPLOYED, in the right order.** The founder pasted the script; the webhook's
+own `doGet` was then probed and answered
+`{"ok":true,"service":"serve-booking-webhook","version":"2026-09-19 r58"}` —
+so r58 is live upstream, confirmed by probe and not by report. The site was
+pushed only after that, as `9071bd1`, and Workers Builds picked the commit up.
 
-**Next action:** paste `apps-script/webhook.gs` into Leads MASTER →
-Extensions → Apps Script, confirm `doGet` reports `r58`, then push the site and
-make one real booking to a reachable address to prove the mail actually sends.
+**Still not checked, and this is the gap that matters:** **no real email has
+ever been sent.** `sendCustomerBookingEmail` has run against the harness stub
+and nothing else. Live MailApp can fail in ways no stub reproduces — a daily
+quota (100/day on a consumer account, 1,500 on Workspace), a `replyTo` the
+account is not allowed to set, or a body a client mangles. Until one real
+booking produces one real email in an inbox, the send is unproven and the
+site is already promising it on every confirmation screen.
+
+The Chrome extension was not connected, so the consent block was rendered
+through a generated preview page built from the real markup and the real
+stylesheet — not through the booking flow itself. Its placement *within* step 3
+is unverified visually; the test pins it between the phone and address fields.
+
+**Next action:** make one real booking to a reachable address. Confirm the
+email arrives, the `/h` link in it opens that customer's portal, and the Apps
+Script execution log shows `customer booking email SRV-…: sent`. Serve is on a
+**live Stripe key**, so use a real card and refund, or a booking you intend to
+honour — `4242…` no longer works.
 
 ---
 
