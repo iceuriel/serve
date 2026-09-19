@@ -71,15 +71,25 @@ which is the half of the boundary the r38 refusal must not block.
 counting as one-off" — because no fixture had a blank frequency. That case is
 now covered, and the second pass killed 9/9.
 
-**Not checked:** nothing is deployed and **nothing was rendered in a browser**.
-The Chrome extension was not connected, so the deep-clean wording is verified
-through portal-render.test.js's DOM harness only. No real customer has been
-shown this box.
+**DEPLOYED, script first.** The founder pasted r59; `doGet` was then probed and
+answered `{"ok":true,"service":"serve-booking-webhook","version":"2026-09-19
+r59"}` — live upstream by probe, not by report. `0575ce2` was pushed after
+that, Workers Builds completed success, and production `portal.js` serves
+`planWords` / `kind === 'deep'`.
 
-**Next action:** paste `apps-script/webhook.gs` (r59), confirm `doGet` reports
-r59, then push. Then open a real portal for a customer whose only booking is a
-one-time deep clean and confirm the box appears and says "After your deep
-clean".
+**Not checked, and worth being plain about: NOTHING WAS RENDERED IN A
+BROWSER.** The Chrome extension was not connected, so the deep-clean wording is
+verified through portal-render.test.js's DOM harness only, and **no real
+customer has been shown this box**. The harness proves the strings and the
+branch; it does not prove the box looks right on a phone, or that a real
+one-off deep-clean portal draws it at all — that depends on live JOBS rows
+whose `service_type` and `frequency` cells read the way the fixtures assume.
+
+**Next action:** open a real portal for a customer whose only booking is a
+one-time deep clean. Confirm the box appears, reads "After your deep clean",
+and prices load. If it does NOT appear, the first thing to check is that
+booking's `service_type` and `frequency` cells — `planBasisKind` needs the
+service to map to `CLEAN_DEEP` and the frequency to be once/blank.
 
 ---
 
