@@ -38,8 +38,10 @@ and no `trust-bar__icon` appears inside it. The last two were confirmed to FAIL
 against an icon deliberately inserted into the lead before being trusted. All
 37 files pass.
 
-**Done:** edited, tested, committed and pushed to `master`. Cloudflare deploy
-was not probed in production.
+**Done:** committed and pushed to `master` as `6a0eb58`; Workers Builds
+completed success on that commit; production `servecleaning.com` probed and
+serves the lead in the trust bar with both `hero__sub` blocks reduced to
+"Coordination, Booking & Management". Nothing remaining.
 
 ---
 
