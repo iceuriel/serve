@@ -13,6 +13,36 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-19, Claude Code: the network line moves to the trust bar
+
+**Site only. No script change, no sheet change, no deploy ordering to respect.**
+
+The founder asked for "Powered by Serve's Network of Established & Local
+Providers" (their capitalisation, kept verbatim) to sit centred inside the
+trust-bar box, directly above the four checkmark items, in the same type as
+them and with no checkmark of its own.
+
+It used to be the second line of `hero__sub`, in **both** hero blocks —
+`#hero-body-default` and `#hero-body-zip`, the skin the move-in and pro
+segments swap in. It was removed from both, so the sub is now just
+"Coordination, Booking & Management" on every skin, and added once to
+`index.html` as `<p class="trust-bar__lead">` above `.trust-bar__inner`.
+`.trust-bar__lead` in `style.css` deliberately repeats `.trust-bar__item`'s
+0.9rem / 500 / `--color-dark` rather than inventing a size — it must read as
+the same row of type.
+
+**Tests.** `pricing-and-services.test.js` and `segment-and-skins.test.js` both
+asserted the old two-line sub and were updated. Three new assertions cover the
+move: the lead exists and is not in the hero, it precedes `.trust-bar__inner`,
+and no `trust-bar__icon` appears inside it. The last two were confirmed to FAIL
+against an icon deliberately inserted into the lead before being trusted. All
+37 files pass.
+
+**Done:** edited, tested, committed and pushed to `master`. Cloudflare deploy
+was not probed in production.
+
+---
+
 ## Current work — 2026-09-19, Claude Code: the plan box also asks one-off deep cleans
 
 **BOTH SURFACES. `webhook.gs` goes to r59 and `portal.js` changes with it —

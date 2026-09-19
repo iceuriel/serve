@@ -547,6 +547,16 @@ a {
     padding: 1rem 1.25rem;
 }
 
+/* Same type as the checkmark items below it, just centred and without one. */
+.trust-bar__lead {
+    max-width: 1100px;
+    margin: 0 auto 0.75rem;
+    text-align: center;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--color-dark);
+}
+
 .trust-bar__inner {
     max-width: 1100px;
     margin: 0 auto;

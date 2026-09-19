@@ -461,8 +461,18 @@ t('the headline is the two-line lockup',
    unescaped dot matches every character, so it failed on correct markup. */
 const headline = (INDEX.match(/<h1 class="hero__headline">([\s\S]*?)<\/h1>/) || [])[1] || '';
 t('the headline carries no full stops', headline.indexOf('.') === -1, headline);
-t('the sub names the three jobs, then the network (2026-09-14)',
-  INDEX.includes('hero__sub">Coordination, Booking &amp; Management<br>Powered by Serve&rsquo;s network of established &amp; local providers</p>'));
+t('the sub names the three jobs (2026-09-14)',
+  INDEX.includes('hero__sub">Coordination, Booking &amp; Management</p>'));
+/* The network claim moved out of the hero and into the trust bar on
+   2026-09-19, centred above the four checks and carrying none of its own. */
+t('the network line is the trust bar\'s lead, not the hero sub',
+  INDEX.includes('trust-bar__lead">Powered by Serve&rsquo;s Network of Established &amp; Local Providers</p>')
+  && !/hero__sub[^<]*<[^>]*>Powered by/.test(INDEX));
+t('the lead sits above the checkmark row',
+  INDEX.indexOf('trust-bar__lead') < INDEX.indexOf('trust-bar__inner'),
+  [INDEX.indexOf('trust-bar__lead'), INDEX.indexOf('trust-bar__inner')]);
+t('and it is not given a checkmark of its own',
+  !/trust-bar__icon/.test((INDEX.match(/<p class="trust-bar__lead"[\s\S]*?<\/p>/) || [''])[0]));
 
 /* Order matters: the sub explains the headline, and the tagline closes under
    it. Reversing them puts a slogan between a claim and its explanation. */
