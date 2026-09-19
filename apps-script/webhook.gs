@@ -1,7 +1,33 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-18  ·  master  ·  r57 — a plan can be confirmed without an open slot
+ * VERSION STAMP:  2026-09-19  ·  master  ·  r58 — the customer gets their own confirmation email
+ *
+ * r58 = EVERY BOOKING NOW EMAILS THE CUSTOMER, WITH THEIR PORTAL LINK.
+ *
+ *       PASTE THIS BEFORE THE SITE IS PUSHED. The confirmation screen ships
+ *       saying a booking page link is on its way by email, and the consent
+ *       block ships saying the link is emailed "either way". A site making
+ *       that promise against r57 promises something nothing sends.
+ *
+ *       WHAT WAS BROKEN. Serve sent the customer nothing by email, ever. Every
+ *       MailApp.sendEmail in this file goes to notifyEmail() — the operator.
+ *       The only automatic delivery a customer got was the r26 text, gated on
+ *       `sms_transactional`, which may not be pre-ticked and mostly is not. So
+ *       the default outcome of a booking was silence, and the portal link —
+ *       the page holding their visit, their price, their payment and their
+ *       ability to change or cancel — never reached them. Meanwhile the
+ *       confirmation screen had been promising a confirmation email within 15
+ *       minutes since long before this, and nobody was keeping that promise.
+ *
+ *       NO CONSENT GATE, DELIBERATELY. See sendCustomerBookingEmail. A
+ *       transactional email to somebody who just booked is not the instrument
+ *       A2P 10DLC governs; the texts are, and their gate is untouched.
+ *
+ *       Sent from deliverBookingNotify, so it inherits r55's at-most-once
+ *       claim: a retry, a duplicate submission or the sweep cannot send twice.
+ *       It cannot fail a booking — wrapped at the call site and internally —
+ *       and it logs the job id and an outcome, never an address or a link.
  *
  * r57 = THE PORTAL'S PLAN CARD NO LONGER DEAD-ENDS WHEN THE FEED IS EMPTY.
  *       INCLUDES r56 BELOW — this is one paste, not two.
@@ -1822,7 +1848,7 @@ function routeGet(e) {
      health stamp below rather than creating anything. */
   if (p.booking) return handleBookingStatus(p.booking);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-18 r57" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-19 r58" });
 }
 
 
@@ -2790,6 +2816,128 @@ function sendBookingSms(data, contactId, jobId) {
 
 
 /* ============================================================
+   THE CUSTOMER'S OWN CONFIRMATION EMAIL  —  r58
+   ============================================================
+
+   UNTIL NOW SERVE SENT THE CUSTOMER NOTHING BY EMAIL. Every MailApp.sendEmail
+   in this file goes to notifyEmail() — the operator. The only automatic
+   delivery a customer ever got was the r26 text, and that is gated on
+   `sms_transactional`. So a customer who left the consent box unticked — the
+   default, since it may not be pre-ticked — booked a clean and then heard
+   nothing at all, and never received the portal link that holds their visit,
+   their price and their payment.
+
+   Meanwhile index.html has promised, on the confirmation screen, that "you'll
+   get a confirmation email within 15 minutes" — and that promise was being
+   kept by nobody. This function is what makes it true.
+
+   WHY THIS NEEDS NO CONSENT CHECKBOX. This is a transactional message to
+   somebody who has just bought, about the thing they bought. That is the
+   relationship email CAN-SPAM contemplates, and it is a different instrument
+   from the A2P 10DLC consent on the site, which governs TEXT messages to a
+   carrier-registered number. Do not add a consent gate here by analogy with
+   sendBookingSms; the whole point is that this one always goes.
+
+   EVERY BOOKING, ONCE. Called only from deliverBookingNotify, which sends a
+   notice it has CLAIMED under the script lock — read, delete, release — so a
+   retry, a duplicate submission or the five-minute sweep cannot send twice.
+
+   NOTHING HERE MAY FAIL A BOOKING. It is wrapped at the call site and again
+   internally, and it returns a reason string rather than throwing. It also
+   must not log the address, the email or the link: the log line gets the job
+   id and the outcome, the same discipline as the SMS.
+
+   NO ENTRY CODE, EVER. Door and access codes are write-only across this
+   system. The booking payload carries none, and none may be added here. */
+
+/**
+ * The body the customer reads.
+ *
+ * Plain text on purpose: it matches every other send in this file, it cannot
+ * render broken in a client, and the link is unmistakably a link. Kept short —
+ * the portal holds the detail, and the point of the email is to hand them the
+ * door to it, so the description of what the link is FOR is the part that
+ * earns its space.
+ */
+function customerBookingEmailText(firstName, sched, data, link) {
+  var hello = firstName ? "Hi " + firstName + "," : "Hi,";
+
+  /* A SLOT AND A PREFERENCE ARE NOT THE SAME PROMISE, and printing them the
+     same way would be the more expensive kind of wrong. A slot booking has a
+     real date and time the customer chose and Serve has held. A preference
+     booking has only "earlier in the day" — nothing is on the calendar yet, and
+     heading that "your clean" would read as a confirmed appointment that does
+     not exist. normalizeSchedule already tells them apart; say so. */
+  var when = "";
+  if (isSet(sched && sched.summary) && sched.shape === "slot") {
+    when = "— YOUR CLEAN —\n" + sched.summary + "\n\n";
+  } else if (isSet(sched && sched.summary) && sched.shape !== "none") {
+    when = "— WHEN YOU ASKED FOR —\n" + sched.summary + "\n" +
+           "We'll confirm the exact day and arrival window with you shortly.\n\n";
+  }
+
+  /* The price the customer was shown. firstSet because the two fields are
+     written by different paths, exactly as sendReservationEmail reads them. */
+  var price = firstSet(data.quote_price, data.first_visit_total);
+  var cost  = isSet(price) ? "Price for this visit: " + money(price) + " (all in)\n\n" : "";
+
+  var portal = link
+    ? "— YOUR BOOKING PAGE —\n" +
+      "This is your own page, and the link stays the same for every clean you\n" +
+      "ever book with us. Open it any time to see your visit, check who is\n" +
+      "coming, add entry instructions, pay, or change or cancel a visit:\n\n" +
+      link + "\n\n" +
+      "Worth saving — it is the fastest way to reach us about this booking.\n\n"
+    : "We'll follow up shortly with a link to your own booking page, where you\n" +
+      "can see your visit and make changes.\n\n";
+
+  return hello + "\n\n" +
+         "You're on the schedule. Serve has your booking and we're coordinating\n" +
+         "with our provider network on your arrival window.\n\n" +
+         when + cost + portal +
+         "Anything we should know before we come — pets, parking, how to get in,\n" +
+         "rooms to skip — just reply to this email and we'll pass it on.\n\n" +
+         "— Serve\n" +
+         "management@servecos.com · (617) 804-7201";
+}
+
+/**
+ * Returns a short reason string, always. Never throws, and never returns or
+ * logs an email address, an address or a signed link.
+ */
+function sendCustomerBookingEmail(data, contactId, sched, jobId) {
+  try {
+    var to = String(data.email || "").trim();
+    /* Deliberately loose. A real address this rejects is worse than a bad one
+       it lets through — MailApp simply fails on a bad one, and that is caught
+       below, whereas a strict pattern silently drops the customer entirely. */
+    if (!to || to.indexOf("@") < 1 || /\s/.test(to)) return "no usable email";
+
+    /* No contact_id means the portal does not exist for them yet. The email
+       still goes: confirming the booking is the promise on the screen, and the
+       link is the bonus. */
+    var link = contactId ? portalUrl(contactId) : "";
+
+    var subject = "Your Serve cleaning is booked" +
+                  (isSet(sched && sched.summary) && sched.shape === "slot"
+                    ? " — " + sched.summary : "");
+
+    MailApp.sendEmail(to, subject,
+      customerBookingEmailText(String(data.name || "").split(" ")[0], sched, data, link),
+      { name: "Serve", replyTo: "management@servecos.com" });
+
+    return link ? "sent" : "sent without portal link";
+
+  } catch (err) {
+    /* err can quote the recipient, so it is not logged verbatim. */
+    console.error("customer booking email failed for " + jobId +
+                  " (booking stands): " + (err && err.name ? err.name : "error"));
+    return "failed";
+  }
+}
+
+
+/* ============================================================
    THE TEXT AND THE EMAIL NO LONGER HOLD UP THE CONFIRMATION  —  r55
    ============================================================
 
@@ -2879,6 +3027,20 @@ function deliverBookingNotify(notice) {
   }
   console.log("booking SMS " + notice.jobId + ": " + sms);
 
+  /* r58. The customer's own confirmation, with their portal link. Sent to
+     EVERY booking — no consent gate, see sendCustomerBookingEmail — and sent
+     BEFORE the operator's copy, because this is the one a customer is waiting
+     on and the operator's is long and can throw on a bad field. */
+  var customerEmail = "skipped";
+  try {
+    customerEmail = sendCustomerBookingEmail(notice.data, notice.contactId,
+                                             notice.sched, notice.jobId);
+  } catch (custErr) {
+    customerEmail = "failed";
+    console.error("customer email wrapper failed (booking stands): " + custErr);
+  }
+  console.log("customer booking email " + notice.jobId + ": " + customerEmail);
+
   var email = "sent";
   try {
     sendReservationEmail(notice.data, notice.sched, notice.leadId, notice.leadResult,
@@ -2887,7 +3049,7 @@ function deliverBookingNotify(notice) {
     email = "failed";
     console.error("Email send failed (row was still written): " + mailErr);
   }
-  return { sms: sms, email: email };
+  return { sms: sms, email: email, customerEmail: customerEmail };
 }
 
 /**

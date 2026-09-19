@@ -608,9 +608,32 @@
                          tests/sms-consent.test.js before editing anything in this block.
                          Both boxes must stay UNCHECKED and OPTIONAL, transactional and
                          promotional consent must stay on SEPARATE boxes, and the policy
-                         links must stay OUTSIDE the label text as their own anchors. -->
+                         links must stay OUTSIDE the label text as their own anchors.
+
+                         THE INTRO IS NOT PART OF THE CONSENT LANGUAGE, and that is what
+                         makes it allowed. A carrier reviews the LABEL: it must not be
+                         pre-ticked, must not be required, and must carry its own
+                         disclosures. Explaining the benefit ABOVE the labels, as a
+                         sibling of them, is the one lever that moves opt-in without
+                         touching any of that. Nothing here may imply consent is needed
+                         to book — the booking page is emailed either way as of r58, and
+                         the intro says so on purpose.
+
+                         THE TWO BOXES ARE DELIBERATELY NOT EQUAL IN WEIGHT. They used
+                         to render identically, which made the appointment box look like
+                         the same kind of ask as the marketing one and dragged it down by
+                         association. Primary/secondary is presentation only: both are
+                         still unchecked, still optional, still separate. -->
                     <div class="sms-consent">
-                        <label class="sms-consent__opt">
+                        <div class="sms-consent__intro">
+                            <h3 class="sms-consent__title">Text me about my cleaning</h3>
+                            <p class="sms-consent__lede">Your booking page link is emailed to you
+                            either way. Tick this and we'll text it as well &mdash; plus your
+                            confirmation, any schedule changes, and a heads-up when your cleaner
+                            is on the way.</p>
+                        </div>
+
+                        <label class="sms-consent__opt sms-consent__opt--primary">
                             <input type="checkbox" id="sms-transactional" name="sms_transactional" value="yes">
                             <span>I agree to receive text messages from Serve about my cleaning
                             appointments, including confirmations, scheduling updates, and cleaner
@@ -619,7 +642,7 @@
                             Reply STOP to opt out or HELP for help.</span>
                         </label>
 
-                        <label class="sms-consent__opt">
+                        <label class="sms-consent__opt sms-consent__opt--secondary">
                             <input type="checkbox" id="sms-promotional" name="sms_promotional" value="yes">
                             <span>I agree to receive occasional promotional text messages from Serve,
                             including offers and rebooking reminders. Consent is not a condition of
@@ -768,12 +791,21 @@
                          customer waits for a cleaner who was never booked, and finds out
                          on the day. A precise window turns silence into something they
                          notice and act on.
+
+                         THE EMAIL THIS PROMISES IS webhook.gs r58, and it did not exist
+                         until 2026-09-19 — the promise sat here unkept, because every
+                         send in that script goes to the operator. If this line is ever
+                         live against a script older than r58, it is a lie. The consent
+                         block above depends on the same send.
                          TODO(twilio): add the Serve number here once provisioned, so the
                          fallback is a text rather than an email. Contact details must
                          match the footer exactly — see tests/static-checks. -->
                     <p class="flow-confirm__promise">
-                        You'll get a confirmation email within 15 minutes. If it doesn't arrive,
-                        email <a href="mailto:management@servecos.com">management@servecos.com</a>
+                        You'll get a confirmation email within 15 minutes, and we'll be in touch
+                        shortly after. It carries a link to your own booking page &mdash; your
+                        personal portal, where you can check your visit, see who's coming, add
+                        entry instructions and make any changes. If it doesn't arrive, email
+                        <a href="mailto:management@servecos.com">management@servecos.com</a>
                         and we'll sort it out.
                     </p>
 

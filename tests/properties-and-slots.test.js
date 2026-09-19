@@ -141,7 +141,14 @@ function build(opts) {
   };
   vm.createContext(sandbox);
   vm.runInContext(SRC, sandbox);
+  /* THE OPERATOR'S MAIL, PICKED BY RECIPIENT, NEVER BY POSITION. Every
+     assertion below is about the notification an operator reads. Indexing
+     `mails` directly made those assertions depend on how many OTHER messages a
+     booking happens to send, and r58 — the customer's own confirmation, which
+     goes out first — silently shifted every one of them: the slot-conflict
+     checks started reading the customer's email and failing on its subject. */
   return { leadsTabs, opsTabs, audit, mails, logs, sandbox,
+    opsMails: () => mails.filter(m => m.to === 'ops@example.com'),
     evalIn: expr => vm.runInContext(expr, sandbox),
     post: p => JSON.parse(sandbox.doPost({ postData: { contents: JSON.stringify(p) } }).getContent()) };
 }
@@ -228,7 +235,7 @@ const rb = B.post(Object.assign({}, BASE, { submission_id: 'p-fail' }));
 t('booking still written', B.leadsTabs.JOBS._rows.length - 1 === 1);
 t('property_action failed', rb.property_action === 'failed', rb.property_action);
 t('status still ok to the customer', rb.status === 'ok');
-t('notification flags it', /PROPERTIES UPSERT FAILED/.test(B.mails[0].body));
+t('notification flags it', /PROPERTIES UPSERT FAILED/.test(B.opsMails()[0].body));
 
 /* ============================================================
    2. AVAILABILITY write-back
@@ -259,8 +266,8 @@ const rc2 = C.post(Object.assign({}, BASE, { submission_id: 's-2', email: 'other
 t('slot_action conflict', rc2.slot_action === 'conflict', rc2.slot_action);
 t('the booking is STILL written', C.leadsTabs.JOBS._rows.length - 1 === 2);
 t('customer sees success', rc2.status === 'ok');
-t('subject flags SLOT CONFLICT', /SLOT CONFLICT/.test(C.mails[1].subject), C.mails[1].subject);
-t('body says the booking is recorded', /booking IS recorded/.test(C.mails[1].body));
+t('subject flags SLOT CONFLICT', /SLOT CONFLICT/.test(C.opsMails()[1].subject), C.opsMails()[1].subject);
+t('body says the booking is recorded', /booking IS recorded/.test(C.opsMails()[1].body));
 t('no extra AVAILABILITY write on the conflict',
   C.audit.filter(a => a.tab === 'AVAILABILITY').length === 2);
 
@@ -278,8 +285,8 @@ const re = E.post(Object.assign({}, BASE, { submission_id: 's-down' }));
 t('slot_action failed', re.slot_action === 'failed', re.slot_action);
 t('booking still written', E.leadsTabs.JOBS._rows.length - 1 === 1);
 t('customer still sees success', re.status === 'ok');
-t('subject flags SLOT NOT MARKED', /SLOT NOT MARKED/.test(E.mails[0].subject), E.mails[0].subject);
-t('body tells the operator to mark it by hand', /Mark it booked by hand/.test(E.mails[0].body));
+t('subject flags SLOT NOT MARKED', /SLOT NOT MARKED/.test(E.opsMails()[0].subject), E.opsMails()[0].subject);
+t('body tells the operator to mark it by hand', /Mark it booked by hand/.test(E.opsMails()[0].body));
 
 console.log('\n=== 2e. a missing AVAILABILITY header fails loudly, not silently ===');
 const F = build({ availHeaders: ['date','start_time','cleaner_id','state','job_id','week_of','notes'] });

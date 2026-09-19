@@ -117,7 +117,12 @@ t('neither box is required',      !boxes.some(b => /\brequired\b/.test(b)), boxe
 
 /* The links must be siblings of the labels, not children of them. A reviewer
    who finds an <a> inside the consent label text rejects the campaign. */
-const labels = block.match(/<label class="sms-consent__opt">[\s\S]*?<\/label>/g) || [];
+/* Matches the modifier classes too. The labels carry --primary / --secondary
+   as of 2026-09-19 so the appointment box can outweigh the marketing one
+   visually; pinned to the bare class string, this found zero labels and
+   reported the consent block as missing when it was simply restyled. What is
+   under test is the CONTENT of each label, and that is unchanged below. */
+const labels = block.match(/<label class="sms-consent__opt[^"]*">[\s\S]*?<\/label>/g) || [];
 t('two consent labels', labels.length === 2, labels.length);
 t('no anchor inside either label', !labels.some(l => /<a\s/.test(l)));
 const linksBlock = block.slice(block.indexOf('sms-consent-links'));

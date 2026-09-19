@@ -2171,6 +2171,28 @@ a {
     border-radius: var(--radius);
 }
 
+/* The benefit, above the boxes and outside every label. See the comment on the
+   block in index.html for why that distinction is the whole point. */
+.sms-consent__intro {
+    margin-bottom: 1rem;
+}
+
+.sms-consent__title {
+    margin: 0 0 0.3rem;
+    font-family: var(--flow-sans);
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--color-dark);
+}
+
+.sms-consent__lede {
+    margin: 0;
+    font-family: var(--flow-sans);
+    font-size: 0.84rem;
+    line-height: 1.55;
+    color: var(--color-text);
+}
+
 .sms-consent__opt {
     display: flex;
     align-items: flex-start;
@@ -2182,10 +2204,35 @@ a {
     cursor: pointer;
 }
 
-.sms-consent__opt + .sms-consent__opt {
-    margin-top: 0.9rem;
-    padding-top: 0.9rem;
+/* WEIGHT, NOT SIZE. The disclosure text may never drop below 0.8rem — a
+   carrier reviewer reads the secondary box too — so the hierarchy is carried
+   by the card, the border and the control, and the promotional label keeps the
+   same 0.82rem it always had. */
+.sms-consent__opt--primary {
+    padding: 0.85rem 0.9rem;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    font-size: 0.86rem;
+    color: var(--color-dark);
+}
+
+/* Checked is visibly different from unchecked at a glance, which the block
+   comment requires — here it is the border and ground, not just the tick. */
+.sms-consent__opt--primary:hover {
+    border-color: var(--color-accent-hover);
+}
+
+.sms-consent__opt--primary:has(input:checked) {
+    border-color: var(--color-dark);
+    box-shadow: inset 0 0 0 1px var(--color-dark);
+}
+
+.sms-consent__opt--secondary {
+    margin-top: 0.85rem;
+    padding-top: 0.85rem;
     border-top: 1px solid var(--color-border);
+    color: var(--color-text-muted);
 }
 
 /* 1.05rem box with padding around it clears the 44px touch target on mobile
@@ -2197,6 +2244,12 @@ a {
     margin: 0.18rem 0 0;
     accent-color: var(--color-dark);
     cursor: pointer;
+}
+
+.sms-consent__opt--primary input[type="checkbox"] {
+    width: 1.25rem;
+    height: 1.25rem;
+    margin-top: 0.1rem;
 }
 
 .sms-consent-links {

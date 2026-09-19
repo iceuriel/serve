@@ -6,14 +6,86 @@ assistant with no access to this repo. Self-contained on purpose.
 **Companion doc:** `/docs/SCHEMA.md` — authoritative for every column's meaning
 and who writes it. This file is the narrative; that file is the contract.
 
-**Latest session: 2026-09-18.** Jump to
+**Latest session: 2026-09-19.** Jump to
 [what changed on 2026-09-08 / 09](#session-2026-09-08--09) for the current
 state. The sections below it describe earlier builds and remain accurate
 except where a later section supersedes them.
 
 ---
 
-## Current work — 2026-09-18, Claude Code: the agenda folds after seven days
+## Current work — 2026-09-19, Claude Code: the customer finally gets an email
+
+**BOTH SURFACES. `webhook.gs` goes to r58 and the site changes with it —
+PASTE THE SCRIPT FIRST.** The site ships promising a confirmation email with a
+booking-page link, in two places. Against r57 nothing sends one, so a site
+pushed first is a site telling every customer to wait for mail that will never
+arrive.
+
+**What was found.** The founder asked how to get more people to tick the SMS
+consent box, since it gates the portal. Tracing it turned up something worse
+than a low opt-in rate: **Serve sent the customer nothing by email, ever.**
+Every `MailApp.sendEmail` in `webhook.gs` goes to `notifyEmail()` — the
+operator. `script.js` never renders the portal link either. So
+`sendBookingSms` was the *only* automatic path by which a customer ever
+received their `/h` link, and it is gated on `sms_transactional`, a box that
+may not be pre-ticked and mostly is not.
+
+The default outcome of a real booking was **silence**. And the confirmation
+screen has been promising "a confirmation email within 15 minutes" the whole
+time, kept by nobody.
+
+**Three changes, in the order they matter:**
+
+1. **`sendCustomerBookingEmail` (r58)** — every booking now emails the
+   customer their portal link with a short description of what it opens. No
+   consent gate, deliberately: A2P 10DLC governs *texts*. Called from
+   `deliverBookingNotify`, so it inherits r55's at-most-once claim — a retry,
+   a duplicate or the sweep cannot send twice. It is wrapped twice and cannot
+   fail a booking, and it logs a job id and an outcome, never an address or a
+   link. A slot booking and a preference booking are worded differently: the
+   second has no date yet and must not read as a confirmed appointment.
+2. **The consent block is framed and weighted** (`index.html`, `style.css`).
+   A heading and one benefit line now sit *above* the labels — outside them,
+   which is what keeps it legal; a carrier reviews the label. The appointment
+   box is a white card with a 1.25rem control, the marketing box is muted
+   below it. **Both are still unchecked, still optional, still separate, and
+   the disclosure text still never drops below 0.8rem.** The intro says the
+   link is emailed "either way", so it cannot imply consent is a condition of
+   booking — which is also why change 1 has to be live first.
+3. **The confirmation screen** now describes the portal as a personal page for
+   monitoring and adjusting the booking, keeping the 15-minute tripwire.
+
+**A trap this set off, worth knowing about:** `properties-and-slots` and
+`webhook-routing` asserted on the operator's mail **by index** into the
+harness's `mails` array. Adding a send ahead of it silently moved every one of
+them — three assertions started reading the *customer's* email and failing on
+its subject. Both suites now select by recipient (`opsMails()`). Anything that
+adds another send will not repeat this.
+
+**Checked:** all **37 test files pass**, including a new
+`tests/customer-booking-email.test.js` (43 assertions). **11 mutations run, 11
+killed** — a consent gate added to the email, an untrimmed recipient, the send
+redirected to the operator, the wrapper removed, the recipient logged, a link
+printed with no `contact_id`, a `/j` and a `/v` link planted in the body, the
+portal link removed, and a double delivery. Source restored byte-identical
+after each. The consent block was **rendered in headless Chrome at 760px and
+512px** — hierarchy reads, checked state is more distinct than before, no
+overflow at either width.
+
+**Not checked:** nothing is deployed. `webhook.gs` r58 is **not pasted**, the
+site is **not pushed**, and no real email has been sent — the customer email
+has never run against live MailApp, only the harness stub. The Chrome
+extension was not connected, so the block was rendered through a generated
+preview page built from the real markup and the real stylesheet, not through
+the booking flow itself.
+
+**Next action:** paste `apps-script/webhook.gs` into Leads MASTER →
+Extensions → Apps Script, confirm `doGet` reports `r58`, then push the site and
+make one real booking to a reachable address to prove the mail actually sends.
+
+---
+
+## Previous — 2026-09-18, Claude Code: the agenda folds after seven days
 
 **Site only. No Apps Script paste.** `webhook.gs` stays at **r57**.
 `serve-slots.js` is **r59**; `style.css` gained one block.

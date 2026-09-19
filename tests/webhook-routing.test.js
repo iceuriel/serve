@@ -108,7 +108,11 @@ function build(leadsHeaders) {
   };
   vm.createContext(sandbox);
   vm.runInContext(SRC, sandbox);
+  /* Operator mail by RECIPIENT, not by position — see the same note in
+     properties-and-slots.test.js. r58 added the customer's own confirmation
+     ahead of it, which moved every index. */
   return { tabs, mails, logs, sandbox,
+    opsMails: () => mails.filter(m => m.to === 'ops@example.com'),
     post: p => JSON.parse(sandbox.doPost({ postData: { contents: JSON.stringify(p) } }).getContent()) };
 }
 
@@ -266,8 +270,8 @@ const r3 = M.post(slot);
 console.log('  ' + JSON.stringify(r3));
 t('JOBS row still written', M.tabs.JOBS._rows.length - 1 === 1);
 t('lead_action reports failure', r3.lead_action === 'failed', r3.lead_action);
-t('email subject flags the failure', /LEADS WRITE FAILED/.test(M.mails[0].subject));
-t('email body explains it', /LEADS UPSERT FAILED/.test(M.mails[0].body));
+t('email subject flags the failure', /LEADS WRITE FAILED/.test(M.opsMails()[0].subject));
+t('email body explains it', /LEADS UPSERT FAILED/.test(M.opsMails()[0].body));
 
 /* ============ SCENARIO 4: quote_meta column present ============ */
 console.log('\n\n=== SCENARIO 4 — quote_meta column added ===');
@@ -295,7 +299,7 @@ const atFloors = n => Object.assign({}, slot, {
 });
 
 EM.post(atFloors(3));
-let lm = EM.mails[EM.mails.length - 1];
+let lm = EM.opsMails()[EM.opsMails().length - 1];
 t('SERVICE block reports 3 floors', /Levels:\s+3 floors/.test(lm.body),
   (lm.body.match(/Levels:.*/) || [])[0]);
 t('subject line reports 3 floors', /2 BR \/ 1\.5 BA \/ 3 floors/.test(lm.subject), lm.subject);
@@ -303,7 +307,7 @@ t('subject line reports 3 floors', /2 BR \/ 1\.5 BA \/ 3 floors/.test(lm.subject
 /* The single-storey case is the whole point of the field. Suppressing it once
    left a real booking looking as though levels had never been captured. */
 EM.post(atFloors(1));
-lm = EM.mails[EM.mails.length - 1];
+lm = EM.opsMails()[EM.opsMails().length - 1];
 t('ONE floor is stated, not suppressed', /Levels:\s+1 floor\b/.test(lm.body),
   (lm.body.match(/Levels:.*/) || [])[0]);
 t('one floor is singular, not "1 floors"', !/1 floors/.test(lm.body));
@@ -314,13 +318,13 @@ t('one floor reaches the subject too', /2 BR \/ 1\.5 BA \/ 1 floor/.test(lm.subj
 const noLevels = Object.assign({}, slot, { submission_id: 'uuid-lv-absent' });
 delete noLevels.levels;
 EM.post(noLevels);
-lm = EM.mails[EM.mails.length - 1];
+lm = EM.opsMails()[EM.opsMails().length - 1];
 t('absent levels says NOT REPORTED', /Levels:\s+NOT REPORTED/.test(lm.body),
   (lm.body.match(/Levels:.*/) || [])[0]);
 t('absent levels never prints NaN', !/NaN|undefined/.test(lm.body));
 
 /* Every booking email carries the line, whatever the payload. */
-t('Levels line is never missing', EM.mails.every(m => /^Levels:/m.test(m.body)));
+t('Levels line is never missing', EM.opsMails().every(m => /^Levels:/m.test(m.body)));
 
 /* ============ SCENARIO 6: late notes from the confirmation screen ============
    r10. The reserve step's textarea moved to the confirmation screen, so notes
