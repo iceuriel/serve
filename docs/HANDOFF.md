@@ -52,8 +52,13 @@ actually inside it. Each was confirmed to FAIL first: `open` injected, the
 so this is structural verification only. The caret's vertical alignment is the
 thing to eyeball.
 
-**State:** committed and pushed to `master`. Workers Builds and the production
-probe have NOT been checked yet — a follow-up entry records them.
+**Done:** committed and pushed to `master` as `1dd2ed9`; Workers Builds
+completed success on that commit; production `servecleaning.com` probed and
+serves `<details class="trust-bar__fold">` with **no `open` attribute**, the
+lead as its `<summary>`, all four `trust-bar__item`s inside the element, and
+both `hero__sub` blocks still reduced to "Coordination, Booking & Management".
+`style.css` on the live host carries the fold rules. Nothing remaining, except
+that nobody has looked at it in a browser — see above.
 
 ---
 
