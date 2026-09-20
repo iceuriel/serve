@@ -464,15 +464,31 @@ t('the headline carries no full stops', headline.indexOf('.') === -1, headline);
 t('the sub names the three jobs (2026-09-14)',
   INDEX.includes('hero__sub">Coordination, Booking &amp; Management</p>'));
 /* The network claim moved out of the hero and into the trust bar on
-   2026-09-19, centred above the four checks and carrying none of its own. */
+   2026-09-19, centred above the four checks and carrying none of its own.
+   Later the same day it became the fold's summary, so the four checks are
+   closed by default and the bar costs one line. */
+const lead = (INDEX.match(/<summary class="trust-bar__lead"[\s\S]*?<\/summary>/) || [''])[0];
 t('the network line is the trust bar\'s lead, not the hero sub',
-  INDEX.includes('trust-bar__lead">Powered by Serve&rsquo;s Network of Established &amp; Local Providers</p>')
+  lead.includes('>Powered by Serve&rsquo;s Network of Established &amp; Local Providers<')
   && !/hero__sub[^<]*<[^>]*>Powered by/.test(INDEX));
 t('the lead sits above the checkmark row',
   INDEX.indexOf('trust-bar__lead') < INDEX.indexOf('trust-bar__inner'),
   [INDEX.indexOf('trust-bar__lead'), INDEX.indexOf('trust-bar__inner')]);
 t('and it is not given a checkmark of its own',
-  !/trust-bar__icon/.test((INDEX.match(/<p class="trust-bar__lead"[\s\S]*?<\/p>/) || [''])[0]));
+  lead !== '' && !/trust-bar__icon/.test(lead));
+/* The fold is a native <details>: no script runs, and it must ship CLOSED or
+   it has compressed nothing. An `open` attribute here is the silent
+   regression — the page still looks right to whoever added it. */
+const fold = (INDEX.match(/<details class="trust-bar__fold"[^>]*>/) || [''])[0];
+t('the checks are folded away behind a native details',
+  fold !== '' && INDEX.includes('</details>'), fold);
+t('and the fold ships closed',
+  fold !== '' && !/\bopen\b/.test(fold), fold);
+/* The summary is the handle. If the four checks are not inside the details,
+   the caret opens an empty box. */
+t('the four checks live inside the fold',
+  INDEX.indexOf('<details class="trust-bar__fold"') < INDEX.indexOf('trust-bar__inner')
+  && INDEX.indexOf('trust-bar__inner') < INDEX.indexOf('</details>'));
 
 /* Order matters: the sub explains the headline, and the tagline closes under
    it. Reversing them puts a slogan between a claim and its explanation. */

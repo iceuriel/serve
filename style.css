@@ -547,19 +547,55 @@ a {
     padding: 1rem 1.25rem;
 }
 
-/* Same type as the checkmark items below it, just centred and without one. */
+/* Same type as the checkmark items below it, just centred and without one.
+   It doubles as the fold's handle, so it also carries the caret and the
+   pointer; the default disclosure triangle is removed in both dialects
+   because it would sit off to the left and break the centring. */
 .trust-bar__lead {
     max-width: 1100px;
-    margin: 0 auto 0.75rem;
+    margin: 0 auto;
     text-align: center;
     font-size: 0.9rem;
     font-weight: 500;
     color: var(--color-dark);
+    cursor: pointer;
+    list-style: none;
 }
 
+.trust-bar__lead::-webkit-details-marker {
+    display: none;
+}
+
+/* Inline rather than absolutely placed, so on a narrow screen the caret
+   follows the last word down instead of floating beside a two-line claim.
+   Accent-coloured to match the checks it opens — it is an affordance, not
+   a fifth check. */
+.trust-bar__lead::after {
+    content: "";
+    display: inline-block;
+    width: 0.4em;
+    height: 0.4em;
+    margin-left: 0.5em;
+    border-right: 2px solid var(--color-accent);
+    border-bottom: 2px solid var(--color-accent);
+    transform: translateY(-0.15em) rotate(45deg);
+    transition: transform 0.15s ease;
+}
+
+.trust-bar__fold[open] .trust-bar__lead::after {
+    transform: translateY(0.1em) rotate(-135deg);
+}
+
+.trust-bar__lead:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 3px;
+    border-radius: 3px;
+}
+
+/* The gap belongs to the open state. Closed, the bar is one line tall. */
 .trust-bar__inner {
     max-width: 1100px;
-    margin: 0 auto;
+    margin: 0.75rem auto 0;
     display: flex;
     flex-wrap: wrap;
     gap: 0.75rem 2rem;

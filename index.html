@@ -210,26 +210,35 @@
         <!-- The network line sits above the checkmarks, not beside them: it is
              the claim the four checks support, and it carries no check of its
              own because nothing verified it. Moved here from the hero sub
-             (2026-09-19). -->
-        <p class="trust-bar__lead">Powered by Serve&rsquo;s Network of Established &amp; Local Providers</p>
-        <div class="trust-bar__inner">
-            <div class="trust-bar__item">
-                <span class="trust-bar__icon">✓</span>
-                <span>Bonded &amp; Insured</span>
+             (2026-09-19).
+
+             It is also the summary of a native <details>, so the four checks
+             fold away and the bar costs one line until someone asks for them
+             (2026-09-19). <details> and not a script on purpose: the closed
+             text is still in the DOM for search and for a reader, and the
+             disclosure keeps working with JS off, which is the same bet the
+             hero skins make. -->
+        <details class="trust-bar__fold">
+            <summary class="trust-bar__lead">Powered by Serve&rsquo;s Network of Established &amp; Local Providers</summary>
+            <div class="trust-bar__inner">
+                <div class="trust-bar__item">
+                    <span class="trust-bar__icon">✓</span>
+                    <span>Bonded &amp; Insured</span>
+                </div>
+                <div class="trust-bar__item">
+                    <span class="trust-bar__icon">✓</span>
+                    <span>Background Checked</span>
+                </div>
+                <div class="trust-bar__item">
+                    <span class="trust-bar__icon">✓</span>
+                    <span>Satisfaction Guaranteed</span>
+                </div>
+                <div class="trust-bar__item">
+                    <span class="trust-bar__icon">✓</span>
+                    <span>Serving Greater Boston</span>
+                </div>
             </div>
-            <div class="trust-bar__item">
-                <span class="trust-bar__icon">✓</span>
-                <span>Background Checked</span>
-            </div>
-            <div class="trust-bar__item">
-                <span class="trust-bar__icon">✓</span>
-                <span>Satisfaction Guaranteed</span>
-            </div>
-            <div class="trust-bar__item">
-                <span class="trust-bar__icon">✓</span>
-                <span>Serving Greater Boston</span>
-            </div>
-        </div>
+        </details>
     </section>
 
     <!-- HOW SERVE WORKS

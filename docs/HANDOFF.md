@@ -13,6 +13,50 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-19, Claude Code: the trust bar folds
+
+**Site only. No script change, no sheet change, no deploy ordering to respect.**
+Directly follows the entry below it — same box, same day.
+
+The founder asked to compress the page: show only the network line, and put
+the four checkmark items behind a disclosure the visitor can open.
+
+`index.html` — the lead is now the `<summary>` of a
+`<details class="trust-bar__fold">`, with `.trust-bar__inner` and its four
+items moved inside it unchanged. **A native `<details>`, not a script.** The
+closed text stays in the DOM for search and for a screen reader, and the
+disclosure still works with JS off — the same bet the hero skins make.
+
+`style.css` — `.trust-bar__lead` keeps the 0.9rem / 500 / `--color-dark`
+centring it had and gains a pointer, a CSS caret and a focus ring. The native
+marker is suppressed in both dialects (`list-style: none` **and**
+`::-webkit-details-marker`); left in, it sits far left and breaks the centring.
+The caret is an inline `::after`, not absolutely positioned, so when the claim
+wraps to two lines on a phone the caret follows the last word down instead of
+floating beside the block. The `0.75rem` gap moved off the lead onto
+`.trust-bar__inner`, so closed, the bar is one line tall and not one line plus
+a gap.
+
+`.trust-bar` exists only in `index.html`. "All pages" was one page; nothing to
+propagate to `services.html`, `pricing.html` or the portals.
+
+**Tests.** The three assertions from the entry below expected `<p …></p>` and
+were retargeted at the `<summary>`. Three more were added: the fold is a native
+`<details>`, **it ships closed** (an `open` attribute is the silent regression —
+the page still looks right to whoever added it), and the four checks are
+actually inside it. Each was confirmed to FAIL first: `open` injected, the
+`<details>` swapped for a `<span>`, and `.trust-bar__inner` moved out past
+`</details>`. All 37 files pass.
+
+**Not visually verified.** The Chrome extension was not connected this session,
+so this is structural verification only. The caret's vertical alignment is the
+thing to eyeball.
+
+**State:** committed and pushed to `master`. Workers Builds and the production
+probe have NOT been checked yet — a follow-up entry records them.
+
+---
+
 ## Current work — 2026-09-19, Claude Code: the network line moves to the trust bar
 
 **Site only. No script change, no sheet change, no deploy ordering to respect.**
