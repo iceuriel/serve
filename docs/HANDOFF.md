@@ -27,7 +27,13 @@ The shared link groups alumni together rather than identifying their tier.
 All 12 local Outreach drafts use the short URL as plain text; the link reference
 retains the four earlier URLs for compatibility checks. All 37 test files passed
 (`node tests/run-all.js`), including blanket redirect attribution checks.
-Site only; no Apps Script or sheet changes. Push and production verification pending.
+Site only; no Apps Script or sheet changes. **Deployed:** commit `0539f73`
+pushed to master; Cloudflare Workers Builds completed successfully. Production
+checks on 2026-09-21 confirmed `/bu` returns the exact intended 302 and its
+destination returns 200. All four previous tier-tagged URLs return 200;
+`/movein` and `/clean` still return their existing tagged 302s. Live `script.js`
+retains the email-to-pro mapping and weekends-back headline. No campaign sent
+or resumed. No remaining implementation or deployment work for this request.
 
 ## Current work — 2026-09-19, Claude Code: the trust bar folds
 
