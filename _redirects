@@ -28,6 +28,9 @@
 /movein   /?src=deed-movein   302
 /clean    /?src=dh-clean      302
 
+# One shared BU alumni email link; tags stay out of the email body.
+/bu       /?src=email-bu-alumni-01&utm_source=bu_alumni&utm_medium=email&utm_campaign=bu_alumni_launch    302
+
 # Business cards.
 #
 # THESE LIVE HERE, NOT IN THE CLOUDFLARE DASHBOARD. A rule created in the

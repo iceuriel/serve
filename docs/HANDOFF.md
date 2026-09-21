@@ -6,12 +6,28 @@ assistant with no access to this repo. Self-contained on purpose.
 **Companion doc:** `/docs/SCHEMA.md` — authoritative for every column's meaning
 and who writes it. This file is the narrative; that file is the contract.
 
-**Latest session: 2026-09-19.** Jump to
+**Latest session: 2026-09-21.** Jump to
 [what changed on 2026-09-08 / 09](#session-2026-09-08--09) for the current
 state. The sections below it describe earlier builds and remain accurate
 except where a later section supersedes them.
 
 ---
+
+## Current work — 2026-09-21, Codex: one BU alumni link
+
+The founder requested one official URL, `https://servecleaning.com/bu`, for
+all BU alumni emails, while retaining earlier links used in existing emails.
+`_redirects` adds a 302 to the homepage with `src=email-bu-alumni-01`,
+`utm_source=bu_alumni`, `utm_medium=email`, and `utm_campaign=bu_alumni_launch`.
+The existing email prefix selects the pro “Get your weekends back with Serve”
+hero on a fresh first touch. Existing first-touch attribution remains
+authoritative for returning visitors. Previous URLs are not removed or changed.
+
+The shared link groups alumni together rather than identifying their tier.
+All 12 local Outreach drafts use the short URL as plain text; the link reference
+retains the four earlier URLs for compatibility checks. All 37 test files passed
+(`node tests/run-all.js`), including blanket redirect attribution checks.
+Site only; no Apps Script or sheet changes. Push and production verification pending.
 
 ## Current work — 2026-09-19, Claude Code: the trust bar folds
 
