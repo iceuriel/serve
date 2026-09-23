@@ -30,8 +30,10 @@ rm -rf "$OUT"
 mkdir -p "$OUT"
 
 # --- the allow-list ---
-# privacy.html and sms-terms.html are served at /privacy and /sms-terms. Both
-# are REQUIRED to stay reachable: Twilio's A2P 10DLC registration lists them and
+# privacy.html, terms.html and sms-terms.html are served at /privacy, /terms and
+# /sms-terms. The first two are the general privacy and service terms used by
+# customers and supported agents. Privacy and SMS terms are also REQUIRED to
+# stay reachable because Twilio's A2P 10DLC registration lists them and
 # carriers re-check them, so a 404 here can get the number's campaign revoked,
 # not merely rejected. They are plain HTML with no JS by design.
 #
@@ -60,7 +62,7 @@ mkdir -p "$OUT"
 # throw on a feed that answered perfectly, land in the same catch as a network
 # error, and silently serve the earlier/later radios instead — a working site
 # quietly losing its live availability, in production only.
-cp index.html pricing.html services.html privacy.html sms-terms.html serve-geo-data.js pricing-engine.js serve-services.js serve-scope.js serve-slots.js script.js style.css "$OUT"/
+cp index.html pricing.html services.html privacy.html terms.html sms-terms.html serve-geo-data.js pricing-engine.js serve-services.js serve-scope.js serve-slots.js script.js style.css "$OUT"/
 
 # j.html is served at /j and renders ONE job from an id in the query string.
 # It is not in the sitemap and carries noindex both in the markup and as an

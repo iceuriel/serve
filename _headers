@@ -72,6 +72,14 @@
   Content-Type: text/html; charset=utf-8
   Cache-Control: public, max-age=0, must-revalidate
 
+/terms
+  Content-Type: text/html; charset=utf-8
+  Cache-Control: public, max-age=0, must-revalidate
+
+/terms.html
+  Content-Type: text/html; charset=utf-8
+  Cache-Control: public, max-age=0, must-revalidate
+
 /sms-terms
   Content-Type: text/html; charset=utf-8
   Cache-Control: public, max-age=0, must-revalidate

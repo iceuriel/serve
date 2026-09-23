@@ -12,9 +12,10 @@
         pricing.html    full nav  — byte-identical to this file's
         services.html   full nav  — byte-identical to this file's
         privacy.html    reduced nav (Home + Instant Booking)
+        terms.html      reduced nav (Home + Instant Booking)
         sms-terms.html  reduced nav (Home + Instant Booking)
 
-    The two legal pages deliberately carry a SHORTER nav and no script tag.
+    The three legal pages deliberately carry a SHORTER nav and no script tag.
     They are load-bearing for A2P 10DLC registration and are kept as plain
     HTML with no JS — which also means no hamburger, so a full link list would
     be unreachable on a phone, where .nav__links is display:none until 721px.
@@ -830,6 +831,10 @@
                          TOLD US" block is empty on every job. detectPets() in script.js is kept
                          deliberately — it is the parser the replacement needs. -->
                     <div class="form-error" id="reserve-error" aria-live="polite"></div>
+                    <p class="reserve-terms">By selecting <strong>Reserve my clean</strong>, you
+                        agree to Serve's <a href="/terms" target="_blank" rel="noopener">Terms of
+                        Service</a> and acknowledge the
+                        <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</p>
                     <div class="step-actions">
                         <button type="button" class="btn btn--ghost" id="back-to-2">&larr; Back</button>
                         <button type="submit" class="btn btn--primary" id="reserve-submit">Reserve my clean</button>
@@ -1469,6 +1474,7 @@
         <div class="footer__copy">
             <!-- Required on every page for A2P 10DLC registration. -->
             <p class="footer__legal">
+                <a href="/terms">Terms of Service</a> &middot;
                 <a href="/privacy">Privacy Policy</a> &middot;
                 <a href="/sms-terms">SMS Terms</a>
             </p>

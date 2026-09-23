@@ -127,6 +127,49 @@ that **Serve is on a live Stripe key — the test must stop before payment.**
 
 ---
 
+## Current work — 2026-09-23, Codex: general terms for customers and authorized agents
+
+**Site only. No Apps Script or sheet change. Not committed, pushed, or deployed.**
+
+The founder asked for a general Terms of Service page adequate for connector
+review and authorized-agent use, after Muse's application required a product
+terms URL. `/sms-terms` remains the narrow A2P messaging agreement; it was not
+repurposed as the product contract.
+
+`terms.html` now publishes at canonical `/terms`. It covers eligibility,
+quote inputs and scope changes, the request-versus-confirmed distinction,
+full-amount Stripe authorization and capture only after partner acceptance,
+cancellation and hold release without inventing a cancellation fee or notice
+window, property safety/access, local service companies, photos and records,
+acceptable use, and non-waivable Massachusetts consumer rights. Its agent
+section expressly allows a customer to direct an AI agent or other third-party
+service while preserving express confirmation for booking, changes,
+cancellation, and payment. It treats the agent provider's own data handling as
+separate and lets Serve pause suspicious or abusive automation.
+
+The final Reserve action now carries a plain-language Terms + Privacy notice
+immediately before the button; this is outside the regulated SMS-consent block.
+All six public pages link `/terms` in the footer. The page is on the build
+allow-list and sitemap, and both `/terms` and `/terms.html` have UTF-8,
+must-revalidate headers. No arbitration clause, liability cap, cancellation
+fee, cancellation deadline, refund window, or new numeric business term was
+created.
+
+**Checked:** `terms.test.js` covers publication, the booking notice, every
+footer, current operating/payment facts, agent confirmation boundaries,
+Chapter 93A preservation, and the absence of invented cancellation/arbitration
+terms. All **39 test files pass**. The publish build completed through Git Bash
+login mode and staged `terms.html`; 76 files staged and the private-file guard
+passed. `git diff --check` is clean. No browser rendering and no production
+probe were performed. The two untracked image files already in the worktree
+were not modified.
+
+**Before using the URL in Muse:** review the business wording and obtain legal
+counsel if legal enforceability is important, then commit/push/deploy and verify
+`https://servecleaning.com/terms` returns 200. The open cancellation/refund
+policy remains intentionally non-numeric; adding a fee, deadline, or refund
+promise is still a founder decision.
+
 ## Current work — 2026-09-21, Codex: one BU alumni link
 
 The founder requested one official URL, `https://servecleaning.com/bu`, for
