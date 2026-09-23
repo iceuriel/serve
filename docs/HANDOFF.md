@@ -15,8 +15,8 @@ except where a later section supersedes them.
 
 ## Current work — 2026-09-23, Codex: protected portal visual refresh
 
-**Local site work only. Not committed, pushed or deployed. No Apps Script or
-sheet change.** The founder supplied a dashboard reference and asked for its
+**Live on production from commit `dffc11d`. No Apps Script or sheet change.**
+The founder supplied a dashboard reference and asked for its
 navy / pale-blue palette and logo placement across all portals without moving
 the existing information or controls around.
 
@@ -41,9 +41,16 @@ targeted test then passed. Final `npm test`: **40 files, all passing**.
 Visual QA caveat: temporary representative portal fixtures were prepared, but
 the computer-use browser correctly refused local `file://` navigation under
 its URL policy. The fixtures were removed. Static responsive checks and the
-full behavioral suite passed; a real signed portal link should still receive a
-human desktop/phone glance before deployment. The founder's two pre-existing
-untracked image files remain untouched.
+full behavioral suite passed. A real signed portal link should still receive a
+human desktop/phone glance when one is available. The founder's two
+pre-existing untracked image files remain untouched.
+
+Deployment was verified rather than inferred from the push: GitHub registered
+one `Workers Builds: serve` check for `dffc11d`, and it completed successfully.
+Fresh production fetches of `/h`, `/j`, `/v` and `/style.css` all returned 200;
+the three documents carried their respective theme class and logo markup, and
+the stylesheet carried the protected-portal section, navy token and desktop
+rail rule.
 
 ---
 
