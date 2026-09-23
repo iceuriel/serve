@@ -110,7 +110,7 @@ five were confirmed to fail against a deliberate mutation, including the FAQ
 claiming a code can be read back and the intro dropping the "either way"
 promise.
 
-**Deployed:** recorded below once the build and production probe complete.
+**Deployed and verified in production, 2026-09-23.** Workers Builds success on `86851e7`. Probed live: the consent intro serves the new sentence and still says the page is emailed "either way"; both SMS boxes remain unchecked, unrequired and separate; all nine FAQ questions serve; and "write-only" appears exactly twice on `/pricing` — once in the visible prose and once in the JSON-LD, which is what "both copies" means here.
 
 **FOR THE FOUNDER, a tradeoff now in published copy rather than only implied:**
 encouraging customers to hand the portal link to an agent is encouraging them
