@@ -155,7 +155,14 @@ export default {
 
     if (url.pathname === "/api/submit") return handleSubmit(request, env, ctx);
     if (url.pathname === "/api/booking-status") return handleBookingStatus(request, env, ctx);
-    if (url.pathname === "/api/quote")  return handleQuote(request, env);
+    /* THE ONE PUBLIC, CROSS-ORIGIN ROUTE. See publicCors() for why this is
+       safe here and nowhere else. The preflight is answered before the handler
+       because a browser sends OPTIONS with no body and no content type, which
+       handleQuote would correctly reject as a bad request. */
+    if (url.pathname === "/api/quote") {
+      if (request.method === "OPTIONS") return corsPreflight();
+      return publicCors(await handleQuote(request, env));
+    }
     if (url.pathname === "/api/checkout") return handleCheckout(request, env);
     /* Stripe calls this one, not a browser. It is the only route whose caller
        proves itself with a signature rather than a ticket token. */
@@ -2061,6 +2068,64 @@ function json(obj, status) {
     headers: { "Content-Type": "application/json; charset=utf-8",
                "Cache-Control": "no-store" },
   });
+}
+
+
+/* ============================================================
+   PUBLIC CORS  —  /api/quote ONLY
+   ============================================================
+
+   Added 2026-09-23 so an AI agent acting for a customer can price a home from
+   its own page context rather than driving the booking form in a browser.
+   Serve answers in one request where a cleaner quoting by phone or by visit
+   cannot, and that advantage is worth nothing if it is only reachable by
+   somebody clicking.
+
+   WHAT THIS DOES NOT DO, because it is the thing most likely to be
+   misremembered later: it does not newly expose pricing. `/api/quote` has
+   always been reachable by any server-side caller — curl, a competitor, a
+   script — and still is. Cross-origin rules are a BROWSER restriction, and
+   lifting it changes who can call this from page JavaScript, not who can call
+   it at all. Anyone treating this commit as "the day pricing became public"
+   has the history wrong.
+
+   WHY IT IS SAFE ON THIS ROUTE:
+     - it reads nothing and writes nothing; `priceFrom` is pure computation
+     - it costs nothing per call — no provider, no sheet, no billable upstream,
+       unlike /api/address, which is gated behind counters for that reason
+     - it takes no credential, so there is no credential to leak, and
+       Allow-Credentials is deliberately ABSENT. With `Allow-Origin: *` the two
+       together are rejected by every browser anyway, and adding it to a route
+       that later grew a cookie would be the quiet mistake.
+     - the signed quote it returns is already handed to every visitor's browser,
+       and `verifyPrice()` re-derives the price server-side on submission
+       regardless, so a quote_sig obtained here buys exactly what one obtained
+       through the form buys: nothing that is not re-checked.
+
+   DO NOT LIFT THIS TO json() OR TO THE ROUTER GENERALLY. Every other route
+   either carries a token in the request or moves money, and handlePhotos says
+   in its own comment that it blocks cross-site posts on purpose. */
+const PUBLIC_CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+  /* Chrome caps this at 2h regardless; a day is the polite ask, not a promise. */
+  "Access-Control-Max-Age": "86400",
+  /* So a shared cache cannot hand one origin's answer to another. The body is
+     already no-store, but the header costs nothing and states the intent. */
+  "Vary": "Origin",
+};
+
+function corsPreflight() {
+  return new Response(null, { status: 204, headers: PUBLIC_CORS });
+}
+
+/* Copies the response rather than mutating it: a Response from json() has
+   immutable headers, and assigning to them throws. */
+function publicCors(res) {
+  const headers = new Headers(res.headers);
+  for (const [k, v] of Object.entries(PUBLIC_CORS)) headers.set(k, v);
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 
 /* Private R2 images. All credentials travel in request bodies; the sheet

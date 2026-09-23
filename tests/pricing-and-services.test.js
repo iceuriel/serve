@@ -707,8 +707,15 @@ t('/pricing publishes FAQPage structured data', /"@type":\s*"FAQPage"/.test(PRIC
    so every JSON-LD question must actually appear in the rendered FAQ. */
 const ld = JSON.parse(PRICING.slice(PRICING.indexOf('{', PRICING.indexOf('application/ld+json')),
                                     PRICING.indexOf('</script>', PRICING.indexOf('application/ld+json'))).trim());
-t('JSON-LD carries five questions', ld.mainEntity.length === 5);
 const visibleFaq = PRICING.slice(PRICING.indexOf('class="serve-faq"'));
+/* Counted against the rendered <summary> elements rather than against a
+   literal. "carries five questions" had to be edited every time the FAQ grew,
+   and a hand-maintained number is the thing it was checking for. The claim
+   worth making is that the two lists are the same length, which is what makes
+   a missing JSON-LD entry — or an orphaned one — a failure. */
+const visibleQs = (visibleFaq.match(/<summary>/g) || []).length;
+t('JSON-LD carries one question per visible FAQ entry',
+  ld.mainEntity.length === visibleQs, { jsonLd: ld.mainEntity.length, visible: visibleQs });
 t('every JSON-LD question is visible on the page',
   ld.mainEntity.every(q => visibleFaq.includes(q.name)),
   ld.mainEntity.filter(q => !visibleFaq.includes(q.name)).map(q => q.name));

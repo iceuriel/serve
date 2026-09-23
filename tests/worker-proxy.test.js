@@ -713,6 +713,55 @@ console.log('\n=== 7. the failure UI exists and is reachable ===');
   const unsignedRec = await (await askQuote({}, ENV)).json();
   t('and they come back unsigned too', JSON.stringify(unsignedRec.recurring) === JSON.stringify(issued.recurring));
 
+  /* ---------- /api/quote is the one public, cross-origin route ----------
+     Added 2026-09-23 so an agent acting for a customer can price a home from
+     its own page context instead of driving the booking form. Exercised here
+     against the real Worker rather than by matching strings in the source:
+     structured-data.test.js advertises this endpoint to agents, and an advert
+     for a route that rejects the caller is worse than no advert.
+
+     Note what is NOT new: this route has always answered any server-side
+     caller. Cross-origin rules are a browser restriction. */
+  const corsOn = r => r.headers.get('Access-Control-Allow-Origin');
+
+  const quoted = await askQuote({});
+  t('a quote answers any origin', corsOn(quoted) === '*', corsOn(quoted));
+  t('and never allows credentials alongside it',
+    quoted.headers.get('Access-Control-Allow-Credentials') === null);
+  t('the body still arrives intact through the CORS wrapper',
+    (await quoted.json()).price === honest);
+
+  /* A browser sends OPTIONS with no body and no content type before any
+     cross-origin POST carrying a JSON content type. Routed to handleQuote it
+     would be answered 405 by the method check, and the real POST would never
+     be sent — the failure would appear only in a browser, never in curl. */
+  const pre = await worker.fetch(new Request('https://servecleaning.com/api/quote',
+    { method: 'OPTIONS' }), QENV);
+  t('the preflight is answered, not 405', pre.status === 204, pre.status);
+  t('the preflight allows any origin', corsOn(pre) === '*', corsOn(pre));
+  t('the preflight permits POST', /POST/.test(pre.headers.get('Access-Control-Allow-Methods') || ''),
+    pre.headers.get('Access-Control-Allow-Methods'));
+  t('the preflight permits a JSON content type',
+    /content-type/i.test(pre.headers.get('Access-Control-Allow-Headers') || ''),
+    pre.headers.get('Access-Control-Allow-Headers'));
+
+  /* An error from this route has to carry the headers too. Without them the
+     browser reports a CORS failure and the caller never sees "no_zip" — it
+     retries a request that was answered correctly the first time. */
+  const badQuote = await worker.fetch(new Request('https://servecleaning.com/api/quote',
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }), QENV);
+  t('an error answer carries the CORS headers too', corsOn(badQuote) === '*',
+    { status: badQuote.status, origin: corsOn(badQuote) });
+
+  /* THE BLAST RADIUS. Every other route either carries a token or moves money,
+     and handlePhotos blocks cross-site posts in its own comment. If this ever
+     goes green for another path, the header was lifted somewhere shared. */
+  for (const p of ['/api/submit', '/api/checkout', '/api/photos', '/api/portal', '/api/vendor', '/api/address']) {
+    const r = await worker.fetch(new Request('https://servecleaning.com' + p,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }), QENV);
+    t(p + ' stays same-origin', corsOn(r) === null, corsOn(r));
+  }
+
   /* A booking carrying that signature, exactly as the site would send it. */
   const signed = o => JSON.stringify(Object.assign({
     event_type: 'reservation', pricing_version: VERSION, submission_id: 'sig-1',

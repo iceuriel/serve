@@ -38,6 +38,7 @@ const read = f => fs.readFileSync(path.join(REPO_ROOT, f), 'utf8').replace(/\r\n
 const INDEX     = read('index.html');
 const PRICING   = read('pricing.html');
 const SERVICES  = read('services.html');
+const WORKER    = read('src/worker.js');
 const CATALOGUE = require(path.join(REPO_ROOT, 'serve-services.js'));
 
 let bad = 0;
@@ -172,17 +173,49 @@ if (biz.email) {
    does not have to infer it from the nav. */
 console.log('\n=== 5. the booking entry point is declared ===');
 
-const action = biz.potentialAction;
-t('a potentialAction is declared', !!action, action && action['@type']);
-if (action) {
-  const target = (action.target || {}).urlTemplate || '';
-  t('its target is on servecleaning.com', /^https:\/\/servecleaning\.com\//.test(target), target);
+const actions = [].concat(biz.potentialAction || []);
+t('at least one potentialAction is declared', actions.length > 0, actions.map(a => a['@type']));
+t('every action targets servecleaning.com',
+  actions.every(a => /^https:\/\/servecleaning\.com\//.test((a.target || {}).urlTemplate || '')),
+  actions.map(a => (a.target || {}).urlTemplate));
+
+const reserve = actions.filter(a => a['@type'] === 'ReserveAction')[0];
+t('the booking action is present', !!reserve);
+if (reserve) {
   /* The anchor has to exist, or the action points at a page section that was
      renamed — a dead entry point reads as working right up until it is used. */
-  const frag = (target.split('#')[1] || '');
-  t('it points at a fragment', frag.length > 0, target);
+  const frag = (((reserve.target || {}).urlTemplate || '').split('#')[1] || '');
+  t('the booking action points at a fragment', frag.length > 0, reserve.target);
   t('that fragment is a real id in index.html',
     new RegExp('id="' + frag + '"').test(INDEX), frag);
+}
+
+/* The quote API, advertised here because this is the only machine-readable
+   place that can say "there is an endpoint, here is how to call it". An agent
+   that finds it does in one request what it would otherwise do by driving the
+   booking form — which is the whole reason Serve can be quoted by an agent
+   when a cleaner who quotes by phone cannot. */
+const quote = actions.filter(a => a['@type'] === 'QuoteAction')[0];
+t('the quote action is present', !!quote);
+if (quote) {
+  const target = quote.target || {};
+  /* Asserted against the ROUTE THE WORKER ACTUALLY SERVES, read from
+     src/worker.js, not against a path retyped here. Advertising an endpoint
+     that 404s is worse than advertising none: the agent has no way to tell a
+     wrong URL from a business that cannot quote. */
+  const advertised = new URL(target.urlTemplate).pathname;
+  t('it advertises a route the Worker actually serves',
+    WORKER.includes('url.pathname === "' + advertised + '"'), advertised);
+  t('it states the HTTP method', target.httpMethod === 'POST', target.httpMethod);
+  t('it states the content type', /json/.test(target.contentType || ''), target.contentType);
+  /* The endpoint must accept a cross-origin call, or an agent running in a
+     page context gets a CORS failure the description does not warn it about. */
+  t('that route sends public CORS headers',
+    /publicCors\(await handleQuote/.test(WORKER));
+  t('and answers the preflight', /request\.method === "OPTIONS"\) return corsPreflight/.test(WORKER));
+  /* Credentials must never be allowed alongside Allow-Origin: * — browsers
+     reject the pair, and a future route with a cookie would inherit it. */
+  t('it never allows credentials', !/Access-Control-Allow-Credentials/.test(WORKER));
 }
 
 console.log('\n' + (bad ? 'FAILURES: ' + bad : 'ALL CHECKS PASSED'));

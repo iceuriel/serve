@@ -164,22 +164,44 @@
           }
         }
       ],
-      "potentialAction": {
-        "@type": "ReserveAction",
-        "name": "Book a cleaning",
-        "target": {
-          "@type": "EntryPoint",
-          "urlTemplate": "https://servecleaning.com/#quote",
-          "actionPlatform": [
-            "https://schema.org/DesktopWebPlatform",
-            "https://schema.org/MobileWebPlatform"
-          ]
+      "potentialAction": [
+        {
+          "@type": "ReserveAction",
+          "name": "Book a cleaning",
+          "target": {
+            "@type": "EntryPoint",
+            "urlTemplate": "https://servecleaning.com/#quote",
+            "actionPlatform": [
+              "https://schema.org/DesktopWebPlatform",
+              "https://schema.org/MobileWebPlatform"
+            ]
+          },
+          "result": {
+            "@type": "Reservation",
+            "name": "Home cleaning booking"
+          }
         },
-        "result": {
-          "@type": "Reservation",
-          "name": "Home cleaning booking"
+        {
+          "@type": "QuoteAction",
+          "name": "Get an instant price",
+          "description": "Returns a firm price for a home in seconds. No account, no callback and no site visit: POST a JSON body with zip, beds, baths and service to the endpoint below.",
+          "target": {
+            "@type": "EntryPoint",
+            "urlTemplate": "https://servecleaning.com/api/quote",
+            "httpMethod": "POST",
+            "contentType": "application/json",
+            "encodingType": "application/json",
+            "actionPlatform": [
+              "https://schema.org/DesktopWebPlatform",
+              "https://schema.org/MobileWebPlatform"
+            ]
+          },
+          "result": {
+            "@type": "Quote",
+            "name": "Home cleaning price"
+          }
         }
-      }
+      ]
     }
     </script>
 </head>

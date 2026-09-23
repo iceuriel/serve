@@ -13,6 +13,91 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-23, Claude Code: the quote endpoint goes public
+
+**Site and Worker. No Apps Script change, no sheet change, no deploy ordering
+to respect.** Follows the agent-readability entry below it, same day, and
+depends on the business JSON-LD that entry added.
+
+The founder authorized two things after reading what Muse actually supports:
+say the instant-quote advantage where a machine can parse it, and open the
+quote endpoint to agents.
+
+**Why there is nothing to sign up for.** Muse discovers products through
+Shopify Catalog and checks out via Shop Pay, automatically, with no merchant
+onboarding — but that path is product-shaped retail that ships to the US. A
+local service is not in a product catalog, and **there is no Muse merchant
+programme for local services.** Discovery for Serve is the open web. The one
+documented integration path for a non-Shopify business is a public API: Muse
+will connect to one when a service offers it. That is what this entry ships.
+
+**Also worth knowing operationally: Muse can telephone US businesses to book
+appointments and get quotes.** That is what it does with every other cleaner in
+Boston. Serve answers in one request. The advantage is larger than "we are
+faster" — the competition is a phone call. Serve's number is on the site and in
+the structured data, so a Muse call would ring the founder's phone.
+
+**`/pricing` gained two FAQ entries**, in both the visible prose and the
+FAQPage JSON-LD, stating that a price needs no call, no callback, no in-home
+estimate and no phone number, and that an assistant may get a quote and book on
+a customer's behalf. The second one points at `/terms`, which Codex shipped the
+same day and which already permits authorized agent use — read that section
+before changing this copy, the two have to agree. Written without em-dashes
+deliberately: the visible copy uses `&mdash;` where the JSON-LD uses the
+character, and the two must match word-for-word.
+
+**`/api/quote` now answers cross-origin.** `Access-Control-Allow-Origin: *`, a
+204 preflight, and `Allow-Credentials` deliberately absent. Scoped to that one
+route — NOT lifted into `json()`, which every other endpoint shares.
+
+**THE THING MOST LIKELY TO BE MISREMEMBERED: this did not make pricing public.**
+`/api/quote` has always answered any server-side caller — curl, a competitor, a
+script — and still does. Cross-origin rules are a browser restriction, so what
+changed is who can call it from page JavaScript, not who can call it at all.
+Anyone reading this commit as "the day pricing became public" has the history
+wrong. Safe on this route specifically because it reads nothing, writes
+nothing, costs nothing per call (pure computation, no provider and no sheet,
+unlike `/api/address` and its counters), takes no credential, and returns a
+signed quote that `verifyPrice()` re-derives on submission anyway.
+
+**The endpoint is advertised in the homepage JSON-LD** as a `QuoteAction` with
+an `EntryPoint` naming the URL, `POST` and `application/json` — the only
+machine-readable place that can tell an agent the endpoint exists and how to
+call it. A test asserts the advertised path is a route `src/worker.js` actually
+serves, because advertising a 404 is worse than advertising nothing: the agent
+cannot tell a wrong URL from a business that cannot quote.
+
+**Tests — 39 files, all passing.** The CORS behaviour is exercised against the
+real Worker in `worker-proxy.test.js`, not by matching strings in the source:
+the quote answers any origin, the preflight is 204 rather than the 405
+`handleQuote` would give it, an ERROR answer carries the headers too (without
+them a browser reports a CORS failure and the caller never sees `no_zip`), and
+**six other routes are asserted to stay same-origin** — the blast-radius check
+that catches the header being lifted somewhere shared. All six new assertions
+were confirmed to fail against a deliberate mutation, including lifting CORS
+into `json()` and adding `Allow-Credentials`.
+
+`pricing-and-services.test.js` no longer hardcodes "five questions" — it counts
+the rendered `<summary>` elements and asserts the JSON-LD matches, so the FAQ
+can grow without editing a literal, which is the thing the test was checking
+for in the first place.
+
+**Deployed:** recorded below once the build and production probe complete.
+
+**Still owed, unchanged:** nobody has confirmed a browser agent can complete
+the booking flow. The Chrome extension was not connected. **Serve is on a live
+Stripe key — that test must stop before payment.**
+
+**Deliberately NOT built, and why:** server-side address verification at
+submit. It was scoped (resolve through the existing `splitUnit` +
+`/api/address` path, flag on the ops mail, never block) and the founder parked
+it. Correctly — Serve has no bookings yet, so it insures against a failure that
+has happened zero times, and the site's own rules say not to overbuild. The
+lookup already exists whenever it is wanted. A GET form of `/api/quote` was
+also considered and rejected as a second code path for no proven need.
+
+---
+
 ## Current work — 2026-09-23, Claude Code: the site becomes agent-readable
 
 **Site only. No Apps Script change, no sheet change, no deploy ordering to
