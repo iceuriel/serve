@@ -54,11 +54,14 @@
     <link rel="apple-touch-icon" href="images/apple-touch-icon.png">
     <link rel="stylesheet" href="style.css">
 </head>
-<body class="ticket-body">
+<body class="ticket-body portal-body portal-body--account portal-body--client">
 
     <main class="portal" id="portal">
         <header class="ticket__bar">
-            <a href="/" class="ticket__brand">Serve</a>
+            <a href="/" class="ticket__brand" aria-label="Serve home">
+                <img class="ticket__brand-mark" src="images/serve-wordmark.svg" alt="Serve">
+                <span class="ticket__brand-sub">Home Cleaning</span>
+            </a>
             <span class="portal__for" id="p-for"></span>
         </header>
 

@@ -5240,3 +5240,423 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
 @media (prefers-reduced-motion: reduce) {
     .skel__bar { animation: none; }
 }
+
+/* ============================================================
+   PROTECTED PORTALS — NAVY DASHBOARD THEME  ·  2026-09-23
+   ============================================================
+   /h and /v keep their existing tabs-to-sidebar layout; /j keeps the compact
+   single-ticket layout used at the door. The shared skin makes them feel like
+   one product without changing what any audience can see or do.
+   ============================================================ */
+.portal-body {
+    --portal-navy: #0b2542;
+    --portal-navy-deep: #071b31;
+    --portal-blue: #0d5da8;
+    --portal-blue-strong: #084c8d;
+    --portal-blue-soft: #eaf4ff;
+    --portal-canvas: #f3f7fb;
+    --portal-card: #ffffff;
+    --portal-ink: #102641;
+    --portal-copy: #40536d;
+    --portal-muted: #6b7d94;
+    --portal-line: #dce6f0;
+    --portal-green: #137447;
+    --portal-green-soft: #e2f6ea;
+    --portal-radius: 14px;
+    --portal-shadow: 0 12px 32px rgba(21, 52, 83, 0.08);
+
+    /* Existing ticket components already consume these tokens. Scoping the
+       aliases here keeps the public site and booking flow unchanged. */
+    --color-dark: var(--portal-navy);
+    --color-dark-alt: var(--portal-navy-deep);
+    --color-accent: var(--portal-blue);
+    --color-accent-hover: var(--portal-blue-strong);
+    --color-bg: var(--portal-card);
+    --color-bg-light: var(--portal-canvas);
+    --color-text: var(--portal-copy);
+    --color-text-muted: var(--portal-muted);
+    --color-border: var(--portal-line);
+    --radius: var(--portal-radius);
+
+    min-height: 100vh;
+    min-height: 100dvh;
+    color: var(--portal-copy);
+    background:
+        radial-gradient(circle at 85% 0%, rgba(139, 196, 238, 0.17), transparent 27rem),
+        var(--portal-canvas);
+}
+
+.portal-body .ticket__brand {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    flex: none;
+    width: 5.25rem;
+    color: #fff;
+}
+.portal-body .ticket__brand-mark {
+    width: 100%;
+    height: auto;
+}
+.portal-body .ticket__brand-sub {
+    margin-top: -0.3rem;
+    color: #b9daf3;
+    font-family: var(--flow-sans);
+    font-size: 0.5rem;
+    font-weight: 700;
+    letter-spacing: 0.21em;
+    line-height: 1.2;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.portal-body .ticket__state {
+    color: var(--portal-muted);
+}
+.portal-body .ticket__foot {
+    color: var(--portal-muted);
+}
+.portal-body .ticket__foot a {
+    color: var(--portal-blue);
+    font-weight: 600;
+}
+
+/* The live cards use the same restrained elevation as the reference: borders
+   still define controls, while shadow is reserved for containers. */
+.portal-body :is(.pb, .pq, .vp__svc, .tk-room, .tk-partner, .tk-seek, .plan, .mplan, .sched__confirm, .portal__note) {
+    border-color: var(--portal-line);
+    border-radius: var(--portal-radius);
+    box-shadow: 0 5px 18px rgba(21, 52, 83, 0.045);
+}
+.portal-body :is(.pb, .pq, .vp__svc, .tk-room, .mplan--saved) {
+    background: var(--portal-card);
+}
+.portal-body :is(.tk-partner, .tk-seek, .sc, .plan, .mplan, .sched__confirm) {
+    background: #f8fbfe;
+}
+.portal-body :is(.pb[open], .tk-room[open]) {
+    border-color: #9cc9ec;
+    box-shadow: 0 13px 30px rgba(15, 75, 126, 0.09);
+}
+.portal-body :is(.pb__sum, .tk-room__sum) {
+    min-height: 3.75rem;
+}
+.portal-body .pb__sum {
+    padding: 1rem 1.1rem;
+}
+.portal-body .pb__body {
+    padding: 0 1.1rem 1.1rem;
+}
+.portal-body .pb--done {
+    background: #f8fafc;
+}
+.portal-body .pb__title,
+.portal-body .tk-room__name,
+.portal-body .vp__svc-name {
+    color: var(--portal-ink);
+}
+.portal-body .pb__price {
+    color: var(--portal-blue-strong);
+}
+.portal-body .portal__access-flag.is-complete,
+.portal-body .tk-save.is-ok,
+.portal-body .pq__saved {
+    color: var(--portal-green);
+}
+.portal-body .portal__access-flag.is-complete {
+    background: var(--portal-green-soft);
+}
+
+.portal-body :is(.tk-edit__box, .vp__pref) {
+    border-color: var(--portal-line);
+    background: #fbfdff;
+}
+.portal-body :is(.tk-edit__box, .vp__pref):focus {
+    border-color: var(--portal-blue);
+    box-shadow: 0 0 0 3px rgba(13, 93, 168, 0.13);
+}
+.portal-body :is(.tk-edit__save, .pay__btn, .plan__go, .mplan__go, .sched__move) {
+    border-radius: 9px;
+    background: var(--portal-navy);
+    border-color: var(--portal-navy);
+    box-shadow: 0 5px 12px rgba(7, 37, 66, 0.14);
+}
+.portal-body :is(.tk-edit__save, .pay__btn, .plan__go, .mplan__go, .sched__move):hover:not(:disabled) {
+    background: var(--portal-blue);
+    border-color: var(--portal-blue);
+}
+.portal-body :is(.plan__cta, .mplan__edit, .sched__btn, .tk-tap) {
+    border-color: var(--portal-line);
+    background: #f7fafe;
+}
+.portal-body :is(.plan__pref, .mplan__opt, .mplan__pref, .mplan__keep).is-selected {
+    border-color: var(--portal-blue);
+    box-shadow: inset 0 0 0 1px var(--portal-blue), 0 5px 15px rgba(13, 93, 168, 0.08);
+    background: var(--portal-blue-soft);
+}
+.portal-body :is(button, a, summary, input, textarea, select):focus-visible {
+    outline: 3px solid rgba(54, 144, 214, 0.42);
+    outline-offset: 3px;
+}
+
+/* Customer and provider portals: compact branded masthead and scrollable tabs
+   on phones. The data and tab order remain exactly where they were. */
+.portal-body--account .portal {
+    max-width: none;
+    min-height: 100vh;
+    min-height: 100dvh;
+    margin: 0;
+    padding: 0 0 2rem;
+}
+.portal-body--account .portal > .ticket__bar {
+    min-height: 7.25rem;
+    margin: 0;
+    padding: 0.9rem 1.1rem;
+    border: 0;
+    justify-content: space-between;
+    color: #fff;
+    background: linear-gradient(145deg, var(--portal-navy-deep), var(--portal-navy));
+    box-shadow: 0 8px 24px rgba(6, 28, 50, 0.2);
+}
+.portal-body--account .portal__for {
+    max-width: 55%;
+    margin: 0;
+    color: #d6e6f3;
+    font-size: 0.88rem;
+    line-height: 1.35;
+    text-align: right;
+}
+.portal-body--account .portal__nav {
+    position: sticky;
+    z-index: 5;
+    top: 0;
+    gap: 0.35rem;
+    margin: 0;
+    padding: 0.65rem 0.8rem;
+    overflow-x: auto;
+    border-bottom: 1px solid var(--portal-line);
+    background: rgba(255, 255, 255, 0.95);
+    box-shadow: 0 5px 18px rgba(21, 52, 83, 0.06);
+    backdrop-filter: blur(12px);
+}
+.portal-body--account .portal__tab {
+    flex: none;
+    margin: 0;
+    padding: 0.62rem 0.85rem;
+    color: var(--portal-muted);
+    border: 0;
+    border-radius: 9px;
+    white-space: nowrap;
+}
+.portal-body--account .portal__tab:hover {
+    color: var(--portal-navy);
+    background: #f3f7fb;
+}
+.portal-body--account .portal__tab.is-on {
+    color: var(--portal-blue-strong);
+    border: 0;
+    background: var(--portal-blue-soft);
+    box-shadow: inset 3px 0 0 #4d9ad5;
+}
+.portal-body--account .portal__body,
+.portal-body--account .portal > .ticket__state {
+    min-width: 0;
+    padding: 2rem 1rem 1rem;
+}
+.portal-body--account .portal__h {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    margin: 2rem 0 0.85rem;
+    color: var(--portal-ink);
+    font-size: 1.25rem;
+}
+.portal-body--account .portal__h::before {
+    content: '';
+    flex: 0 0 auto;
+    width: 0.55rem;
+    height: 0.55rem;
+    border: 4px solid #d9edfc;
+    border-radius: 50%;
+    background: var(--portal-blue);
+}
+.portal-body--account .portal > .ticket__foot {
+    margin: 1.5rem 1rem 0;
+    padding: 1rem 0 0;
+}
+
+/* A job ticket is often opened at the property, so it remains one column and
+   touch-friendly. On larger screens it becomes a focused card, not an empty
+   dashboard with a decorative sidebar. */
+.portal-body--ticket {
+    padding: 0;
+}
+.portal-body--ticket .ticket {
+    max-width: 46rem;
+    min-height: 100vh;
+    min-height: 100dvh;
+    margin: 0 auto;
+    padding: 0;
+    overflow: hidden;
+    background: var(--portal-card);
+}
+.portal-body--ticket .ticket__bar {
+    min-height: 7.25rem;
+    margin: 0;
+    padding: 0.9rem 1.25rem;
+    border: 0;
+    color: #fff;
+    background: linear-gradient(145deg, var(--portal-navy-deep), var(--portal-navy));
+}
+.portal-body--ticket .ticket__role {
+    margin-left: auto;
+    padding: 0.35rem 0.65rem;
+    color: #d8eaff;
+    border: 1px solid rgba(185, 218, 243, 0.3);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.07);
+}
+.portal-body--ticket #t-body,
+.portal-body--ticket .ticket__state {
+    padding: 2rem 1.15rem;
+}
+.portal-body--ticket .tk-when {
+    margin-bottom: 1.6rem;
+    padding: 1.15rem 1.2rem;
+    border: 1px solid #d6e7f5;
+    border-radius: var(--portal-radius);
+    background: linear-gradient(135deg, #f5faff, #eaf4ff);
+}
+.portal-body--ticket .tk-day {
+    color: var(--portal-blue);
+}
+.portal-body--ticket .tk-sec {
+    margin-top: 2rem;
+    padding-top: 1.4rem;
+    border-top-color: #bfd5e7;
+}
+.portal-body--ticket .tk-sec__h {
+    color: var(--portal-ink);
+    font-size: 1.2rem;
+}
+.portal-body--ticket .ticket__foot {
+    margin: 1rem 1.15rem 0;
+    padding: 1.1rem 0 2rem;
+}
+
+@media (min-width: 720px) {
+    .portal-body--account .portal {
+        display: grid;
+        grid-template-columns: 16.125rem minmax(0, 1fr);
+        grid-template-rows: auto 1fr auto;
+        grid-template-areas:
+            "brand body"
+            "nav   body"
+            "nav   foot";
+        column-gap: 0;
+        align-items: stretch;
+        background: linear-gradient(90deg, var(--portal-navy-deep) 0 16.125rem, transparent 16.125rem 100%);
+    }
+    .portal-body--account .portal > .ticket__bar {
+        grid-area: brand;
+        min-height: 13.5rem;
+        padding: 2rem 1.25rem 1rem;
+        flex-direction: column;
+        justify-content: flex-start;
+        gap: 0.75rem;
+        background: transparent;
+        box-shadow: none;
+    }
+    .portal-body--account .ticket__brand {
+        width: 7.75rem;
+    }
+    .portal-body--account .ticket__brand-sub {
+        font-size: 0.58rem;
+    }
+    .portal-body--account .portal__for {
+        max-width: 12rem;
+        color: #a9c3d8;
+        font-size: 0.78rem;
+        text-align: center;
+    }
+    .portal-body--account .portal__nav {
+        grid-area: nav;
+        position: static;
+        align-self: stretch;
+        flex-direction: column;
+        gap: 0.35rem;
+        margin: 0;
+        padding: 0.25rem 0.65rem 2rem;
+        overflow: visible;
+        border: 0;
+        background: transparent;
+        box-shadow: none;
+        backdrop-filter: none;
+    }
+    .portal-body--account .portal__tab {
+        width: 100%;
+        padding: 0.78rem 1rem;
+        color: #adbed0;
+        text-align: left;
+        border: 0;
+        border-radius: 9px;
+    }
+    .portal-body--account .portal__tab:hover {
+        color: #fff;
+        background: rgba(99, 163, 214, 0.12);
+    }
+    .portal-body--account .portal__tab.is-on {
+        color: #fff;
+        border: 0;
+        background: linear-gradient(90deg, rgba(46, 112, 168, 0.62), rgba(35, 91, 142, 0.42));
+        box-shadow: inset 3px 0 0 #9fd0f4;
+    }
+    .portal-body--account .portal__access-flag {
+        color: inherit;
+    }
+    .portal-body--account .portal__body,
+    .portal-body--account .portal > .ticket__state {
+        grid-area: body;
+        width: min(100%, 68rem);
+        padding: 3.5rem clamp(2.25rem, 5vw, 5rem) 2rem;
+    }
+    .portal-body--account .portal > .ticket__foot {
+        grid-area: foot;
+        margin: 0;
+        padding: 1.25rem clamp(2.25rem, 5vw, 5rem) 2rem;
+        border-top-color: var(--portal-line);
+    }
+    .portal-body--account .portal .skel {
+        display: flex;
+    }
+    .portal-body--account .portal .skel__tabs {
+        display: none;
+    }
+    .portal-body--account .portal .skel > :not(.skel__tabs) {
+        grid-column: auto;
+    }
+    .portal-body--ticket {
+        padding: 2rem;
+    }
+    .portal-body--ticket .ticket {
+        min-height: calc(100vh - 4rem);
+        min-height: calc(100dvh - 4rem);
+        border: 1px solid var(--portal-line);
+        border-radius: 18px;
+        box-shadow: var(--portal-shadow);
+    }
+    .portal-body--ticket .ticket__bar {
+        min-height: 8.25rem;
+        padding: 1rem 2rem;
+    }
+    .portal-body--ticket .ticket__brand {
+        width: 6.5rem;
+    }
+    .portal-body--ticket #t-body,
+    .portal-body--ticket .ticket__state {
+        padding: 2.5rem 2.25rem;
+    }
+    .portal-body--ticket .ticket__foot {
+        margin: 1rem 2.25rem 0;
+    }
+}

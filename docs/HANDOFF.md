@@ -13,6 +13,40 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-23, Codex: protected portal visual refresh
+
+**Local site work only. Not committed, pushed or deployed. No Apps Script or
+sheet change.** The founder supplied a dashboard reference and asked for its
+navy / pale-blue palette and logo placement across all portals without moving
+the existing information or controls around.
+
+`/h` and `/v` now opt into one scoped portal skin: a white Serve roofline mark
+on a deep navy rail, the same existing navigation as stacked rail items on
+desktop and scrollable tabs on phones, a pale blue-white workspace, elevated
+white cards, blue action states and restrained green success states. `/j`
+shares those tokens, cards and masthead but deliberately remains a focused
+single-column ticket because it is commonly opened on a cleaner's phone. No
+rendering JavaScript, endpoint, mount id, field, route or audience changed.
+The public site does not opt into the theme.
+
+Affected files: `h.html`, `j.html`, `v.html`, `style.css`, and the new static
+contract `tests/portal-theme.test.js`. The test checks all three pages opt in,
+their functional mounts and accessible navigation remain, the public homepage
+does not opt in, desktop and phone navigation rules both exist, the job ticket
+stays single-column, and keyboard focus remains visible. A first full run
+caught `portal-body--vendor` as shipped copy that violated the established
+provider-facing vocabulary; it was renamed `portal-body--provider`, and the
+targeted test then passed. Final `npm test`: **40 files, all passing**.
+
+Visual QA caveat: temporary representative portal fixtures were prepared, but
+the computer-use browser correctly refused local `file://` navigation under
+its URL policy. The fixtures were removed. Static responsive checks and the
+full behavioral suite passed; a real signed portal link should still receive a
+human desktop/phone glance before deployment. The founder's two pre-existing
+untracked image files remain untouched.
+
+---
+
 ## Current work — 2026-09-23, Claude Code: the quote endpoint goes public
 
 **Site and Worker. No Apps Script change, no sheet change, no deploy ordering

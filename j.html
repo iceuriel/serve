@@ -56,11 +56,14 @@
     <link rel="apple-touch-icon" href="images/apple-touch-icon.png">
     <link rel="stylesheet" href="style.css">
 </head>
-<body class="ticket-body">
+<body class="ticket-body portal-body portal-body--ticket">
 
     <main class="ticket" id="ticket">
         <header class="ticket__bar">
-            <a href="/" class="ticket__brand">Serve</a>
+            <a href="/" class="ticket__brand" aria-label="Serve home">
+                <img class="ticket__brand-mark" src="images/serve-wordmark.svg" alt="Serve">
+                <span class="ticket__brand-sub">Home Cleaning</span>
+            </a>
             <span class="ticket__role" id="t-role"></span>
         </header>
 
