@@ -105,6 +105,15 @@
   Content-Type: application/xml; charset=utf-8
   Cache-Control: public, max-age=3600
 
+# Crawler and agent policy. The explicit Content-Type matters more than it
+# looks: a robots.txt served as anything but text/plain is treated by several
+# crawlers as absent, which silently downgrades an explicit "yes, read this
+# site" back to no policy at all. Same one-hour cache as the sitemap — both are
+# fetched rarely and neither is worth a revalidation round trip.
+/robots.txt
+  Content-Type: text/plain; charset=utf-8
+  Cache-Control: public, max-age=3600
+
 # Job tickets. THE X-Robots-Tag IS THE CONTROL HERE, not the meta tag in the
 # markup — a meta robots directive only helps if a crawler renders the page,
 # and this URL carries a customer's home address, when the house will be empty,

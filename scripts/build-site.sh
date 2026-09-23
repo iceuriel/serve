@@ -79,7 +79,13 @@ cp booking-live.js booking-photos.js "$OUT"/
 # their jobs and their profile. Same noindex + no-store + no-referrer as the
 # other two token-bearing pages.
 cp v.html vendor.js "$OUT"/
-cp sitemap.xml "$OUT"/
+# sitemap.xml lists the pages worth indexing; robots.txt points crawlers and
+# AI shopping agents at it and allows the whole public site. robots.txt is
+# fetched from the ROOT by convention — staged but not listed here, it 404s and
+# every agent falls back to "no policy", which is not the same as the explicit
+# permission the file exists to give. See its own comments for why the three
+# token-bearing paths are deliberately absent from it.
+cp sitemap.xml robots.txt "$OUT"/
 cp -r images "$OUT"/
 
 # Favicon at the ROOT as well as in images/.

@@ -463,9 +463,21 @@ console.log('\n=== 7. "provider" in the copy, "vendor" in the wiring ===');
     (SJS.match(/Serve is coordinating with our provider network/g) || []).length === 2);
   t('the seeking card names it too',
     /Coordinating with our provider network/.test(PC));
-  t('and so do all three social/meta descriptions',
-    (IDX.match(/trusted local Boston providers/g) || []).length === 3,
-    (IDX.match(/trusted local Boston providers/g) || []).length);
+  /* Checked inside the three description ATTRIBUTES, not counted across the
+     whole file. Counting raw occurrences meant "exactly three, anywhere" —
+     which a comment mentioning the phrase three times would satisfy with every
+     meta tag deleted, and which broke on 2026-09-23 when the homepage's new
+     JSON-LD block correctly reused the same sentence as its `description`. The
+     claim being made is about the three tags, so read the three tags. */
+  const descs = [
+    (IDX.match(/<meta name="description" content="([^"]*)"/) || [])[1],
+    (IDX.match(/<meta property="og:description" content="([^"]*)"/) || [])[1],
+    (IDX.match(/<meta name="twitter:description" content="([^"]*)"/) || [])[1],
+  ];
+  t('all three social/meta description tags are present',
+    descs.every(d => typeof d === 'string' && d.length > 0), descs.map(d => !!d));
+  t('and all three name the provider network',
+    descs.every(d => /trusted local Boston providers/.test(d || '')), descs);
 
   /* THE WIRING IS UNTOUCHED. These are not cosmetic. */
   const WH = fs.readFileSync(path.join(REPO_ROOT, 'apps-script', 'webhook.gs'), 'utf8');

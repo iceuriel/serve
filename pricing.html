@@ -38,7 +38,25 @@
     <link rel="stylesheet" href="style.css">
 
     <!-- FAQPage structured data. Every answer below is word-for-word what the
-         visible FAQ says — Google treats a mismatch as a markup violation. -->
+         visible FAQ says — Google treats a mismatch as a markup violation.
+
+         THE PRICE FIGURES IN THE FIRST ANSWER ARE CHECKED AGAINST THE ENGINE
+         by pricing-and-services.test.js, in both this block and the visible
+         <p> further down. They were not, until 2026-09-23, and every one of
+         them had gone stale: it read "$117 and $347 ... from $85 ... about
+         $191" while serveRange() quoted $127, $322, $79 and $139.
+
+         That is the same rot the <meta name="description"> above suffered and
+         was fixed for — and it survived the fix, because the test written that
+         day read the meta tag and nothing else. Structured data is the worse
+         place for it: a wrong meta description misleads a reader, a wrong
+         FAQPage block feeds a wrong number straight to Google's answer box and
+         to any AI agent pricing a clean on its owner's behalf.
+
+         FLOORS ONLY, for the reason the meta tag learned: a floor moves when
+         base pricing changes, a ceiling moves whenever the largest home in
+         SERVE_SIZES does. Do not reintroduce an upper bound here. -->
+
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
@@ -49,7 +67,7 @@
           "name": "How much does house cleaning cost in Boston?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "For a first clean with Serve, most Boston homes fall between $117 and $347 depending on size and condition. Recurring visits run from $85 per visit for a studio to about $191 for a three-bedroom. Move-in and move-out cleans on an empty home are higher, since every cabinet, the fridge and the oven are done inside."
+            "text": "For a first clean with Serve, most Boston homes start at $127 and rise with the home's size and condition. Recurring visits start at $79 per visit for a studio and $139 for a three-bedroom. Move-in and move-out cleans on an empty home are higher, since every cabinet, the fridge and the oven are done inside."
           }
         },
         {
@@ -211,7 +229,7 @@
             <div class="serve-faq">
                 <details>
                     <summary>How much does house cleaning cost in Boston?</summary>
-                    <p>For a first clean with Serve, most Boston homes fall between $117 and $347 depending on size and condition. Recurring visits run from $85 per visit for a studio to about $191 for a three-bedroom. Move-in and move-out cleans on an empty home are higher, since every cabinet, the fridge and the oven are done inside.</p>
+                    <p>For a first clean with Serve, most Boston homes start at $127 and rise with the home's size and condition. Recurring visits start at $79 per visit for a studio and $139 for a three-bedroom. Move-in and move-out cleans on an empty home are higher, since every cabinet, the fridge and the oven are done inside.</p>
                 </details>
                 <details>
                     <summary>Is that the real price, or are there fees on top?</summary>

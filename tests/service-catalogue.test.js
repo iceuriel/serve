@@ -136,7 +136,18 @@ head('5. No second, disagreeing list of services');
    feature list (rooms, photos, history), which is not a service at all. What
    makes a claim about availability is a status label sitting NEXT TO A SERVICE
    NAME, so that adjacency is what is tested. */
-const outsideGrid = HTML.slice(0, gridStart) + HTML.slice(gridEnd);
+/* HTML COMMENTS ARE STRIPPED FIRST. An availability claim is something a
+   visitor or a crawler can read; a comment is neither. Left in, this section
+   reports a contradiction that does not exist in the page — which it did on
+   2026-09-23, against a comment in <head> explaining why the new JSON-LD block
+   lists cleaning and not Plumbing. Explaining the rule tripped the rule.
+
+   pricing-and-services.test.js strips comments before its own adjacency scan
+   for exactly this reason and says so; this is the same fix in the same
+   spirit. Nothing is lost: markup that renders nothing cannot contradict
+   anything, and the grid itself is still scanned in full below. */
+const outsideGrid = (HTML.slice(0, gridStart) + HTML.slice(gridEnd))
+  .replace(/<!--[\s\S]*?-->/g, '');
 const labels = [liveLabel, CATALOGUE.label('planned'), CATALOGUE.label('request')].filter(Boolean);
 const NEAR = 160;
 

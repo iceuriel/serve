@@ -1,0 +1,35 @@
+# Serve — crawler and agent policy.
+#
+# DELIBERATELY PERMISSIVE. Everything staged for publication is meant to be
+# read, by a search crawler or by somebody's AI agent shopping for a cleaner on
+# their behalf. Serve wants to be found by both, so there is no Disallow line
+# here at all and no per-agent block singling one out.
+#
+# Adding a Disallow later is a business decision, not a tidy-up: the agents that
+# now book real work read this file first, and a blanket rule aimed at scrapers
+# turns away the buyer too.
+#
+#
+# WHY /h, /j AND /v ARE NOT LISTED BELOW — AND MUST NOT BE ADDED.
+#
+# The obvious instinct is to Disallow the three token-bearing surfaces. Doing
+# that would make them LESS private, not more.
+#
+# robots.txt is world-readable and is the first file anyone curious fetches. A
+# "Disallow: /h" line publishes, to every reader, that a customer portal lives
+# at that path — the one fact the URLs themselves never leak. It also buys
+# nothing: the paths appear in no sitemap and no link anywhere on the site, so
+# nothing is going to crawl to them in the first place.
+#
+# What actually protects them, in order:
+#   1. the HMAC token in the query string — no token, no page content at all
+#   2. X-Robots-Tag: noindex, nofollow, noarchive, set per-path in _headers
+#   3. Cache-Control: no-store and Referrer-Policy: no-referrer, same file
+#
+# _headers is the control and says so in its own comments. This file is only
+# here to say "yes, please read the public pages" and to point at the sitemap.
+
+User-agent: *
+Allow: /
+
+Sitemap: https://servecleaning.com/sitemap.xml

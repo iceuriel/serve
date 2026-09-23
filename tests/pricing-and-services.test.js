@@ -36,6 +36,7 @@ const CSS      = read('style.css');
 const BUILD    = read('scripts/build-site.sh');
 const HEADERS  = read('_headers');
 const SITEMAP  = read('sitemap.xml');
+const ROBOTS   = read('robots.txt');
 
 let bad = 0;
 const t = (label, cond, extra) => {
@@ -628,6 +629,34 @@ console.log('\n=== 9. the new pages are actually reachable ===');
 });
 t('sitemap lists extensionless URLs only, never both forms for one page',
   !/\.html<\/loc>/.test(SITEMAP));
+
+/* ---------- robots.txt ----------
+   Added 2026-09-23. The site ran without one entirely until then, which is not
+   neutral: an agent that fetches /robots.txt and gets a 404 records "no
+   policy", and several crawlers treat a robots.txt served as anything but
+   text/plain the same way. Serve wants to be read, so it should say so.
+
+   THE LAST TWO ASSERTIONS ARE THE POINT OF THE FILE. Disallowing /h, /j or /v
+   reads like the careful thing to do and is the opposite: robots.txt is
+   world-readable, so the line publishes the existence of a path that appears
+   in no sitemap and no link anywhere. The token and the X-Robots-Tag in
+   _headers are what protect those pages. Anyone tidying this up later gets a
+   failing test and a reason, not a silent privacy regression. */
+t('build-site.sh stages robots.txt', /cp\s+[^\n]*\brobots\.txt\b/.test(BUILD));
+t('/robots.txt has a cache rule', /^\/robots\.txt$/m.test(HEADERS));
+t('/robots.txt is served as text/plain',
+  /\/robots\.txt\n\s*Content-Type:\s*text\/plain/.test(HEADERS));
+t('robots.txt points at the sitemap',
+  /^Sitemap:\s*https:\/\/servecleaning\.com\/sitemap\.xml$/m.test(ROBOTS));
+t('robots.txt allows the public site', /^Allow:\s*\/$/m.test(ROBOTS));
+
+/* Comments are stripped first: this file explains at length why the three
+   paths are absent, and it names all three while doing it. Matching the prose
+   would fail the test the documentation exists to prevent. */
+const robotsRules = ROBOTS.replace(/^\s*#.*$/gm, '');
+t('robots.txt has no Disallow at all', !/^Disallow:/m.test(robotsRules), robotsRules.match(/^Disallow:.*/gm));
+t('robots.txt never names /h, /j or /v — the line would publish the path',
+  !/\/[hjv]\b/.test(robotsRules), robotsRules.match(/\/[hjv]\b.*/g));
 t('both pages load the shared script', /<script src="script\.js">/.test(PRICING) && /<script src="script\.js">/.test(SERVICES));
 
 /* The geo data is a second script file, so it needs the same four things any
@@ -771,6 +800,53 @@ t('recurring floor matches the engine',
 /* "from $127" must not become "$127 to $865" again. */
 t('description quotes floors, not a range',
   !/\bto \$|\$\d+\s*[–-]\s*\$/.test(pricingDesc), pricingDesc);
+
+/* ---------- the FAQ quotes them too, in BOTH copies ----------
+   Added 2026-09-23, and it caught the thing it was written for immediately.
+
+   The check above was written the day the meta description was corrected, and
+   it reads the meta description and nothing else. The FAQ two hundred lines
+   below it still said "between $117 and $347 ... from $85 ... about $191" —
+   the identical stale figures, from the identical rework — and went on saying
+   them for as long as the meta tag had, because no test had ever looked.
+
+   The FAQ is the worse place to be wrong. It exists TWICE: once as visible
+   prose and once inside the FAQPage JSON-LD, which is what Google quotes in
+   an answer box and what an AI shopping agent reads instead of the page. A
+   wrong number there is a wrong number delivered with authority.
+
+   Asserted against serveRange() — the same function that renders the table on
+   this page — so the FAQ cannot disagree with the table above it. */
+console.log('\n=== the /pricing FAQ quotes prices the engine agrees with ===');
+
+const faqAnswer = (PRICING.match(
+  /"text":\s*"(For a first clean with Serve[^"]*)"/) || [])[1] || '';
+const faqVisible = (PRICING.match(
+  /<p>(For a first clean with Serve[^<]*)<\/p>/) || [])[1] || '';
+
+t('the FAQ answer is present in the JSON-LD', faqAnswer.length > 0);
+t('the FAQ answer is present as visible prose', faqVisible.length > 0);
+/* Google treats a structured answer that does not match the rendered one as a
+   markup violation, so this is a policy check as much as a consistency one. */
+t('both copies of the FAQ answer are word-for-word identical',
+  faqAnswer === faqVisible, { jsonLd: faqAnswer, visible: faqVisible });
+
+const threeBed  = sizes.filter(s => s.beds === 3)[0];
+const recThree  = threeBed ? rangeOf(threeBed.beds, threeBed.baths, 'recurring')[0] : null;
+const faqFigures = (faqAnswer.match(/\$\d+/g) || []).map(s => +s.slice(1));
+
+t('the FAQ quotes exactly three figures', faqFigures.length === 3, faqFigures);
+t('FAQ first-clean floor matches the engine',
+  faqFigures[0] === deepFloor, { inFaq: faqFigures[0], fromEngine: deepFloor });
+t('FAQ recurring studio floor matches the engine',
+  faqFigures[1] === recFloor, { inFaq: faqFigures[1], fromEngine: recFloor });
+t('FAQ recurring three-bedroom floor matches the engine',
+  faqFigures[2] === recThree, { inFaq: faqFigures[2], fromEngine: recThree });
+
+/* Same rule as the meta description, and for the same reason: the ceiling is
+   what rotted last time. "$117 and $347" was a range; both ends were wrong. */
+t('the FAQ quotes floors, not a range',
+  !/\bbetween \$|\bto \$|\$\d+\s*[–-]\s*\$/.test(faqAnswer), faqAnswer);
 
 console.log('\n' + (bad ? 'FAILURES: ' + bad : 'ALL CHECKS PASSED'));
 process.exit(bad ? 1 : 0);

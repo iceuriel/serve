@@ -80,6 +80,107 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Montserrat:wght@500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
+
+    <!-- WHO SERVE IS, IN THE ONE FORMAT A MACHINE READS WITHOUT GUESSING.
+         Added 2026-09-23. Until then the site carried no business identity in
+         structured form anywhere — /pricing had an FAQPage block and that was
+         the lot. A crawler could infer the name from <title> and a shopping
+         agent had to parse the footer for a phone number.
+
+         Every field below already appears in the served markup of this page.
+         Nothing here is a new claim, and that is the rule for editing it.
+
+         THREE THINGS ARE ABSENT ON PURPOSE:
+
+         No `address`. Serve has no premises a customer visits, and the only
+         street address in reach is a personal one. `areaServed` is the honest
+         shape of the business and the only one that belongs in public markup.
+
+         No `aggregateRating` or `review`. There are no customers yet. A rating
+         object here would be an invented number in the one place a machine
+         treats as authoritative, and Google penalises it besides.
+
+         No price. The <meta name="description"> above already explains why
+         this page quotes none: /pricing owns those figures, and a second place
+         to state them is a second place to go stale. `priceRange: "$$"` was
+         considered and rejected as a claim too vague to be worth maintaining.
+
+         `makesOffer` LISTS CLEANING AND NOTHING ELSE. serve-services.js has
+         six categories and exactly one of them is `status: 'live'` — the rest
+         are 'planned', and that file's own banner says nothing may claim
+         capability the business does not have. Structured data is the easiest
+         place in the codebase to break that rule by accident: listing
+         Plumbing here tells an agent Serve does plumbing, and the agent has no
+         "Coming to Serve" badge to read. service-catalogue.test.js holds the
+         visible grid to that file; structured-data.test.js now holds this
+         block to it too. -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "HomeAndConstructionBusiness",
+      "@id": "https://servecleaning.com/#business",
+      "name": "Serve",
+      "description": "Serve books, coordinates and manages your home service by partnering with trusted local Boston providers. Home cleaning today — quote and book in a minute.",
+      "url": "https://servecleaning.com/",
+      "logo": "https://servecleaning.com/images/serve-logo-boston.svg",
+      "image": "https://servecleaning.com/images/serve-header-img.jpg",
+      "email": "management@servecos.com",
+      "telephone": "+1-617-804-7201",
+      "areaServed": {
+        "@type": "City",
+        "name": "Boston",
+        "containedInPlace": {
+          "@type": "AdministrativeArea",
+          "name": "Greater Boston, Massachusetts"
+        }
+      },
+      "makesOffer": [
+        {
+          "@type": "Offer",
+          "itemOffered": {
+            "@type": "Service",
+            "name": "First deep clean",
+            "serviceType": "House cleaning",
+            "url": "https://servecleaning.com/services"
+          }
+        },
+        {
+          "@type": "Offer",
+          "itemOffered": {
+            "@type": "Service",
+            "name": "Recurring home cleaning",
+            "serviceType": "House cleaning",
+            "url": "https://servecleaning.com/services"
+          }
+        },
+        {
+          "@type": "Offer",
+          "itemOffered": {
+            "@type": "Service",
+            "name": "Move-in and move-out cleaning",
+            "serviceType": "House cleaning",
+            "url": "https://servecleaning.com/services"
+          }
+        }
+      ],
+      "potentialAction": {
+        "@type": "ReserveAction",
+        "name": "Book a cleaning",
+        "target": {
+          "@type": "EntryPoint",
+          "urlTemplate": "https://servecleaning.com/#quote",
+          "actionPlatform": [
+            "https://schema.org/DesktopWebPlatform",
+            "https://schema.org/MobileWebPlatform"
+          ]
+        },
+        "result": {
+          "@type": "Reservation",
+          "name": "Home cleaning booking"
+        }
+      }
+    }
+    </script>
 </head>
 <body>
 
