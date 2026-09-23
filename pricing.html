@@ -20,7 +20,8 @@
     <title>House Cleaning Prices in Boston — Serve</title>
     <!-- The figures here are FLOORS, deliberately, and they are checked against
          the engine by pricing-and-services.test.js. This line previously read
-         "$117 to $347, recurring from $85" — every one of those was wrong after
+         "117 to 347, recurring from 85" (dollar signs omitted deliberately —
+         see the FAQ block below) — every one of those was wrong after
          the pricing rework, and the ceiling was out by 2.5x, because a meta tag
          is plain text that no test was reading. Quoting an upper bound is what
          made it rot: the floor moves rarely, the ceiling moves whenever the
@@ -43,8 +44,9 @@
          THE PRICE FIGURES IN THE FIRST ANSWER ARE CHECKED AGAINST THE ENGINE
          by pricing-and-services.test.js, in both this block and the visible
          <p> further down. They were not, until 2026-09-23, and every one of
-         them had gone stale: it read "$117 and $347 ... from $85 ... about
-         $191" while serveRange() quoted $127, $322, $79 and $139.
+         them had gone stale: it read "117 and 347 ... from 85 ... about 191"
+         while serveRange() quoted 127, 322, 79 and 139. (Dollar signs are
+         omitted throughout this comment on purpose — see the note below.)
 
          That is the same rot the <meta name="description"> above suffered and
          was fixed for — and it survived the fix, because the test written that
@@ -55,7 +57,18 @@
 
          FLOORS ONLY, for the reason the meta tag learned: a floor moves when
          base pricing changes, a ceiling moves whenever the largest home in
-         SERVE_SIZES does. Do not reintroduce an upper bound here. -->
+         SERVE_SIZES does. Do not reintroduce an upper bound here.
+
+         AND NO DOLLAR SIGNS IN THESE COMMENTS. Comments are stripped by the
+         renderer and ignored by Google, but they are still in the bytes served
+         to anything reading the raw HTML — which now includes agents shopping
+         on somebody's behalf. A superseded figure written with its dollar sign
+         is scrapeable as a price; written bare it is plainly prose about
+         history. (This paragraph originally illustrated the point with the
+         figure itself, and tripped its own test.) Cheap to
+         honour, and the whole point of this block is that no stale number
+         reaches a machine from this page. -->
+
 
     <script type="application/ld+json">
     {

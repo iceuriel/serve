@@ -13,6 +13,120 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-23, Claude Code: the site becomes agent-readable
+
+**Site only. No Apps Script change, no sheet change, no deploy ordering to
+respect.** Commit `bfbfa74`.
+
+The founder asked what it would take to be "connected to Muse" — Meta's
+personal AI agent, which as of its 2026-09-08 launch shops and transacts on a
+user's behalf. **There is no partner API to join at Serve's size.** Muse runs a
+real browser in an isolated VM and pays through Stripe Link, Shop Pay or PayPal.
+Serve is already on hosted Stripe Checkout (`src/worker.js`, `/api/checkout`),
+which serves Link, so the payment rail needs nothing. What was missing was the
+site telling a machine who Serve is, what it sells, and where to book.
+
+**Three things shipped, one of which was a live bug.**
+
+`robots.txt` — **did not exist at all.** A 404 there is not neutral: an agent
+records "no policy" rather than permission. Deliberately permissive, and
+deliberately **does not name `/h`, `/j` or `/v`**. Disallowing them reads like
+the careful choice and is the opposite — robots.txt is world-readable, so the
+line publishes the existence of a path that appears in no sitemap and no link
+anywhere. The token and the `X-Robots-Tag` in `_headers` are the controls, and
+`_headers` already says so. Two tests fail if anyone "tidies" this up. Staged
+in `build-site.sh` and given a `text/plain` rule in `_headers` — several
+crawlers treat a robots.txt served as anything else as absent.
+
+`index.html` — **carried no business identity in structured form at all**; the
+only JSON-LD on the whole site was /pricing's FAQPage. Added a
+`HomeAndConstructionBusiness` block restating only what the served markup
+already says: name, `areaServed`, the contact details already in the footer,
+and a `ReserveAction` naming the `#quote` anchor so an agent does not have to
+infer the entry point from the nav. `makesOffer` lists **cleaning and nothing
+else**, held to `serve-services.js` by the new test — five of its six
+categories are `planned`, and an agent reading structured data has no "Coming
+to Serve" badge to temper it with. No `aggregateRating` (no customers yet), no
+`address` (no premises, and the only one in reach is personal), no price
+(/pricing owns those figures).
+
+**THE LIVE BUG — `/pricing`'s FAQ had four stale prices, in both copies.** It
+read "between $117 and $347 ... from $85 ... about $191" while `serveRange()`
+quotes **$127, $322, $79 and $139**. This is the same rot the `<meta
+name="description">` was corrected for, and it **survived that fix**: the test
+written that day reads the meta tag and nothing else, so the FAQ two hundred
+lines below kept the original wrong numbers. The FAQ is the worse place for it
+— it exists twice, once as visible prose and once inside the FAQPage JSON-LD,
+which is what Google lifts into an answer box and what an agent reads instead
+of the page. Corrected to engine values in both copies, floors only, for the
+reason the meta tag learned: a ceiling moves whenever the largest home in
+`SERVE_SIZES` does.
+
+**Tests — 38 files now, all passing.** New `structured-data.test.js`: every
+JSON-LD block parses, the business block claims no unavailable service (read
+from `serve-services.js`, not retyped), invents no rating/address/price, uses
+only contact details the page actually links to, and names a fragment that is a
+real id. New FAQ-versus-engine assertions sit beside the meta-description ones
+in `pricing-and-services.test.js`.
+
+**Every new assertion was confirmed to FAIL against a deliberate mutation
+before being trusted** — 14 of them, including the stale-FAQ revert, a
+`Disallow: /h` line, a trailing comma, an invented rating, and `Plumbing` added
+to the offer list. **One mutation caught a bug in my own test:** matching the
+phone number against the digits of the whole document finds any 10-digit run
+inside the hero skyline's SVG path, so a fabricated `+1-555-010-9999` passed.
+It reads the `tel:` hrefs now.
+
+**Two existing guards were tightened** where the new markup collided with them.
+Both were matching too loosely rather than being wrong, and both were
+re-verified to still catch a real regression:
+- `service-catalogue.test.js` scanned HTML **comments** for availability
+  claims, so the comment explaining why the JSON-LD omits Plumbing tripped the
+  Plumbing rule. Comments are stripped now, as `pricing-and-services.test.js`
+  already does for the same reason.
+- `payout-discount-parity.test.js` counted a phrase "exactly three times
+  anywhere in index.html", which the JSON-LD's correct reuse of the same
+  sentence broke. It reads the three description **tags** now — which also
+  catches a deleted tag, something the count never did.
+
+**A follow-up commit removed the dollar signs from this page's comments.** The
+production probe found three superseded figures still in the served bytes — all
+inside the comments explaining the correction, so invisible to a reader and
+ignored by Google, but present for anything parsing raw HTML, which is now the
+audience in question. Written bare they are prose about history rather than
+scrapeable prices. A test asserts no `$`-figure appears in a `/pricing`
+comment; the paragraph explaining the rule originally illustrated it with the
+figure itself and tripped its own test.
+
+**Deployed and verified in production, 2026-09-23.** Workers Builds reported
+success on `bfbfa74`, and `servecleaning.com` was probed directly:
+- `/robots.txt` → `200`, `Content-Type: text/plain; charset=utf-8`,
+  `Cache-Control: public, max-age=3600`, the sitemap line present, and **zero**
+  matches for `Disallow` or the three private paths.
+- `/` serves the `HomeAndConstructionBusiness` block with all three cleaning
+  offers and no others.
+- `/pricing` serves the corrected sentence in **both** copies, identical.
+
+**STILL OWED — the question this work did not answer.** Nobody has confirmed a
+browser agent can actually complete the booking flow. The flow has address
+autocomplete, live-priced fields and slot selection, any of which can stall an
+agent silently, and that is the thing that decides whether the rest matters.
+The Chrome extension was not connected this session (the same gap as
+2026-09-19), so **this is structural verification only**. When it is run, note
+that **Serve is on a live Stripe key — the test must stop before payment.**
+
+**TWO DECISIONS FOR THE FOUNDER, neither an engineering call:**
+1. **Should an agent be able to book unattended?** The instant quote carries a
+   deliberate convenience premium, and an agent comparing on price alone is
+   exactly the buyer that lane loses. Routing agent traffic to the slower
+   compare lane instead is a positioning decision.
+2. **Should `/api/quote` be callable cross-origin?** There is no CORS handling
+   in the Worker today. Opening it would let an agent price a job without
+   scraping — the cleanest possible integration — but it also publishes the
+   pricing function to competitors.
+
+---
+
 ## Current work — 2026-09-21, Codex: one BU alumni link
 
 The founder requested one official URL, `https://servecleaning.com/bu`, for

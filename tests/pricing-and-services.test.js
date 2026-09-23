@@ -844,9 +844,21 @@ t('FAQ recurring three-bedroom floor matches the engine',
   faqFigures[2] === recThree, { inFaq: faqFigures[2], fromEngine: recThree });
 
 /* Same rule as the meta description, and for the same reason: the ceiling is
-   what rotted last time. "$117 and $347" was a range; both ends were wrong. */
+   what rotted last time. A range was quoted; both ends were wrong. */
 t('the FAQ quotes floors, not a range',
   !/\bbetween \$|\bto \$|\$\d+\s*[–-]\s*\$/.test(faqAnswer), faqAnswer);
+
+/* ---------- no superseded price survives in a comment ----------
+   Comments are invisible to a reader and ignored by Google, but they are in
+   the bytes served to anything parsing the raw HTML, and this page's comments
+   necessarily discuss prices that are no longer true. Written "$117" a
+   superseded figure is scrapeable as a price; written "117" it is prose about
+   history. The page carries three such figures today, all in the explanation
+   of why the FAQ was corrected. */
+const pricingComments = (PRICING.match(/<!--[\s\S]*?-->/g) || []).join('\n');
+const dollarsInComments = pricingComments.match(/\$\d+/g) || [];
+t('no dollar figure appears in a /pricing comment',
+  dollarsInComments.length === 0, dollarsInComments);
 
 console.log('\n' + (bad ? 'FAILURES: ' + bad : 'ALL CHECKS PASSED'));
 process.exit(bad ? 1 : 0);
