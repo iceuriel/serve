@@ -6,7 +6,7 @@ assistant with no access to this repo. Self-contained on purpose.
 **Companion doc:** `/docs/SCHEMA.md` — authoritative for every column's meaning
 and who writes it. This file is the narrative; that file is the contract.
 
-**Latest session: 2026-09-21.** Jump to
+**Latest session: 2026-09-23.** Jump to
 [what changed on 2026-09-08 / 09](#session-2026-09-08--09) for the current
 state. The sections below it describe earlier builds and remain accurate
 except where a later section supersedes them.
@@ -129,7 +129,7 @@ that **Serve is on a live Stripe key — the test must stop before payment.**
 
 ## Current work — 2026-09-23, Codex: general terms for customers and authorized agents
 
-**Site only. No Apps Script or sheet change. Not committed, pushed, or deployed.**
+**Site only. No Apps Script or sheet change. Deployed in commit `8cc78e0`.**
 
 The founder asked for a general Terms of Service page adequate for connector
 review and authorized-agent use, after Muse's application required a product
@@ -160,15 +160,17 @@ footer, current operating/payment facts, agent confirmation boundaries,
 Chapter 93A preservation, and the absence of invented cancellation/arbitration
 terms. All **39 test files pass**. The publish build completed through Git Bash
 login mode and staged `terms.html`; 76 files staged and the private-file guard
-passed. `git diff --check` is clean. No browser rendering and no production
-probe were performed. The two untracked image files already in the worktree
-were not modified.
+passed. `git diff --check` is clean. The two untracked image files already in
+the worktree were not modified.
 
-**Before using the URL in Muse:** review the business wording and obtain legal
-counsel if legal enforceability is important, then commit/push/deploy and verify
-`https://servecleaning.com/terms` returns 200. The open cancellation/refund
-policy remains intentionally non-numeric; adding a fee, deadline, or refund
-promise is still a founder decision.
+**Production verified after the Workers build:** `/terms` returns 200 with the
+intended UTF-8 and must-revalidate headers; `/terms.html` returns a 307 to the
+canonical path; the live homepage contains the exact Reserve-action agreement
+notice and `/terms` footer link; and the live sitemap lists `/terms`. No browser
+rendering was performed. Review the business wording with legal counsel if
+legal enforceability is important. The open cancellation/refund policy remains
+intentionally non-numeric; adding a fee, deadline, or refund promise is still
+a founder decision.
 
 ## Current work — 2026-09-21, Codex: one BU alumni link
 
