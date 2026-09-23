@@ -82,7 +82,7 @@ the rendered `<summary>` elements and asserts the JSON-LD matches, so the FAQ
 can grow without editing a literal, which is the thing the test was checking
 for in the first place.
 
-**Deployed:** recorded below once the build and production probe complete.
+**Deployed and verified in production, 2026-09-23.** Workers Builds success on `c779db6` (the check run took two minutes to register — `total_count` was 0 at first, which is the missed-push shape and was not one). Probed live: the preflight answers `204` with `Allow-Origin: *`, `POST, OPTIONS` and `Content-Type`; a real cross-origin POST from `Origin: https://example.com` returns a signed quote (2BR/1.5BA in 02116 → $217, recurring 133/192/331); `Allow-Credentials` appears nowhere; `/api/submit`, `/api/checkout`, `/api/address` and `/api/portal` all send NO CORS headers; both new FAQ questions serve in both copies; and the `QuoteAction` serves with its URL and `POST` method.
 
 **Still owed, unchanged:** nobody has confirmed a browser agent can complete
 the booking flow. The Chrome extension was not connected. **Serve is on a live
