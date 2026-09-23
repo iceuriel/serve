@@ -855,6 +855,40 @@ t('FAQ recurring three-bedroom floor matches the engine',
 t('the FAQ quotes floors, not a range',
   !/\bbetween \$|\bto \$|\$\d+\s*[–-]\s*\$/.test(faqAnswer), faqAnswer);
 
+/* ---------- the portal FAQ describes the portal that exists ----------
+   Added 2026-09-23. The FAQ now tells customers — and any agent reading the
+   JSON-LD — what the booking page at /h is for: reschedule, cancel, authorize
+   payment, manage a plan, and record how to get in. That is a promise about a
+   surface in a different file, which is exactly the shape of claim this repo
+   keeps finding stale, so each capability is checked against portal.js rather
+   than trusted.
+
+   THE LAST ASSERTION IS THE ONE THAT MATTERS. Access codes are write-only:
+   portal.js says in three separate places that the code is never sent to the
+   page, and the Apps Script marks that choice `secret: true`. The FAQ is now
+   the only customer-facing place that states it, which makes it the only place
+   that could quietly start promising the opposite. */
+console.log('\n=== the portal FAQ matches the portal ===');
+const PORTAL_JS = read('portal.js');
+const portalAnswer = (PRICING.match(
+  /"text":\s*"(Both happen on your booking page[^"]*)"/) || [])[1] || '';
+
+t('the portal answer is in the JSON-LD', portalAnswer.length > 0);
+[['reschedule',        /kind: 'reschedule'/],
+ ['cancel a visit',    /cancel this visit/i],
+ ['authorize payment', /Authorize payment/]].forEach(([claim, evidence]) => {
+  t('it claims "' + claim + '", and portal.js does that', evidence.test(PORTAL_JS));
+});
+t('the answer actually names all three',
+  /reschedule/i.test(portalAnswer) && /cancel/i.test(portalAnswer) &&
+  /authorize payment/i.test(portalAnswer), portalAnswer);
+/* Never readable, and portal.js is the authority on that. */
+t('portal.js still refuses to hold a door code',
+  /never in this page's data|NEVER SENT TO THIS PAGE|Never read or retain a door code/i.test(PORTAL_JS));
+t('and the FAQ says the code cannot be read back, not that it can',
+  /write-only/.test(portalAnswer) && !/you can (see|view|read)[^.]*code/i.test(portalAnswer),
+  portalAnswer);
+
 /* ---------- no superseded price survives in a comment ----------
    Comments are invisible to a reader and ignored by Google, but they are in
    the bytes served to anything parsing the raw HTML, and this page's comments

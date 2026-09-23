@@ -54,6 +54,74 @@ rail rule.
 
 ---
 
+## Current work — 2026-09-23, Claude Code: the portal explains itself
+
+**Site only. No Apps Script change, no sheet change, no deploy ordering to
+respect.** Third entry of the day; follows the two below it.
+
+The founder asked how to get agents to tick the SMS consent box so a client
+receives their portal by text, and to make clear what the portal is for.
+
+**HALF THE REQUEST WAS ALREADY SATISFIED, which is why the consent half was not
+built.** Since r58 the portal link is EMAILED on every booking regardless of
+consent, and the consent intro says so in as many words. An agent that skips
+the checkbox does not cost its client the portal. SMS is a second delivery
+channel, not the only one.
+
+**The consent labels were deliberately NOT touched, and must not be.** Tuning
+them to get an agent to tick on a human's behalf means texts to numbers whose
+owner never formed that intent. The concrete stake is not abstract: the A2P
+10DLC campaign is registered and approved, carriers re-check, and complaints
+from people who did not ask for texts is how a campaign gets REVOKED rather
+than merely rejected. That number is load-bearing for the whole booking flow.
+The block's own comment already identifies the only legitimate lever — the
+intro, which sits above the labels as a sibling and is therefore not part of
+the consent language a carrier reviews.
+
+**So the intro is what changed.** It now names what the page is for
+("reschedule, cancel, pay and tell us how to get in") before offering to text
+it. Both boxes are untouched: unchecked, optional, separate, same wording.
+
+**`/pricing` gained two more FAQ entries** (nine now, both copies): what the
+booking page is and what it does, and whether an assistant can manage bookings
+on it. The second one states plainly that **the link is the credential** —
+anyone holding it can reschedule, cancel and authorize payment — and says to
+treat it like a password. That is the honest version of "agents can use it
+too", and it matches what `/terms` §3 already tells customers.
+
+**Every capability claimed was verified against `portal.js` before it was
+written**, not assumed: Bookings and Arrival & access tabs, reschedule
+(`kind: 'reschedule'`), cancel ("Yes, cancel this visit"), "Authorize payment",
+recurring plans, and the three access questions in `ACCESS_QUESTIONS`
+(occupancy / entry / parking) plus pet notes.
+
+**ACCESS CODES ARE WRITE-ONLY AND THE FAQ NOW SAYS SO.** `portal.js` states in
+three places that the code never reaches the page, and the Apps Script marks
+that choice `secret: true`. The FAQ is now the only customer-facing text that
+states it, which makes it the only place that could quietly start promising the
+opposite — so a test asserts both that `portal.js` still refuses to hold a code
+AND that the answer says it cannot be read back.
+
+**Tests — 40 files, all passing.** New assertions cross-check each FAQ
+capability against `portal.js` rather than a retyped list, and two guard the
+consent intro, which nothing had ever asserted: it must still say the page
+arrives "either way", and it must never imply a text is how you get it. All
+five were confirmed to fail against a deliberate mutation, including the FAQ
+claiming a code can be read back and the intro dropping the "either way"
+promise.
+
+**Deployed:** recorded below once the build and production probe complete.
+
+**FOR THE FOUNDER, a tradeoff now in published copy rather than only implied:**
+encouraging customers to hand the portal link to an agent is encouraging them
+to share a bearer credential with a third party. The copy is written to be
+honest about that rather than to push it. If the preference is to encourage it
+harder, that is a decision worth taking deliberately — and the alternative
+worth considering first is a scoped or revocable link for agents, which does
+not exist today and would be real work.
+
+---
+
 ## Current work — 2026-09-23, Claude Code: the quote endpoint goes public
 
 **Site and Worker. No Apps Script change, no sheet change, no deploy ordering

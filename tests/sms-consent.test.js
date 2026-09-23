@@ -108,6 +108,26 @@ const addrIdx  = html.indexOf('id="r-address"');
 t('sits directly after the phone field, before the address field',
   phoneIdx !== -1 && phoneIdx < blockStart && blockStart < addrIdx);
 
+/* ---------- the intro may sell, but never at the cost of the promise ----------
+   The intro sits ABOVE the labels as a sibling of them, and that is precisely
+   what makes it allowed: a carrier reviews the LABEL. It is therefore the one
+   place copy can move opt-in, and the one place a careless edit can imply that
+   ticking a box is how you get your booking page.
+
+   It is not. Since r58 the page is emailed on EVERY booking regardless of
+   consent, which is a standing customer promise made in two places. An intro
+   that stopped saying "either way" would turn an optional box into an apparent
+   condition of getting what you paid for — the exact thing the labels below
+   are required to disclaim. Asserted here because nothing asserted it before,
+   and the intro was edited on 2026-09-23 to describe what the page does. */
+const introMatch = block.match(/<p class="sms-consent__lede">([\s\S]*?)<\/p>/);
+t('the consent intro exists', !!introMatch);
+const introText = introMatch ? text(introMatch[1]) : '';
+t('the intro still says the booking page arrives either way',
+  /emailed to you\s+either way/.test(introText), introText);
+t('the intro never makes a text the way to get the booking page',
+  !/tick[^.]*\bto (get|receive)\b[^.]*booking page/i.test(introText), introText);
+
 const boxes = block.match(/<input[^>]*type="checkbox"[^>]*>/g) || [];
 t('exactly two checkboxes', boxes.length === 2, boxes.length);
 t('transactional and promotional are SEPARATE boxes',
