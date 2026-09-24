@@ -113,6 +113,81 @@ Builds check completed successfully, and a fresh production fetch of
 
 ---
 
+## Current work — 2026-09-24, Claude Code: driven as an agent, and two real bugs
+
+The founder asked whether an AI agent could complete the booking flow, ahead of
+applying to Meta's Muse connector programme (opened 2026-09-18; Meta runs
+end-to-end testing on submissions). **Nobody had ever driven the flow in a
+browser before.** Doing so found two production bugs, both invisible.
+
+**BUG 1 — every time slot had the same name.** 42 chips carried exactly TWO
+distinct accessible names, "9:00 AM" and "1:30 PM". The date lived in the day
+heading two elements away and in `data-date`, neither of which is part of a
+button's accessible name. An agent told "book Saturday at nine" saw seven
+identical buttons; so has every screen reader user, all along. The consequence
+is the WRONG DAY booked with a confirmation that looks right to everyone.
+Fixed in `serve-slots.js` by reusing `formatSlotDate` — the day heading already
+labels itself with it, so the two cannot drift. The portal's reschedule picker
+draws through the same function and gained the labels for free. Commit
+`5851fc1`. The test asserts UNIQUENESS, not presence: labelling all 42 "9:00
+AM" would satisfy "has a label" and fix nothing.
+
+**BUG 2 — `/api/slots` was failing 7 times in 10.** Measured, not inferred: ten
+probes, seven failures, every one sitting exactly on the 8s wall, every success
+back in ~1.2s. An Apps Script cold start. The site treats `ok:false` as "no
+availability" and quietly draws the earlier/later radios, so **roughly seven in
+ten customers reaching step 3 were being offered a vague morning/afternoon
+preference instead of a real bookable time** — and the page looked perfectly
+healthy throughout. `build-site.sh` warns about this exact shape.
+
+**THE FIRST FIX (`e7bda9c`) WAS WRONG AND IS WORTH REMEMBERING.** It kept the
+last good feed in KV and served it when the upstream timed out — which made
+every `curl` probe succeed and changed **nothing** in a browser, because
+`script.js` aborts at `AVAILABILITY_TIMEOUT_MS` (5000) and the fallback only
+arrived at 8s. Measuring with a client that has no deadline is not measuring
+what customers hit. That lesson was already written down here and I repeated it
+anyway. Corrected in `edce698`: when a cached feed exists the upstream races
+`SLOTS_SOFT_DEADLINE_MS` (2500ms, deliberately inside the client's 5000), the
+cache is served on a miss, and the in-flight request is NOT cancelled — it
+rides `waitUntil` and refreshes the cache, so the next caller is fast and only
+ONE upstream call is made. A test reads both constants from source and fails if
+the deadline ever rises to meet the client's.
+
+**Measured after, in a real browser with its own 5s abort: 6/6 under the
+deadline, 39 slots every time, max 2.86s.** Before: 3/10 succeeded at all.
+
+**A REAL BOOKING WAS PUT THROUGH, end to end, and everything worked.**
+`TEST BOOKING - Uriel (ignore)`, 700 Boylston St (the public library, chosen so
+no stranger's home got a PROPERTIES row), `uriel@servecos.com`, SMS consent
+left unticked, job `SRV-20260926-F37BF5`, $195.
+
+- booking → "You're on the schedule", both emails inside 10 seconds
+- **customer confirmation carried the portal link** — the r58 promise, verified
+- portal → booking, price, address, per-room instructions all correct
+- **reschedule** → Sat Sep 26 9:00 AM → Sun Sep 27 1:30 PM, ops emailed
+- **payment** → reached live Stripe Checkout (`cs_live_…`), $195, dated to the
+  RESCHEDULED day, with **Link present** — the rail Muse pays through
+- **cancel** → visit reads CANCELLED, ops emailed, row kept
+- all four emails fired: confirmation, reservation, moved, cancelled
+
+**THE CARD WAS NEVER ENTERED** and the hold was never taken — the payment line
+still read "Not yet authorized" after abandoning checkout, which is correct.
+**So the capture path remains unproven, and that is still the founder's to do:**
+one real card, an uncaptured hold in the dashboard, the portal line reading
+"Card authorized", a hand capture, then a refund.
+
+**Left behind by the test:** the cancelled JOBS/LEADS rows and a PROPERTIES row
+for 700 Boylston St. Harmless, but not cleaned up.
+
+**Smaller findings, not fixed:** ~18 buttons in the portal render with EMPTY
+accessible names; the add-on checkboxes read as `checkbox "on"` in an
+accessibility snapshot despite correct `<label>` markup (structure is
+spec-correct, so likely the snapshot tool, but a cheap `aria-label` would end
+the doubt); and page screenshots repeatedly timed out, which the animated
+skyline SVG makes expensive.
+
+---
+
 ## Current work — 2026-09-23, Claude Code: the portal explains itself
 
 **Site only. No Apps Script change, no sheet change, no deploy ordering to
