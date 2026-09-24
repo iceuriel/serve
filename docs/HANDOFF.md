@@ -151,6 +151,74 @@ Builds check completed successfully, and a fresh production fetch of
 
 ---
 
+## Current work — 2026-09-24, Claude Code: the money path, proven on a live card
+
+**Apps Script AND site. Script r60 was pasted BEFORE the site was pushed** —
+the ordering was verified rather than assumed, and that mattered: the first
+"good to push" came while `/exec` still reported r59, because saving Apps
+Script code does not deploy it. Pushing then would have shipped a portal.js
+reading a field the script did not send. Probe `/exec` for the version stamp
+before pushing, every time.
+
+**THE WHOLE MONEY PATH IS NOW PROVEN ON A REAL CARD, which it never was.**
+The founder paid a $137 test booking through live Stripe Checkout via Link,
+captured it by hand, then refunded it. Every state transition was read back
+from a FRESH page load, never from the `?pay=done` banner:
+
+```
+booking → authorized → paid → refunded
+```
+
+- **authorized** — portal LINE read "Card authorized", Authorize button gone
+- **paid** — `$137.00 · paid` after the founder's hand capture
+- **refunded** — see below; this is where a real bug was hiding
+
+So the chain Stripe webhook → Worker → Apps Script `payment_event` →
+`payment_status` → portal works end to end with real money. The 2026-09-17
+note calling the capture path unproven is now closed.
+
+**THE BUG THE REFUND FOUND — webhook r60 + portal.js.** `payment_status` has
+recorded `refunded` since r50, and PAYMENT_RANK has ranked it since r50. But
+**`payment.refunded` existed on no view model**, so both customer surfaces fell
+through to their blank case: after the refund the portal showed **"Not yet
+authorized" beside a live Authorize payment button**, on a booking that had
+been paid for and deliberately refunded. One tap would have put a fresh hold on
+the card.
+
+That is r50's own bug arriving through a different door — the button was made
+to vanish on a confirmed hold precisely so nobody could place a second one by
+accident. **The fix could not be portal-side alone**, which is worth
+remembering: the flag was never in the browser to render.
+
+`released` STAYS collapsed into blank and that is still correct. A voided hold
+means no money ever moved, so that customer can and should authorize again. A
+refund means money moved and a person chose to give it back. A test asserts the
+contrast so the new branch cannot swallow the old one.
+
+**Verified live after deploy** on the real refunded booking: `$137.00 ·
+refunded`, payment line "Refunded", the note about nothing further being owed,
+and **no pay button**. Then the test booking was cancelled so nothing
+dispatches for Mon Sep 28.
+
+**Tests.** Four new assertions across `portal.test.js` (the view model) and
+`portal-render.test.js` (the rendered page), all confirmed to fail against a
+mutation. The money-relevant one reports a pay-button count of **1** on a
+refunded booking when the guard is removed — the bug exactly as it shipped.
+The revision stamp check earned its keep: three suites went red because `doGet`
+still reported r59 against an r60 header.
+
+**STILL OPEN, and now sharper than before:**
+- **Nothing emails the founder when a card is authorized.** `handlePaymentEvent`
+  writes `payment_status` and sends nothing. Combined with the ~7-day hold
+  window that nothing watches, a hold can be placed, never announced, and
+  quietly expire.
+- The founder was about to start the Muse connector application. Meta runs
+  end-to-end testing on submissions, and a reviewer refunding a test purchase
+  is the obvious next thing they would do — which is exactly the path that was
+  broken until today.
+
+---
+
 ## Current work — 2026-09-24, Claude Code: driven as an agent, and two real bugs
 
 The founder asked whether an AI agent could complete the booking flow, ahead of
