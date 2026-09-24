@@ -6,10 +6,60 @@ assistant with no access to this repo. Self-contained on purpose.
 **Companion doc:** `/docs/SCHEMA.md` — authoritative for every column's meaning
 and who writes it. This file is the narrative; that file is the contract.
 
-**Latest session: 2026-09-23.** Jump to
+**Latest session: 2026-09-24.** Jump to
 [what changed on 2026-09-08 / 09](#session-2026-09-08--09) for the current
 state. The sections below it describe earlier builds and remain accurate
 except where a later section supersedes them.
+
+---
+
+## Current work — 2026-09-24, Codex: customer portal booking cards and time picker
+
+**Live on production from commit `b61a747`. No Apps Script, Worker, route,
+sheet or schema change.** The founder
+supplied the earlier portal mockups and asked for `/h` to adopt their clearer
+upcoming-booking card and time selection treatment without rearranging the
+rest of the portal.
+
+The Bookings tab now opens with a time-of-day greeting and short account
+overview. Every booking summary has a compact month/day calendar tile, service
+and schedule grouped together, and an explicit Upcoming / Complete / Cancelled
+state. Upcoming bookings expose two full-width actions while collapsed:
+`View details` toggles the existing details panel and `Reschedule` opens that
+same panel directly into the existing availability flow. The reschedule button
+does **not** introduce a second scheduling path; it calls the same warmed-slot,
+stale-slot and write-confirmation logic already used by `Change time`.
+Cancellation remains inside the expanded detail panel and keeps its two-step
+confirmation.
+
+The shared availability picker is restyled as responsive day cards: each day
+has a visible weekday plus month/day tile, with its real time buttons arranged
+below. This is still the single picker used by the public reservation flow,
+plan confirmation, move-plan changes and booking reschedules. The seven-day
+fold and every hidden tail slot remain intact. During this work a concurrent
+Claude session committed and pushed the related `serve-slots.js` accessible
+date naming plus the new date-part markup in `5851fc1`; the corresponding
+visual CSS and customer booking-card changes shipped in `b61a747`.
+
+Affected files: `portal.js`, `style.css`,
+`tests/portal-render.test.js`, `tests/portal-theme.test.js`, and
+`tests/static-checks.test.js`. `serve-slots.js` and
+`tests/slot-agenda-fold.test.js` are already part of `5851fc1` as noted above.
+New render-path assertions pin the date tile, status, View details toggle and
+card-level Reschedule path; theme assertions pin the card/action grid and
+responsive availability cards. Final `npm test`: **40 files, all passing**.
+
+Visual QA used localhost fixtures in the in-app browser at desktop and 430px
+phone widths. The navy rail, greeting, calendar tile, status badge and two
+actions remained clear on desktop; the phone card stacked metadata without
+overlap and kept both actions as large touch targets. The availability cards
+also remained legible at phone width. Temporary fixtures live outside the repo
+under `../social/portal-redesign-preview/` and do not ship.
+
+Cloudflare Workers Builds completed successfully for `b61a747`. Cache-busted
+production probes confirmed the greeting, booking date tile, card actions,
+reschedule hook and responsive scheduler styles in the live `portal.js` and
+`style.css`; `https://servecleaning.com/h` returned HTTP 200.
 
 ---
 
