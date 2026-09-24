@@ -472,9 +472,49 @@ console.log('\n=== 5b. a cold upstream must not cost the customer their slot lis
     /* The heal is the half that stops the cold start being permanent. */
     t('the upstream is warmed for the NEXT caller, not this one', ctx.pending.length > 0);
     await settle(ctx);
-    t('and that warm ping actually went to AVAILABILITY_URL',
-      calls.filter(c => c.target === ENV.AVAILABILITY_URL).length >= 2,
+    /* ONE call, not two. The request already in flight IS the heal — it is
+       never cancelled, it just stops being something the customer waits for.
+       Firing a second ping alongside it would double the load on the thing
+       that is already struggling to wake up. */
+    t('and it reuses the in-flight request rather than firing a second one',
+      calls.filter(c => c.target === ENV.AVAILABILITY_URL).length === 1,
       calls.filter(c => c.target === ENV.AVAILABILITY_URL).length);
+  }
+
+  /* ---- THE DEADLINE THAT DECIDES WHAT A CUSTOMER SEES ----
+     script.js aborts this fetch at AVAILABILITY_TIMEOUT_MS (5000) and drops to
+     the earlier/later radios. So the Worker answering at 8s is not a slow
+     answer, it is NO answer — the customer has already been moved on.
+
+     The first version of this fix waited the full upstream budget before
+     serving the cache. Every curl probe passed and a browser saw no change
+     whatsoever, because curl has no deadline and a customer does. This asserts
+     the property that failure mode violated. */
+  {
+    const kv = kvBox(), ctx = ctxBox();
+    kv.store.set('slots:last-good', feed);
+    /* An upstream slower than the client is willing to wait. */
+    const slow = async () => new Promise(r => setTimeout(() => r(new Response(feed, { status: 200 })), 9000));
+    const { worker } = loadWorker(slow);
+    const started = Date.now();
+    const res = await worker.fetch(get('/api/slots'), { ...ENV, PROPERTY_CACHE: kv }, ctx);
+    const took = Date.now() - started;
+    const body = await res.text();
+    t('a slow upstream is abandoned well inside the browser\'s 5s budget', took < 4000, took + 'ms');
+    t('and the customer still gets a real slot list', body === feed);
+    t('labelled stale, so the cause is visible', res.headers.get('X-Serve-Slots') === 'stale',
+      res.headers.get('X-Serve-Slots'));
+  }
+
+  /* The constant must stay under the client's, or the bug returns silently. */
+  {
+    const site = fs.readFileSync(path.join(REPO_ROOT, 'script.js'), 'utf8');
+    const clientMs = Number((site.match(/AVAILABILITY_TIMEOUT_MS\s*=\s*(\d+)/) || [])[1]);
+    const workerSrc = fs.readFileSync(path.join(REPO_ROOT, 'src', 'worker.js'), 'utf8');
+    const soft = Number((workerSrc.match(/SLOTS_SOFT_DEADLINE_MS\s*=\s*(\d+)/) || [])[1]);
+    t('the client abort is still 5s and still findable', clientMs > 0, clientMs);
+    t('the soft deadline sits inside it with room to spare',
+      soft > 0 && soft < clientMs - 1000, { soft, clientMs });
   }
 
   /* ---- nothing cached: retry once rather than give up on one cold start ---- */
@@ -1490,11 +1530,23 @@ console.log('\n=== UPSTREAM BUDGETS — a slow server is not a dead link (r50) =
     t(route + ' reads on the signed-link budget', budgetAt(marker) === 'page', budgetAt(marker));
   });
 
-  /* The feed keeps the short one ON PURPOSE — it has somewhere to fall back
-     to, and a customer typing an address should not wait 15s for a type-ahead. */
-  t('the availability feed still uses the short budget',
-    budgetAt('env.AVAILABILITY_URL, { method: "GET" }') === 'slots',
-    budgetAt('env.AVAILABILITY_URL, { method: "GET" }'));
+  /* THE FEED'S BUDGET STOPPED BEING THE CUSTOMER'S WAIT on 2026-09-24.
+     It used to be both: one attempt on the `slots` budget, and the customer
+     waited exactly that long. Now, when there is a cached feed to fall back
+     on, the upstream races SLOTS_SOFT_DEADLINE_MS and the request that loses
+     keeps running in the background to refresh the cache.
+
+     So the two are asserted separately, because they now protect different
+     things:
+       - the in-flight refresh gets the WARM budget, since nobody waits for it
+         and cutting it short would just leave the cache stale
+       - the no-cache path, which a customer DOES wait for, keeps `slots`
+       - what bounds the customer's wait is the soft deadline, asserted in
+         section 5b against the browser's own 5s abort */
+  t('the background refresh runs on the warm budget, not the customer\'s',
+    /const inFlight = relay\(env\.AVAILABILITY_URL, \{ method: "GET" \}, WARM_TIMEOUT_MS\)/.test(SRC));
+  t('the no-cache path a customer waits for keeps the short budget',
+    /No cache yet[\s\S]{0,400}?UPSTREAM_TIMEOUT_MS\.slots/.test(SRC));
   t('address type-ahead still uses the short budget',
     budgetAt('geocode/autocomplete') === 'slots', budgetAt('geocode/autocomplete'));
 }

@@ -114,6 +114,14 @@ const CAN_PRICE = (() => {
    the next poll than waited on. */
 const UPSTREAM_TIMEOUT_MS = { submit: 12000, slots: 8000, page: 15000, status: 10000 };
 
+/* HOW LONG /api/slots MAY SPEND BEFORE FALLING BACK TO THE CACHED FEED.
+   Deliberately well inside script.js's AVAILABILITY_TIMEOUT_MS (5000), because
+   that is the deadline that actually decides what a customer sees: the browser
+   aborts at five seconds and draws the earlier/later radios, so a reply at 8s
+   is not a slow reply, it is none. Raising this above the client's budget
+   silently restores the bug it was written to fix. */
+const SLOTS_SOFT_DEADLINE_MS = 2500;
+
 /* THE WARM PING'S BUDGET IS DELIBERATELY THE OPPOSITE OF THE ONES ABOVE. Those
    are short because a customer is waiting behind them. Nobody is waiting behind
    this one, and absorbing a slow cold start HERE is the entire point — a ping
@@ -394,6 +402,62 @@ async function handleSlots(request, env, ctx) {
     return json({ ok: false, error: "not_configured" }, 200);
   }
 
+  /* ---------------------------------------------------------------
+     THE CLIENT GIVES UP FIRST, AND THAT IS THE WHOLE CONSTRAINT.
+
+     script.js aborts this fetch after AVAILABILITY_TIMEOUT_MS — 5 seconds —
+     and drops to the earlier/later radios. So an answer that takes 8s is not
+     a slow answer, it is NO answer: the customer has already been moved on.
+
+     The first version of this fix waited the full upstream budget and only
+     then served the cached feed, which made every probe succeed under curl
+     and changed nothing whatsoever in a browser. Measuring with a client that
+     has no deadline is not measuring what customers hit.
+
+     So when there is a cached feed to fall back on, the upstream races a
+     deadline well inside the client's. Miss it and the cache is served at
+     once; the request already in flight is NOT cancelled — it rides on
+     waitUntil and populates the cache when it lands, which is what makes the
+     next caller fast. Nobody waits for it. */
+  const cachedEarly = await readLastSlots(env);
+
+  if (cachedEarly) {
+    const inFlight = relay(env.AVAILABILITY_URL, { method: "GET" }, WARM_TIMEOUT_MS);
+    const raced = await Promise.race([
+      inFlight,
+      new Promise(resolve => setTimeout(() => resolve(null), SLOTS_SOFT_DEADLINE_MS)),
+    ]);
+
+    if (raced && raced.ok) {
+      if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(saveLastSlots(env, raced.text));
+      return new Response(raced.text, {
+        status: 200,
+        headers: { "Content-Type": "application/json; charset=utf-8",
+                   "Cache-Control": "public, max-age=60",
+                   "X-Serve-Slots": "live" },
+      });
+    }
+
+    /* Either the deadline won or the upstream failed outright. Serve what we
+       have and let the in-flight request finish in the background. */
+    if (ctx && typeof ctx.waitUntil === "function") {
+      ctx.waitUntil(inFlight.then(r => { if (r && r.ok) return saveLastSlots(env, r.text); })
+                            .catch(() => {}));
+    }
+    return new Response(cachedEarly, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        /* NOT edge-cached: the next request must try the upstream again, and
+           by then the in-flight refresh above has usually landed. */
+        "Cache-Control": "no-store",
+        "X-Serve-Slots": "stale",
+      },
+    });
+  }
+
+  /* No cache yet — the first cold start after a deploy, or KV is down. There
+     is nothing to serve early, so the full budget is the right one to spend. */
   const upstream = await relay(env.AVAILABILITY_URL, { method: "GET" },
                               UPSTREAM_TIMEOUT_MS.slots);
 
@@ -416,61 +480,9 @@ async function handleSlots(request, env, ctx) {
 
   console.error("slots relay failed: " + upstream.error);
 
-  /* ---------------------------------------------------------------
-     MEASURED 2026-09-24: SEVEN OF TEN REQUESTS WERE FAILING HERE.
-
-     Every failure sat exactly on the 8s wall, every success came back in
-     about 1.2s. That is a cold start, not an outage — Apps Script takes
-     longer than this budget to wake even for a request that does no work,
-     which is already written down as a lesson elsewhere in this project.
-
-     The damage was invisible, which is why it lasted. The site treats
-     ok:false as "no live availability" and quietly draws the earlier/later
-     radios instead, so seven in ten customers reaching step 3 were offered
-     a vague morning/afternoon preference rather than a real bookable time,
-     and the page looked perfectly healthy the whole while.
-
-     RAISING THE TIMEOUT IS THE WRONG FIX and was rejected: it would make a
-     customer wait twenty seconds to find out, which is worse than the
-     fallback they get today. What follows serves the last good feed
-     instantly and then heals the upstream for whoever is next.
-
-     SERVING A SLIGHTLY STALE FEED IS SAFE HERE, and that is a property of
-     the system rather than an assumption. The feed is already five minutes
-     stale upstream and up to a minute more at the edge, so staleness is the
-     normal condition, not a new risk. And a slot that got taken in the
-     meantime does not produce a broken booking: the Apps Script takes the
-     booking and flags it SLOT CONFLICT for a human, on the stated grounds
-     that "a conflict shown to a customer for a slot the feed had just
-     published is our data problem charged to them".
-
-     The cap is what keeps that true. An hour-old feed is still a real list
-     of times a cleaner could come; a day-old one is fiction, and past its
-     TTL KV returns nothing and the honest fallback comes back. */
-  const cached = await readLastSlots(env);
-  if (cached) {
-    /* Wake the upstream for the NEXT caller rather than this one. Nobody is
-       waiting behind this ping, so it gets the warm budget, not the customer's.
-       This is what stops the cold start being permanent under light traffic. */
-    if (ctx && typeof ctx.waitUntil === "function") {
-      ctx.waitUntil(relay(env.AVAILABILITY_URL, { method: "GET" }, WARM_TIMEOUT_MS)
-        .then(r => { if (r.ok) return saveLastSlots(env, r.text); })
-        .catch(() => {}));
-    }
-    return new Response(cached, {
-      status: 200,
-      headers: {
-        "Content-Type": "application/json; charset=utf-8",
-        /* NOT edge-cached. A stale answer must not be handed to everyone for
-           the next minute — the whole point is that the next request tries the
-           upstream again, and by then the warm ping above has usually landed. */
-        "Cache-Control": "no-store",
-        /* So this is measurable from outside without reading a log. */
-        "X-Serve-Slots": "stale",
-      },
-    });
-  }
-
+  /* Both attempts are spent here only when there was nothing to fall back on.
+     See the race above for why the cached path never reaches this far, and for
+     the measurement that prompted all of it. */
   /* Nothing cached yet — the first cold start after a deploy, or KV is down.
      Only here is it worth making the caller wait for a second attempt, because
      the alternative is genuinely nothing. */
