@@ -13,6 +13,44 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-24, Codex: compact public booking scheduler
+
+**Live on production from commit `b1ffc24`. No Worker, Apps Script, route,
+sheet or schema change.** The founder rejected the portal-style day-card
+grid on the public booking form and chose a horizontal date slider instead.
+
+The public form now asks the shared `ServeSlots.picker` for a carousel layout:
+every available date remains built and reachable in a touch-scrollable rail
+with earlier/later arrow controls, while only the active day's real times open
+in one compact panel below. The first day opens by default. Changing the open
+day clears any time selected on another day so the form cannot silently submit
+a now-hidden choice. The customer portal still calls the picker's default
+layout and retains its existing day cards and seven-day fold.
+
+A centered `Request another time` action now sits immediately below the live
+times and reuses the existing fallback path to reveal the Earlier in the day /
+Later in the day choices. No new scheduling value or submission path was
+introduced.
+
+Affected files: `index.html`, `script.js`, `serve-slots.js`, `style.css`,
+`tests/slot-agenda-fold.test.js`, and `tests/static-checks.test.js`. Browser QA
+used temporary local fixtures at desktop and 390px phone widths; both showed a
+compact rail, one clear time panel and the centered alternate-time action.
+Those fixtures were removed. Final `npm test`: **40 files, all passing**.
+
+GitHub registered one `Workers Builds: serve` check for `b1ffc24`, and it
+completed successfully. Cache-busted production probes returned HTTP 200 and
+confirmed the carousel request, horizontal rail, date tabs, arrow controls,
+one-day time panel, hidden-selection guard and centered alternate-time action
+in the live HTML, JavaScript and stylesheet.
+
+The first full run also caught a pre-existing privacy-suite failure from a
+personal email address in the latest handoff entry. It was replaced with the
+non-identifying phrase “a founder-controlled company inbox”; this documentation
+cleanup is included in the local diff.
+
+---
+
 ## Current work — 2026-09-24, Codex: customer portal booking cards and time picker
 
 **Live on production from commit `b61a747`. No Apps Script, Worker, route,
@@ -158,8 +196,8 @@ deadline, 39 slots every time, max 2.86s.** Before: 3/10 succeeded at all.
 
 **A REAL BOOKING WAS PUT THROUGH, end to end, and everything worked.**
 `TEST BOOKING - Uriel (ignore)`, 700 Boylston St (the public library, chosen so
-no stranger's home got a PROPERTIES row), `uriel@servecos.com`, SMS consent
-left unticked, job `SRV-20260926-F37BF5`, $195.
+no stranger's home got a PROPERTIES row), a founder-controlled company inbox,
+SMS consent left unticked, job `SRV-20260926-F37BF5`, $195.
 
 - booking → "You're on the schedule", both emails inside 10 seconds
 - **customer confirmation carried the portal link** — the r58 promise, verified
