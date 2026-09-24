@@ -422,6 +422,109 @@ console.log('\n=== 5. GET /api/slots — degrades, never blocks booking ===');
   t('HEAD is allowed so monitors see a healthy endpoint', head.status === 200, head.status);
 }
 
+console.log('\n=== 5b. a cold upstream must not cost the customer their slot list ===');
+{
+  /* MEASURED IN PRODUCTION 2026-09-24: seven of ten requests to /api/slots
+     failed, every one of them exactly on the 8s wall, every success back in
+     about 1.2s. A cold start, not an outage.
+
+     It was invisible because the fallback is graceful: ok:false draws the
+     earlier/later radios, so seven in ten customers reaching step 3 were
+     offered a vague morning/afternoon preference instead of a real bookable
+     time, and the page looked healthy throughout. These tests exist so it
+     cannot go quiet again. */
+
+  const feed = '{"ok":true,"count":2,"slots":[{"date":"2026-08-07","time":"12:00 PM","open":1}]}';
+  const kvBox = () => {
+    const store = new Map();
+    return { store,
+      get: async (k) => (store.has(k) ? store.get(k) : null),
+      put: async (k, v) => { store.set(k, v); } };
+  };
+  const ctxBox = () => { const pending = []; return { pending, waitUntil: (p) => pending.push(p) }; };
+  const settle = async (c) => { await Promise.allSettled(c.pending); };
+
+  /* ---- a good answer is remembered ---- */
+  {
+    const kv = kvBox(), ctx = ctxBox();
+    const { worker } = loadWorker(ok(feed));
+    const res = await worker.fetch(get('/api/slots'), { ...ENV, PROPERTY_CACHE: kv }, ctx);
+    await settle(ctx);
+    t('a live feed is labelled live', res.headers.get('X-Serve-Slots') === 'live', res.headers.get('X-Serve-Slots'));
+    t('and is kept for the next cold start', kv.store.get('slots:last-good') === feed, kv.store.get('slots:last-good'));
+    t('kept OUT of the hot path — written via waitUntil', ctx.pending.length > 0);
+  }
+
+  /* ---- THE FIX: a cold upstream serves the last good feed instead of nothing ---- */
+  {
+    const kv = kvBox(), ctx = ctxBox();
+    kv.store.set('slots:last-good', feed);
+    const { worker, calls } = loadWorker(boom('ETIMEDOUT'));
+    const res = await worker.fetch(get('/api/slots'), { ...ENV, PROPERTY_CACHE: kv }, ctx);
+    const body = await res.text();
+    t('a timeout serves the cached feed, not ok:false', body === feed, body.slice(0, 60));
+    t('and says so, so it is measurable from outside',
+      res.headers.get('X-Serve-Slots') === 'stale', res.headers.get('X-Serve-Slots'));
+    /* A stale answer handed to everyone for the next minute would keep the
+       upstream cold and the staleness alive. */
+    t('a stale answer is never edge-cached',
+      /no-store/.test(res.headers.get('Cache-Control')), res.headers.get('Cache-Control'));
+    /* The heal is the half that stops the cold start being permanent. */
+    t('the upstream is warmed for the NEXT caller, not this one', ctx.pending.length > 0);
+    await settle(ctx);
+    t('and that warm ping actually went to AVAILABILITY_URL',
+      calls.filter(c => c.target === ENV.AVAILABILITY_URL).length >= 2,
+      calls.filter(c => c.target === ENV.AVAILABILITY_URL).length);
+  }
+
+  /* ---- nothing cached: retry once rather than give up on one cold start ---- */
+  {
+    const kv = kvBox(), ctx = ctxBox();
+    let n = 0;
+    const { worker } = loadWorker(async () => {
+      n++;
+      if (n === 1) throw new Error('ETIMEDOUT');
+      return new Response(feed, { status: 200 });
+    });
+    const res = await worker.fetch(get('/api/slots'), { ...ENV, PROPERTY_CACHE: kv }, ctx);
+    t('an empty cache retries once and succeeds', (await res.text()) === feed);
+    t('and labels itself a retry', res.headers.get('X-Serve-Slots') === 'retry', res.headers.get('X-Serve-Slots'));
+  }
+
+  /* ---- the honest failure still exists ---- */
+  {
+    const kv = kvBox(), ctx = ctxBox();
+    const { worker } = loadWorker(boom('ETIMEDOUT'));
+    const res = await worker.fetch(get('/api/slots'), { ...ENV, PROPERTY_CACHE: kv }, ctx);
+    const b = JSON.parse(await res.text());
+    t('nothing cached and both attempts down still degrades to ok:false',
+      res.status === 200 && b.ok === false, b);
+  }
+
+  /* ---- WHAT MUST NEVER BE CACHED ----
+     Caching an ok:false, or a Google sign-in page, would turn one bad minute
+     into a whole hour of one. */
+  for (const [label, bad] of [
+    ['an ok:false answer',      '{"ok":false,"error":"upstream_unreachable"}'],
+    ['an empty slot list',      '{"ok":true,"slots":[]}'],
+    ['a non-JSON body',         '<html>Sign in to continue</html>'],
+  ]) {
+    const kv = kvBox(), ctx = ctxBox();
+    const { worker } = loadWorker(ok(bad));
+    await worker.fetch(get('/api/slots'), { ...ENV, PROPERTY_CACHE: kv }, ctx);
+    await settle(ctx);
+    t(label + ' is never stored as last-good', kv.store.has('slots:last-good') === false, kv.store.get('slots:last-good'));
+  }
+
+  /* ---- no KV binding at all: behave exactly as before ---- */
+  {
+    const ctx = ctxBox();
+    const { worker } = loadWorker(ok(feed));
+    const res = await worker.fetch(get('/api/slots'), ENV, ctx);
+    t('works with no KV bound', (await res.text()) === feed);
+  }
+}
+
 console.log('\n=== 6. the front end and the Worker agree on the paths ===');
 {
   const site = fs.readFileSync(path.join(REPO_ROOT, 'script.js'), 'utf8');

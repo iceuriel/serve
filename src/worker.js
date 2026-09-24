@@ -167,7 +167,7 @@ export default {
     /* Stripe calls this one, not a browser. It is the only route whose caller
        proves itself with a signature rather than a ticket token. */
     if (url.pathname === "/api/stripe-webhook") return handleStripeWebhook(request, env);
-    if (url.pathname === "/api/slots")  return handleSlots(request, env);
+    if (url.pathname === "/api/slots")  return handleSlots(request, env, ctx);
     if (url.pathname === "/api/job")    return handleJob(request, env);
     if (url.pathname === "/api/photos") return handlePhotos(request, env);
     if (url.pathname === "/api/address")  return handleAddressSuggest(request, env, ctx);
@@ -381,7 +381,7 @@ async function sendBookingNotify(env, submissionId) {
 /* ============================================================
    GET /api/slots  ->  availability feed
    ============================================================ */
-async function handleSlots(request, env) {
+async function handleSlots(request, env, ctx) {
   /* HEAD as well as GET: uptime monitors and link checkers use it, and the
      runtime strips the body for us. Refusing it makes a healthy endpoint look
      broken to anything that probes with HEAD. */
@@ -397,20 +397,122 @@ async function handleSlots(request, env) {
   const upstream = await relay(env.AVAILABILITY_URL, { method: "GET" },
                               UPSTREAM_TIMEOUT_MS.slots);
 
-  if (!upstream.ok) {
-    console.error("slots relay failed: " + upstream.error);
-    return json({ ok: false, error: "upstream_unreachable" }, 200);
+  if (upstream.ok) {
+    /* Keep the last good answer. Written after the response is decided and
+       never awaited on the hot path — a KV hiccup must not cost a customer
+       their slot list when the feed itself answered perfectly. */
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(saveLastSlots(env, upstream.text));
+    return new Response(upstream.text, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        /* The feed is already cached 5 minutes upstream. A short edge cache
+           absorbs bursts without making slots any staler than they already are. */
+        "Cache-Control": "public, max-age=60",
+        "X-Serve-Slots": "live",
+      },
+    });
   }
 
-  return new Response(upstream.text, {
-    status: 200,
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      /* The feed is already cached 5 minutes upstream. A short edge cache
-         absorbs bursts without making slots any staler than they already are. */
-      "Cache-Control": "public, max-age=60",
-    },
-  });
+  console.error("slots relay failed: " + upstream.error);
+
+  /* ---------------------------------------------------------------
+     MEASURED 2026-09-24: SEVEN OF TEN REQUESTS WERE FAILING HERE.
+
+     Every failure sat exactly on the 8s wall, every success came back in
+     about 1.2s. That is a cold start, not an outage — Apps Script takes
+     longer than this budget to wake even for a request that does no work,
+     which is already written down as a lesson elsewhere in this project.
+
+     The damage was invisible, which is why it lasted. The site treats
+     ok:false as "no live availability" and quietly draws the earlier/later
+     radios instead, so seven in ten customers reaching step 3 were offered
+     a vague morning/afternoon preference rather than a real bookable time,
+     and the page looked perfectly healthy the whole while.
+
+     RAISING THE TIMEOUT IS THE WRONG FIX and was rejected: it would make a
+     customer wait twenty seconds to find out, which is worse than the
+     fallback they get today. What follows serves the last good feed
+     instantly and then heals the upstream for whoever is next.
+
+     SERVING A SLIGHTLY STALE FEED IS SAFE HERE, and that is a property of
+     the system rather than an assumption. The feed is already five minutes
+     stale upstream and up to a minute more at the edge, so staleness is the
+     normal condition, not a new risk. And a slot that got taken in the
+     meantime does not produce a broken booking: the Apps Script takes the
+     booking and flags it SLOT CONFLICT for a human, on the stated grounds
+     that "a conflict shown to a customer for a slot the feed had just
+     published is our data problem charged to them".
+
+     The cap is what keeps that true. An hour-old feed is still a real list
+     of times a cleaner could come; a day-old one is fiction, and past its
+     TTL KV returns nothing and the honest fallback comes back. */
+  const cached = await readLastSlots(env);
+  if (cached) {
+    /* Wake the upstream for the NEXT caller rather than this one. Nobody is
+       waiting behind this ping, so it gets the warm budget, not the customer's.
+       This is what stops the cold start being permanent under light traffic. */
+    if (ctx && typeof ctx.waitUntil === "function") {
+      ctx.waitUntil(relay(env.AVAILABILITY_URL, { method: "GET" }, WARM_TIMEOUT_MS)
+        .then(r => { if (r.ok) return saveLastSlots(env, r.text); })
+        .catch(() => {}));
+    }
+    return new Response(cached, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        /* NOT edge-cached. A stale answer must not be handed to everyone for
+           the next minute — the whole point is that the next request tries the
+           upstream again, and by then the warm ping above has usually landed. */
+        "Cache-Control": "no-store",
+        /* So this is measurable from outside without reading a log. */
+        "X-Serve-Slots": "stale",
+      },
+    });
+  }
+
+  /* Nothing cached yet — the first cold start after a deploy, or KV is down.
+     Only here is it worth making the caller wait for a second attempt, because
+     the alternative is genuinely nothing. */
+  const retry = await relay(env.AVAILABILITY_URL, { method: "GET" },
+                            UPSTREAM_TIMEOUT_MS.slots);
+  if (retry.ok) {
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(saveLastSlots(env, retry.text));
+    return new Response(retry.text, {
+      status: 200,
+      headers: { "Content-Type": "application/json; charset=utf-8",
+                 "Cache-Control": "public, max-age=60",
+                 "X-Serve-Slots": "retry" },
+    });
+  }
+
+  console.error("slots retry failed too: " + retry.error);
+  return json({ ok: false, error: "upstream_unreachable" }, 200);
+}
+
+
+/* The last feed that actually answered. Stored under its own key in the same
+   namespace the address cache uses — adding a binding means a dashboard step
+   the founder has to take, and this needs none. */
+const LAST_SLOTS_KEY = "slots:last-good";
+const LAST_SLOTS_TTL_S = 60 * 60;   // see the cap argument in handleSlots
+
+async function saveLastSlots(env, text) {
+  const kv = env.PROPERTY_CACHE;
+  if (!kv || !text) return;
+  /* Only store something that parses AND carries slots. Caching ok:false, or a
+     Google sign-in page, would turn one bad minute into a whole hour of it. */
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || parsed.ok !== true || !Array.isArray(parsed.slots) || !parsed.slots.length) return;
+    await kv.put(LAST_SLOTS_KEY, text, { expirationTtl: LAST_SLOTS_TTL_S });
+  } catch (_) { /* not JSON — nothing worth keeping */ }
+}
+
+async function readLastSlots(env) {
+  const kv = env.PROPERTY_CACHE;
+  if (!kv) return null;
+  return kv.get(LAST_SLOTS_KEY).catch(() => null);
 }
 
 
