@@ -52,6 +52,13 @@ the three documents carried their respective theme class and logo markup, and
 the stylesheet carried the protected-portal section, navy token and desktop
 rail rule.
 
+**Same-day follow-up, local at the time of this note:** the founder liked the
+new portal theme but found the `Incomplete` access tag too quiet. Its portal
+override now uses darker red text, a stronger red-tinted fill, a defined border
+and a small shadow so it reads clearly in both the navy desktop rail and the
+light mobile tab row. `tests/portal-theme.test.js` pins the high-contrast rule.
+Targeted test and final `npm test`: **40 files, all passing**.
+
 ---
 
 ## Current work — 2026-09-23, Claude Code: the portal explains itself

@@ -5366,6 +5366,14 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
 .portal-body .portal__access-flag.is-complete {
     background: var(--portal-green-soft);
 }
+.portal-body .portal__access-flag.is-incomplete {
+    padding: 0.22rem 0.55rem;
+    color: #8f1d18;
+    border: 1px solid #ef6b62;
+    background: #ffe5e2;
+    box-shadow: 0 2px 7px rgba(143, 29, 24, 0.16);
+    letter-spacing: 0.025em;
+}
 
 .portal-body :is(.tk-edit__box, .vp__pref) {
     border-color: var(--portal-line);

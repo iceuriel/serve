@@ -46,5 +46,7 @@ check('the job ticket stays a focused single-column card',
   /\.portal-body--ticket \.ticket\s*\{[\s\S]*max-width:\s*46rem/.test(css));
 check('keyboard focus remains visible in the new theme',
   /\.portal-body :is\([^}]+\):focus-visible\s*\{[\s\S]*outline:/.test(css));
+check('the incomplete access tag has a high-contrast fill and border',
+  /\.portal-body \.portal__access-flag\.is-incomplete\s*\{[^}]*color:\s*#8f1d18;[^}]*border:\s*1px solid #ef6b62;[^}]*background:\s*#ffe5e2;/.test(css));
 
 process.exit(failed ? 1 : 0);
