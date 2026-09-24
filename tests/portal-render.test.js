@@ -711,6 +711,54 @@ const PRETTY = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][D.getDay()] +
     byClass(H.body, 'pay__btn').length, 0);
   t('and renders without throwing', H.warns, []);
 
+  head('H2. A refunded visit is not the same as one never paid for');
+
+  /* FOUND 2026-09-24 by running a real card through authorize, capture and
+     refund on the live key. The sheet has recorded `refunded` since r50, but
+     it reached no view model, so the portal fell through to its blank case:
+     a customer who had paid $137 and been refunded was shown "Not yet
+     authorized" beside a live Authorize button.
+
+     That is r50's original bug arriving through a different door. The button
+     was removed the moment Stripe confirmed a hold precisely so nobody could
+     place a second one by accident — and here it sat, offering to charge a
+     card again for a booking somebody had deliberately refunded.
+
+     THE BUTTON ASSERTION IS THE ONE THAT MATTERS. Wording can be argued
+     about; a pay button on a refunded booking takes real money. */
+  const REFUNDED = model({ bookings: [
+    { bookingId: 'SRV-1', serviceLabel: 'First clean · deep clean',
+      serviceCode: 'CLEAN_DEEP', date: '2026-09-18', time: '9:00 AM',
+      price: 137, paid: false, authorized: false, refunded: true,
+      completed: '', rooms: [], partner: null },
+  ] });
+  const H2 = await boot(REFUNDED);
+
+  t('the payment line says refunded, not "Not yet authorized"',
+    byClass(H2.body, 'pb__line').some(n => /Refunded/.test(n._text || '')) ||
+    all(H2.body).some(n => (n._text || '') === 'Refunded'), true);
+  t('NO pay button — re-charging a refund is a person\'s decision',
+    byClass(H2.body, 'pay__btn').length, 0);
+  t('the summary line says so without opening anything',
+    byClass(H2.body, 'pb__price').some(n => /refunded/.test(n._text || '')), true);
+  t('and it explains that nothing further is owed',
+    byClass(H2.body, 'tk-note').some(n => /refunded/i.test(n._text || '') &&
+                                          /nothing further is owed/i.test(n._text || '')), true);
+  t('and renders without throwing', H2.warns, []);
+
+  /* THE CONTRAST THAT PROVES THE FLAG IS DOING WORK. A released hold means no
+     money ever moved, so that customer SHOULD still be asked to pay. If this
+     ever goes to 0, the refund branch has swallowed the blank one. */
+  const FREED = model({ bookings: [
+    { bookingId: 'SRV-1', serviceLabel: 'First clean · deep clean',
+      serviceCode: 'CLEAN_DEEP', date: '2026-09-18', time: '9:00 AM',
+      price: 137, paid: false, authorized: false, refunded: false,
+      completed: '', rooms: [], partner: null },
+  ] });
+  const HF = await boot(FREED);
+  t('a booking with no payment at all IS still offered the button',
+    byClass(HF.body, 'pay__btn').length, 1);
+
   head('I. Moving a visit to another time');
 
   const I = await boot(model());

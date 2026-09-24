@@ -1,7 +1,33 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-19  ·  master  ·  r59 — the plan box also asks one-off deep cleans
+ * VERSION STAMP:  2026-09-24  ·  master  ·  r60 — a refund is not "never paid"
+ *
+ * r60 = THE PORTAL CAN FINALLY TELL A REFUND FROM A BOOKING NEVER PAID FOR.
+ *       INCLUDES r59 BELOW — this is one paste, not two.
+ *
+ *       PASTE THIS BEFORE THE SITE IS PUSHED. portal.js starts reading
+ *       `booking.refunded`, and a script that does not send it leaves every
+ *       refunded booking reading "Not yet authorized" exactly as before —
+ *       the site change alone fixes nothing.
+ *
+ *       FOUND 2026-09-24 by running a real card all the way through on the
+ *       live key: authorize, capture, refund. The sheet has recorded
+ *       `refunded` since r50 and PAYMENT_RANK has ranked it since r50, but it
+ *       reached NO view model — `payment.refunded` did not exist, so both
+ *       customer surfaces fell through to their blank case. A customer who
+ *       had paid $137 and been refunded was shown "Not yet authorized" beside
+ *       a live Authorize button.
+ *
+ *       That is r50's own bug arriving through a different door. The button
+ *       was made to disappear on a confirmed hold precisely so nobody could
+ *       place a second one by accident; here it sat, offering to charge a card
+ *       again for a booking a human had deliberately refunded.
+ *
+ *       `released` STAYS collapsed into blank and that is still correct — a
+ *       voided hold means no money ever moved, so that customer can and
+ *       should authorize again. A refund means money moved and a person chose
+ *       to give it back. Only one of those is quietly re-payable.
  *
  * r59 = THE PORTAL'S PLAN BOX NOW ASKS ONE-TIME DEEP-CLEAN CUSTOMERS TOO.
  *       INCLUDES r58 BELOW — this is one paste, not two.
@@ -1876,7 +1902,7 @@ function routeGet(e) {
      health stamp below rather than creating anything. */
   if (p.booking) return handleBookingStatus(p.booking);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-19 r59" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-24 r60" });
 }
 
 
@@ -2404,13 +2430,23 @@ function bookingFromRow(h, values, tz) {
        person who still needs it. So `paid` keeps its exact old meaning — money
        actually taken — and `authorized` is a new, separate field.
 
-       `released` and `refunded` are deliberately NEITHER. A voided hold is a
-       booking back to needing authorization, which is the same thing the blank
-       cell means, and every surface should treat it that way. */
+       `released` IS deliberately NEITHER. A voided hold is a booking back to
+       needing authorization, which is the same thing the blank cell means, and
+       every surface should treat it that way.
+
+       `refunded` WAS treated the same way and should not have been (r60).
+       A released hold means no money ever moved; a refund means money moved
+       and a person decided to hand it back. Collapsing the two told a
+       customer who had paid and been refunded that they were "Not yet
+       authorized", and put a live Authorize button in front of them — a
+       second hold on a booking somebody had deliberately refunded, which is
+       the exact failure r50's write-back existed to end, arriving through a
+       different door. So it gets its own flag. */
     payment: {
       status:     String(f("payment_status") || ""),
       paid:       String(f("payment_status") || "").toLowerCase() === "paid",
       authorized: String(f("payment_status") || "").toLowerCase() === "authorized",
+      refunded:   String(f("payment_status") || "").toLowerCase() === "refunded",
       /* INTERNAL. The Stripe PaymentIntent behind the state above — the handle
          that ties this row to the dashboard, and what the Worker voids when a
          customer cancels. Reaches no view model; see the whitelists. */
@@ -5990,9 +6026,12 @@ function buildPortalModel(ss, contact) {
            start showing cancelled visits as live ones the day they did. */
         cancelled:    cancelled,
         price:        b.price.final || b.price.quoted,
-        /* r50. See the client ticket's copy of this for why two fields. */
+        /* r50. See the client ticket's copy of this for why two fields.
+           r60 adds a third: a refund is not the same as never having paid,
+           and the portal could not tell them apart. */
         paid:         b.payment.paid,
         authorized:   b.payment.authorized,
+        refunded:     b.payment.refunded,
         addOns:       b.addOns,
         propertyLabel: [b.address, b.unit].filter(Boolean).join(", "),
         editable:     !done && !cancelled,

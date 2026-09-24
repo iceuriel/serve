@@ -2445,9 +2445,34 @@ head('r50. Three payment states, because two of them tell a customer a lie');
   const freed = row('SRV-20260928-FREED');
   t('a RELEASED hold is back to neither', freed.paid === false && freed.authorized === false, freed);
 
-  t('all four are booleans, never the sheet wording',
-    [unpaid, held, paid, freed].every(b =>
-      typeof b.paid === 'boolean' && typeof b.authorized === 'boolean'), true);
+  /* r60. A REFUND IS NOT A RELEASED HOLD, and collapsing them was a real bug
+     found on 2026-09-24 by running a real card through authorize, capture and
+     refund. The sheet has recorded `refunded` since r50, but it reached no
+     view model — so the portal showed a customer who had paid and been
+     refunded "Not yet authorized", with a live Authorize button offering to
+     put a fresh hold on a booking somebody had deliberately refunded.
+
+     A released hold means no money ever moved. A refund means money moved and
+     a person decided to give it back. Only one of those is quietly
+     re-payable, which is why this needs its own flag rather than the blank. */
+  seedJob('SRV-20260929-BACK', 'pay@example.com', 'PROP-PAY',
+          { payment_status: 'refunded', payment_ref: 'pi_back' });
+  const PP2 = get({ portal: 'CON-PAY', t: TOK });
+  const back = (PP2.bookings || []).find(b => b.bookingId === 'SRV-20260929-BACK') || {};
+
+  t('a REFUNDED booking says so', back.refunded === true, back.refunded);
+  t('and is not reported as paid — the money went back',
+    back.paid === false, back.paid);
+  t('nor as authorized — there is no hold either', back.authorized === false, back.authorized);
+  /* The distinction the whole flag exists for. */
+  t('a released hold is NOT marked refunded — no money ever moved there',
+    freed.refunded === false, freed.refunded);
+  t('and an untouched booking is not either', unpaid.refunded === false, unpaid.refunded);
+
+  t('all five are booleans, never the sheet wording',
+    [unpaid, held, paid, freed, back].every(b =>
+      typeof b.paid === 'boolean' && typeof b.authorized === 'boolean' &&
+      typeof b.refunded === 'boolean'), true);
 
   /* THE INTERNAL HANDLE MUST NOT TRAVEL. View models are whitelists built up
      field by field; payment_ref is used by the cancellation path and by

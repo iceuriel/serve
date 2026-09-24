@@ -1539,7 +1539,9 @@
            so it has to distinguish money TAKEN from money merely held — those
            mean different things to somebody checking their balance. */
         if (price) sum.appendChild(el('span', 'pb__price',
-            price + (b.paid ? ' · paid' : b.authorized ? ' · authorized' : '')));
+            price + (b.paid ? ' · paid'
+                   : b.authorized ? ' · authorized'
+                   : b.refunded ? ' · refunded' : '')));
         det.appendChild(sum);
         card.appendChild(det);
 
@@ -1576,25 +1578,48 @@
             add(inner, partnerNotes(b));
             add(inner, line('Completed', prettyDate(b.completed) || b.completed));
             add(inner, line('Payment', b.paid ? 'Paid'
-                                     : b.authorized ? 'Card authorized' : 'Due'));
+                                     : b.authorized ? 'Card authorized'
+                                     : b.refunded ? 'Refunded' : 'Due'));
             inner.appendChild(el('p', 'tk-note',
                 'Finished bookings are a record — they can no longer be edited.'));
             det.appendChild(inner);
             return card;
         }
 
-        /* THREE STATES, AND THE MIDDLE ONE IS THE WHOLE POINT (r50).
-           Before payment state was written back, this page could only say
-           "Paid" or "Not yet authorized" — so a customer who had authorized
-           two minutes earlier was told they had not, with the button still
-           there inviting a second hold on the same card. The button now
-           disappears the moment Stripe confirms the hold, which is the only
-           version of this a real customer can trust. */
+        /* FOUR STATES, AND THE TWO MIDDLE ONES ARE THE WHOLE POINT.
+           Before payment state was written back (r50), this page could only
+           say "Paid" or "Not yet authorized" — so a customer who had
+           authorized two minutes earlier was told they had not, with the
+           button still there inviting a second hold on the same card. The
+           button disappears the moment Stripe confirms the hold, which is the
+           only version of this a real customer can trust.
+
+           REFUNDED IS THE SAME BUG WEARING A DIFFERENT HAT, found 2026-09-24
+           by running a real card all the way through. The sheet has recorded
+           `refunded` since r50, but it reached no view model, so a customer
+           who had paid and been refunded was shown "Not yet authorized" and a
+           live Authorize button — an invitation to put a fresh hold on a
+           booking somebody had deliberately refunded.
+
+           A REFUND IS NOT A RELEASED HOLD, and that is why it gets its own
+           line rather than reusing the blank one. A released hold means no
+           money ever moved; a refund means money moved and a person decided
+           to hand it back. Only one of those should be quietly re-payable. */
         add(inner, line('Payment', b.paid ? 'Paid'
                                  : b.authorized ? 'Card authorized'
+                                 : b.refunded ? 'Refunded'
                                  : 'Not yet authorized'));
         if (b.authorized) add(inner, authorizedNote(b));
-        if (!b.paid && !b.authorized && Number(b.price) > 0) inner.appendChild(payBlock(b));
+        if (b.refunded) inner.appendChild(el('p', 'tk-note',
+            'This visit was paid for and the payment has been refunded. ' +
+            'Nothing further is owed. Get in touch if you would like to book it again.'));
+        /* NOT offered after a refund. Re-charging a booking a human chose to
+           refund is a decision for a person, not a button a customer can press
+           by accident on the page that just told them they got their money
+           back. */
+        if (!b.paid && !b.authorized && !b.refunded && Number(b.price) > 0) {
+            inner.appendChild(payBlock(b));
+        }
 
         /* Who is coming. The portal is the link the confirmation email
            actually sends, so this is the surface that has to answer it —
