@@ -76,6 +76,24 @@ NEW_CLASSES.forEach(c => {
 });
 ok('all ' + NEW_CLASSES.length + ' new classes used and styled');
 
+/* The public reservation card is too narrow for the portal's full day-card
+   grid. It must explicitly request the compact date rail, while the shared
+   picker keeps its default for portal callers. */
+head('Public scheduler uses the compact date carousel');
+/ServeSlots\.picker\(slots, null, \{ layout: 'carousel' \}\)/.test(js)
+  ? ok('the booking form requests the carousel layout')
+  : fail('the booking form no longer requests the carousel layout');
+/\.slotpick--carousel\s*\{[^}]*display:\s*block;/.test(css) &&
+/\.slotpick__viewport\s*\{[^}]*overflow-x:\s*auto;/.test(css) &&
+/\.slotpick--carousel \.scheduler-day--panel\s*\{/.test(css)
+  ? ok('the date rail scrolls horizontally and opens one time panel')
+  : fail('the compact carousel styling is incomplete');
+html.includes('id="scheduler-fallback-link">Request another time</button>') &&
+/scheduler-fallback-link'[\s\S]*setTimeUi\('fallback'\)/.test(js) &&
+/\.scheduler-fallback-line\s*\{[^}]*justify-content:\s*center;/.test(css)
+  ? ok('the centered alternate-time action opens the earlier/later choices')
+  : fail('the alternate-time action is missing, off-center, or disconnected');
+
 /* 5a. How Serve Works is a grid on desktop, and the areas must all exist.
    Naming an area in grid-template-areas but never assigning it silently drops
    the element into an implicit row instead of erroring. */

@@ -32,6 +32,7 @@
     /* Must not exceed DAYS_AHEAD in /apps-script/availability.gs. */
     var HORIZON_DAYS = 21;
     var TIMEOUT_MS   = 8000;
+    var pickerSerial = 0;
 
     /* How many DAYS WITH OPEN TIMES the agenda shows before it asks. Days, not
        slots: a day with six times and a day with one cost the same heading and
@@ -131,27 +132,82 @@
      * own delegated click handler needs, and attaching one anyway would mean
      * two handlers fighting over the same click.
      *
-     * PAST THE SEVENTH DAY THE AGENDA FOLDS. The extra days are BUILT AND
-     * HIDDEN, never withheld: their chips carry the same listeners and answer
-     * the same queries as the visible ones, so revealing them is one property
-     * flip and no re-render. Building them lazily would mean a chip that
-     * exists in two versions — one wired, one not — which is the shape of a
-     * slot a customer can press without anything happening.
+     * In the default portal layout, the agenda folds past the seventh day. The
+     * extra days are BUILT AND HIDDEN, never withheld: their chips carry the
+     * same listeners and answer the same queries as the visible ones. The
+     * booking form's carousel instead keeps every date in its horizontal rail
+     * and opens one day's times at a time. Both variants build every real slot
+     * up front, so neither can reveal an unwired placeholder later.
      */
-    function picker(slots, onPick) {
+    function picker(slots, onPick, options) {
+        options = options || {};
+        var carousel = options.layout === 'carousel';
         var wrap = document.createElement('div');
-        wrap.className = 'slotpick';
+        wrap.className = 'slotpick' + (carousel ? ' slotpick--carousel' : '');
+
+        /* The public booking form needs to fit inside a 600px card, where the
+           portal's full day cards turn into a tall wall of repeated boxes.
+           Its carousel is an alternate VIEW of the same slots: every date is
+           in one horizontally scrollable rail and only the active date's
+           times are open below it. The default remains the portal layout. */
+        var dateTrack = null, panels = null, railViewport = null;
+        if (carousel) {
+            pickerSerial += 1;
+            var rail = document.createElement('div');
+            rail.className = 'slotpick__rail';
+
+            var previous = document.createElement('button');
+            previous.type = 'button';
+            previous.className = 'slotpick__arrow slotpick__arrow--previous';
+            previous.textContent = '\u2039';
+            previous.setAttribute('aria-label', 'See earlier available days');
+
+            railViewport = document.createElement('div');
+            railViewport.className = 'slotpick__viewport';
+            railViewport.setAttribute('aria-label', 'Available days');
+
+            dateTrack = document.createElement('div');
+            dateTrack.className = 'slotpick__track';
+            dateTrack.setAttribute('role', 'tablist');
+            railViewport.appendChild(dateTrack);
+
+            var next = document.createElement('button');
+            next.type = 'button';
+            next.className = 'slotpick__arrow slotpick__arrow--next';
+            next.textContent = '\u203a';
+            next.setAttribute('aria-label', 'See later available days');
+
+            function moveRail(direction) {
+                var distance = Math.max(220, (railViewport.clientWidth || 320) * 0.78);
+                if (typeof railViewport.scrollBy === 'function') {
+                    railViewport.scrollBy({ left: direction * distance, behavior: 'smooth' });
+                } else {
+                    railViewport.scrollLeft = (railViewport.scrollLeft || 0) + direction * distance;
+                }
+            }
+            previous.addEventListener('click', function () { moveRail(-1); });
+            next.addEventListener('click', function () { moveRail(1); });
+
+            rail.appendChild(previous);
+            rail.appendChild(railViewport);
+            rail.appendChild(next);
+            wrap.appendChild(rail);
+
+            panels = document.createElement('div');
+            panels.className = 'slotpick__panels';
+            wrap.appendChild(panels);
+        }
 
         var currentDate = null, rowEl = null;
-        var days = [];
+        var days = [], dayButtons = [];
         (slots || []).forEach(function (s) {
             if (s.date !== currentDate) {
                 currentDate = s.date;
                 var day = document.createElement('div');
-                day.className = 'scheduler-day';
+                day.className = 'scheduler-day' + (carousel ? ' scheduler-day--panel' : '');
                 days.push(day);
-                var head = document.createElement('div');
-                head.className = 'scheduler-day__head';
+                var head = document.createElement(carousel ? 'button' : 'div');
+                head.className = 'scheduler-day__head' + (carousel ? ' slotpick__day-button' : '');
                 head.setAttribute('aria-label', formatSlotDate(s.date));
                 var parts = slotDateParts(s.date);
                 var weekday = document.createElement('span');
@@ -171,9 +227,34 @@
                 head.appendChild(date);
                 rowEl = document.createElement('div');
                 rowEl.className = 'scheduler-day__times';
-                day.appendChild(head);
-                day.appendChild(rowEl);
-                wrap.appendChild(day);
+                if (carousel) {
+                    var dayNumber = days.length;
+                    var tabId = 'serve-slot-day-' + pickerSerial + '-' + dayNumber;
+                    var panelId = 'serve-slot-times-' + pickerSerial + '-' + dayNumber;
+                    head.type = 'button';
+                    head.setAttribute('id', tabId);
+                    head.setAttribute('role', 'tab');
+                    head.setAttribute('aria-controls', panelId);
+                    head.setAttribute('aria-selected', 'false');
+                    head.setAttribute('data-date', s.date);
+                    day.setAttribute('id', panelId);
+                    day.setAttribute('role', 'tabpanel');
+                    day.setAttribute('aria-labelledby', tabId);
+
+                    var timeLabel = document.createElement('p');
+                    timeLabel.className = 'slotpick__times-label';
+                    timeLabel.textContent = 'Available times for ' + formatSlotDate(s.date);
+                    day.appendChild(timeLabel);
+                    day.appendChild(rowEl);
+                    day.hidden = true;
+                    dateTrack.appendChild(head);
+                    panels.appendChild(day);
+                    dayButtons.push(head);
+                } else {
+                    day.appendChild(head);
+                    day.appendChild(rowEl);
+                    wrap.appendChild(day);
+                }
             }
             var chip = document.createElement('button');
             chip.type = 'button';
@@ -214,10 +295,27 @@
             rowEl.appendChild(chip);
         });
 
-        /* Only fold when there is something to fold. Exactly VISIBLE_DAYS days
-           leaves `rest` empty and the agenda is drawn whole, with no button
-           offering nothing. */
-        var rest = days.slice(VISIBLE_DAYS);
+        if (carousel && days.length) {
+            function activateDay(index) {
+                days.forEach(function (d, i) { d.hidden = i !== index; });
+                dayButtons.forEach(function (b, i) {
+                    var active = i === index;
+                    b.className = 'scheduler-day__head slotpick__day-button' +
+                        (active ? ' is-active' : '');
+                    b.setAttribute('aria-selected', active ? 'true' : 'false');
+                });
+            }
+            dayButtons.forEach(function (button, index) {
+                button.addEventListener('click', function () { activateDay(index); });
+            });
+            activateDay(0);
+        }
+
+        /* Only fold the portal/card layout when there is something to fold.
+           The booking carousel contains every day in its horizontal rail, so
+           it never needs a second "show more" interaction. Exactly
+           VISIBLE_DAYS days leaves `rest` empty and the agenda is drawn whole. */
+        var rest = carousel ? [] : days.slice(VISIBLE_DAYS);
         if (rest.length) {
             rest.forEach(function (d) { d.hidden = true; });
 

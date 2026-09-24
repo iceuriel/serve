@@ -1883,6 +1883,154 @@ a {
     box-shadow: 0 5px 12px rgba(7, 37, 66, 0.15);
 }
 
+/* The public booking form uses the same real slot controls in a denser shape:
+   dates travel horizontally, while only the chosen day's times open below.
+   The plain .slotpick card grid above remains the portal presentation. */
+.slotpick--carousel {
+    display: block;
+}
+
+.slotpick__rail {
+    display: grid;
+    grid-template-columns: 2.5rem minmax(0, 1fr) 2.5rem;
+    align-items: stretch;
+    gap: 0.5rem;
+}
+
+.slotpick__viewport {
+    min-width: 0;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+}
+.slotpick__viewport::-webkit-scrollbar { display: none; }
+
+.slotpick__track {
+    display: flex;
+    width: max-content;
+    min-width: 100%;
+    gap: 0.5rem;
+}
+
+.slotpick__arrow {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    padding: 0;
+    border: 1px solid #cbd8e5;
+    border-radius: 10px;
+    background: #fff;
+    color: var(--color-dark);
+    font-family: var(--flow-sans);
+    font-size: 1.75rem;
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: 0 2px 7px rgba(7, 37, 66, 0.06);
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.slotpick__arrow:hover {
+    border-color: #9bbbd6;
+    background: #eef7ff;
+    color: #075aa6;
+}
+.slotpick__arrow:focus-visible,
+.slotpick__day-button:focus-visible {
+    outline: 2px solid var(--color-dark);
+    outline-offset: 2px;
+}
+
+.slotpick--carousel .slotpick__day-button {
+    display: flex;
+    flex: 0 0 4.65rem;
+    min-height: 5.15rem;
+    margin: 0;
+    padding: 0.65rem 0.45rem;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.42rem;
+    border: 1px solid #d7e2ec;
+    border-radius: 11px;
+    background: #fff;
+    color: var(--color-dark);
+    cursor: pointer;
+    scroll-snap-align: start;
+    transition: border-color 0.15s, background 0.15s, color 0.15s,
+                box-shadow 0.15s, transform 0.15s;
+}
+.slotpick--carousel .slotpick__day-button:hover {
+    border-color: #9bc7e9;
+    background: #f1f8fe;
+}
+.slotpick--carousel .slotpick__day-button.is-active {
+    border-color: var(--color-dark);
+    background: var(--color-dark);
+    color: #fff;
+    box-shadow: 0 6px 15px rgba(7, 37, 66, 0.16);
+}
+.slotpick--carousel .slotpick__day-button.has-selection {
+    box-shadow: 0 0 0 2px #8fc7f2, 0 6px 15px rgba(7, 37, 66, 0.16);
+}
+.slotpick--carousel .scheduler-day__weekday {
+    color: inherit;
+    font-size: 0.76rem;
+    line-height: 1;
+}
+.slotpick--carousel .scheduler-day__date {
+    width: auto;
+    height: auto;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+}
+.slotpick--carousel .scheduler-day__month { font-size: 0.56rem; }
+.slotpick--carousel .scheduler-day__number {
+    margin-top: 0.15rem;
+    font-size: 1.28rem;
+}
+
+.slotpick__panels {
+    margin-top: 0.75rem;
+}
+.slotpick--carousel .scheduler-day--panel {
+    padding: 1rem;
+    border-color: #d7e2ec;
+    border-radius: 11px;
+    background: #fff;
+    box-shadow: 0 3px 12px rgba(7, 37, 66, 0.05);
+}
+.slotpick__times-label {
+    margin: 0 0 0.7rem;
+    font-family: var(--flow-sans);
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--color-text-muted);
+}
+.slotpick--carousel .scheduler-day__times {
+    grid-template-columns: repeat(auto-fit, minmax(7.25rem, 1fr));
+    gap: 0.55rem;
+}
+.slotpick--carousel .slot-chip {
+    min-height: 2.85rem;
+    padding: 0.7rem 0.75rem;
+    white-space: nowrap;
+}
+
+@media (max-width: 420px) {
+    .slotpick__rail {
+        grid-template-columns: 2.2rem minmax(0, 1fr) 2.2rem;
+        gap: 0.35rem;
+    }
+    .slotpick--carousel .slotpick__day-button {
+        flex-basis: 4.2rem;
+        min-height: 4.85rem;
+    }
+    .slotpick--carousel .scheduler-day--panel { padding: 0.8rem; }
+}
+
 /* "Show N more days" — the folded half of the agenda, one click away.
    DASHED, AND NOT SHAPED LIKE A CHIP. It sits directly under a row of solid
    bordered chips that are all pressable times; if it read as one more chip,
@@ -1920,11 +2068,18 @@ a {
 }
 
 .scheduler-fallback-line {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    flex-wrap: wrap;
     font-family: var(--flow-sans);
-    font-size: 0.95rem;
+    font-size: 0.86rem;
     color: var(--color-text-muted);
-    margin-top: 1.1rem;
+    margin: 0.9rem 0 0;
+    text-align: center;
 }
+.scheduler-fallback-line[hidden] { display: none; }
 
 .scheduler-fallback-link {
     background: none;
@@ -1937,6 +2092,26 @@ a {
     cursor: pointer;
 }
 .scheduler-fallback-link:hover { color: var(--color-dark); }
+
+.scheduler-fallback-line .scheduler-fallback-link {
+    padding: 0.38rem 0.65rem;
+    border: 1px solid #cbd8e5;
+    border-radius: 999px;
+    background: #fff;
+    color: #075aa6;
+    font-size: 0.84rem;
+    font-weight: 700;
+    text-decoration: none;
+}
+.scheduler-fallback-line .scheduler-fallback-link:hover {
+    border-color: #9bc7e9;
+    background: #eef7ff;
+    color: var(--color-dark);
+}
+.scheduler-fallback-line .scheduler-fallback-link:focus-visible {
+    outline: 2px solid var(--color-dark);
+    outline-offset: 2px;
+}
 
 /* Link down to the "After you book" section */
 .reserve-aftercare {

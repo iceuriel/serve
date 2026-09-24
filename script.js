@@ -1486,8 +1486,10 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
         $('scheduler-live').hidden     = mode !== 'scheduler';
     }
 
-    /* Build the agenda: one section per day, one chip per open time.
-       Drawn by serve-slots.js so /h and this page render the same thing.
+    /* Build the agenda from the same slots and controls used by /h, but ask
+       for the booking form's compact date carousel. The portal keeps the
+       default day-card layout; this 600px form gets one horizontal date rail
+       and one open set of times instead of a wall of cards.
 
        NO onPick ARGUMENT ON PURPOSE. This page has its own delegated click
        handler on #scheduler-days (below), which also drives `state` and the
@@ -1496,7 +1498,7 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
     function renderSchedulerDays(slots) {
         const container = $('scheduler-days');
         container.innerHTML = '';
-        container.appendChild(ServeSlots.picker(slots));
+        container.appendChild(ServeSlots.picker(slots, null, { layout: 'carousel' }));
     }
 
     function clearSlotSelection() {
@@ -1506,9 +1508,23 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
             c.classList.remove('is-selected');
             c.setAttribute('aria-pressed', 'false');
         });
+        document.querySelectorAll('.slotpick__day-button.has-selection').forEach(day => {
+            day.classList.remove('has-selection');
+        });
     }
 
     $('scheduler-days').addEventListener('click', (e) => {
+        const dayButton = e.target.closest('.slotpick__day-button');
+        if (dayButton) {
+            /* A hidden selection is worse than no selection. If somebody
+               opens a different day, make them choose one of the times now
+               visible instead of silently submitting the previous date. */
+            const openedDate = dayButton.getAttribute('data-date');
+            if (state.slotDate && state.slotDate !== openedDate) clearSlotSelection();
+            reserveError.textContent = '';
+            return;
+        }
+
         const chip = e.target.closest('.slot-chip');
         if (!chip) return;
         clearSlotSelection();
@@ -1516,6 +1532,11 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
         chip.setAttribute('aria-pressed', 'true');
         state.slotDate = chip.getAttribute('data-date');
         state.slotTime = chip.getAttribute('data-time');
+        document.querySelectorAll('.slotpick__day-button').forEach(day => {
+            if (day.getAttribute('data-date') === state.slotDate) {
+                day.classList.add('has-selection');
+            }
+        });
         reserveError.textContent = '';
     });
 

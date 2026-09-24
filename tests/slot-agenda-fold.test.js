@@ -231,5 +231,33 @@ head('F10  an empty feed is still an empty agenda');
   });
 }
 
+head('F11  the booking form carousel shows one day of times at a time');
+{
+  const w = picker(feedOf(21), null, { layout: 'carousel' });
+  const days = all(w, 'scheduler-day');
+  const buttons = all(w, 'slotpick__day-button');
+  const arrows = all(w, 'slotpick__arrow');
+
+  t('all 21 available dates are in the horizontal rail', buttons.length, 21);
+  t('all 42 real time controls are built', all(w, 'slot-chip').length, 42);
+  t('only the first day\'s panel is open initially', shown(w, 'scheduler-day').length, 1);
+  t('so only its two times are visible', shown(w, 'slot-chip').length, 2);
+  t('the carousel needs no vertical show-more control', all(w, 'slotpick__more').length, 0);
+  t('its first date is the selected tab',
+    [buttons[0].getAttribute('aria-selected'), buttons[1].getAttribute('aria-selected')],
+    ['true', 'false']);
+  t('both rail arrows are non-submit buttons with useful names',
+    arrows.map((b) => [b.type, b.getAttribute('aria-label')]),
+    [['button', 'See earlier available days'], ['button', 'See later available days']]);
+
+  click(buttons[1]);
+  t('clicking a date closes the first panel and opens that date',
+    [days[0].hidden, days[1].hidden], [true, false]);
+  t('the active date state follows it',
+    [buttons[0].getAttribute('aria-selected'), buttons[1].getAttribute('aria-selected')],
+    ['false', 'true']);
+  t('still only one compact set of times is visible', shown(w, 'slot-chip').length, 2);
+}
+
 console.log(bad ? '\n' + bad + ' FAILED' : '\nall good');
 process.exit(bad ? 1 : 0);
