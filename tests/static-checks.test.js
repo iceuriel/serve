@@ -543,6 +543,7 @@ const SERIF_ALLOWED = [
   '.nav__logo',            // the wordmark, matching the logo SVG
   '.footer__logo',         // the same wordmark in the footer
   '.ticket__brand',        // the ticket pages' header (the front page's sample ticket overrides it)
+  '.portal__greeting',     // protected customer portal dashboard greeting
   '.serve-page-head h1',   // the /pricing and /services page titles
   '.hero__headline',       // the hero headline, every skin (2026-09-14, founder's call)
   '.hero__lead',           // "Serve handles the rest…", set like the headline (2026-09-14)

@@ -48,5 +48,11 @@ check('keyboard focus remains visible in the new theme',
   /\.portal-body :is\([^}]+\):focus-visible\s*\{[\s\S]*outline:/.test(css));
 check('the incomplete access tag has a high-contrast fill and border',
   /\.portal-body \.portal__access-flag\.is-incomplete\s*\{[^}]*color:\s*#8f1d18;[^}]*border:\s*1px solid #ef6b62;[^}]*background:\s*#ffe5e2;/.test(css));
+check('customer bookings use a compact calendar tile and explicit action row',
+  /\.pb__date\s*\{[^}]*width:\s*3\.5rem;[^}]*height:\s*3\.5rem;/.test(css) &&
+  /\.pb__actions\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/.test(css));
+check('availability is presented as responsive day cards',
+  /\.slotpick\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*repeat\(auto-fit, minmax\(10\.5rem, 1fr\)\)/.test(css) &&
+  /\.scheduler-day__date\s*\{[^}]*width:\s*3\.15rem;[^}]*height:\s*3\.15rem;/.test(css));
 
 process.exit(failed ? 1 : 0);

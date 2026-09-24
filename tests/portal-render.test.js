@@ -617,6 +617,33 @@ const PRETTY = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][D.getDay()] +
 
   const G = await boot(model());
 
+  t('the main booking card exposes clear top-level actions',
+    byClass(G.body, 'pb__action').map(n => n._text),
+    ['View details', 'Reschedule']);
+  t('the booking date is split into a compact month and day tile',
+    [textOf(G.body, 'pb__month'), textOf(G.body, 'pb__day')],
+    ['SEP', '18']);
+  t('the upcoming state is visible without opening the booking',
+    textOf(G.body, 'pb__status--upcoming'), 'Upcoming');
+
+  clickText(G.body, 'pb__action', 'View details');
+  t('View details opens the existing booking panel',
+    (byClass(G.body, 'pb')[0] || {}).open, true);
+  t('and says what the next click will do',
+    textOf(G.body, 'pb__action--primary'), 'Hide details');
+  clickText(G.body, 'pb__action', 'Hide details');
+  t('the same action closes the panel cleanly',
+    (byClass(G.body, 'pb')[0] || {}).open, false);
+
+  const G2 = await boot(model());
+  clickText(G2.body, 'pb__action', 'Reschedule');
+  await G2.settle();
+  t('the card-level Reschedule action opens the booking',
+    (byClass(G2.body, 'pb')[0] || {}).open, true);
+  t('and reaches the one existing availability picker',
+    byClass(G2.body, 'slot-chip').map(n => n._text), ['9:00 AM', '1:00 PM', '11:00 AM']);
+  t('without sending a booking change', G2.posts, []);
+
   t('an open booking offers both ways to change it',
     byClass(G.body, 'sched__btn').map(n => n._text),
     ['Change time', 'Cancel visit', 'Keep it']);

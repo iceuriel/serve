@@ -1796,37 +1796,78 @@ a {
     color: var(--color-text-muted);
 }
 
-/* The agenda's wrapper, built by serve-slots.js for both pages that show it.
-   LAYOUT-TRANSPARENT ON PURPOSE: the booking page used to append day blocks
-   straight into #scheduler-days, and this wrapper must not become a box that
-   any future rule on that container has to reckon with. */
-.slotpick { display: contents; }
+/* Calendar cards shared by the booking flow and every portal scheduler. Each
+   day is legible before a customer has to scan its times, while every time
+   remains the actual control and the existing booking behavior stays intact. */
+.slotpick {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
+    gap: 0.75rem;
+}
 
-.scheduler-day { margin-bottom: 0.875rem; }
-.scheduler-day:last-child { margin-bottom: 0; }
+.scheduler-day {
+    min-width: 0;
+    padding: 0.7rem;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    background: #f9fbfd;
+}
 
 .scheduler-day__head {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    margin-bottom: 0.65rem;
     font-family: var(--flow-sans);
-    font-size: 0.95rem;
-    font-weight: 400;
     color: var(--color-dark);
-    margin-bottom: 6px;
+}
+.scheduler-day__weekday {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--color-text-muted);
+}
+.scheduler-day__date {
+    display: flex;
+    width: 3.15rem;
+    height: 3.15rem;
+    margin-left: auto;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #cfe3f5;
+    border-radius: 10px;
+    background: #eef7ff;
+    font-variant-numeric: tabular-nums;
+}
+.scheduler-day__month {
+    font-size: 0.58rem;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: 0.05em;
+}
+.scheduler-day__number {
+    margin-top: 0.12rem;
+    font-size: 1.12rem;
+    font-weight: 800;
+    line-height: 1;
 }
 
 .scheduler-day__times {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem;
 }
 
 .slot-chip {
+    width: 100%;
     font-family: var(--flow-sans);
-    font-size: 0.95rem;
+    font-size: 0.84rem;
+    font-weight: 650;
     color: var(--color-dark);
     background: #fff;
     border: 1px solid var(--color-border);
-    border-radius: var(--radius);
-    padding: 8px 14px;
+    border-radius: 8px;
+    padding: 9px 8px;
     cursor: pointer;
     transition: border-color 0.15s, background 0.15s, color 0.15s;
 }
@@ -1839,6 +1880,7 @@ a {
     background: var(--color-dark);
     border-color: var(--color-dark);
     color: #fff;
+    box-shadow: 0 5px 12px rgba(7, 37, 66, 0.15);
 }
 
 /* "Show N more days" — the folded half of the agenda, one click away.
@@ -1852,6 +1894,7 @@ a {
    This one is the rest of the agenda, and it has to be findable at a glance. */
 .slotpick__more {
     display: block;
+    grid-column: 1 / -1;
     width: 100%;
     margin-top: 0.875rem;
     padding: 10px 14px;
@@ -4362,47 +4405,161 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
 }
 .portal__h:first-child { margin-top: 0; }
 
+.portal__intro {
+    margin: 0 0 1.65rem;
+}
+.portal__greeting {
+    margin: 0;
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: clamp(2rem, 5vw, 3.15rem);
+    line-height: 1.08;
+    color: var(--color-dark);
+}
+.portal__lede {
+    margin: 0.35rem 0 0;
+    font-family: var(--flow-sans);
+    font-size: 1rem;
+    line-height: 1.5;
+    color: var(--color-text-muted);
+}
+
 /* --- a booking row --- */
-.pb {
+.booking-card {
+    overflow: hidden;
+    margin-bottom: 0.85rem;
     border: 1px solid var(--color-border);
     border-radius: var(--radius);
     background: #fff;
-    margin-bottom: 0.6rem;
 }
-.pb[open] { border-color: var(--color-accent); }
+.pb {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    margin: 0;
+}
+.booking-card:has(.pb[open]) { border-color: var(--color-accent); }
 /* A finished booking is a record. Quieter, and it carries no controls. */
-.pb--done { background: var(--color-bg-light); }
+.booking-card--done { background: var(--color-bg-light); }
 
 .pb__sum {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 0.2rem 0.7rem;
-    padding: 0.8rem 0.95rem;
+    display: grid;
+    grid-template-columns: 3.5rem minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.8rem;
+    min-height: 5.25rem;
+    padding: 0.9rem 1rem;
     cursor: pointer;
     list-style: none;
 }
 .pb__sum::-webkit-details-marker { display: none; }
+.pb__date {
+    display: flex;
+    width: 3.5rem;
+    height: 3.5rem;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #cfe3f5;
+    border-radius: 11px;
+    background: #eef7ff;
+    color: var(--color-dark);
+    font-family: var(--flow-sans);
+    font-variant-numeric: tabular-nums;
+}
+.pb__month {
+    font-size: 0.62rem;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: 0.05em;
+}
+.pb__day {
+    margin-top: 0.15rem;
+    font-size: 1.25rem;
+    font-weight: 800;
+    line-height: 1;
+}
+.pb__main {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 0.18rem;
+}
 .pb__title {
+    display: block;
     font-family: var(--flow-sans);
     font-size: 1.05rem;
     font-weight: 700;
     color: var(--color-dark);
 }
 .pb__when {
+    display: block;
     font-family: var(--flow-sans);
     font-size: 0.88rem;
     color: var(--color-text-muted);
 }
+.pb__status {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    justify-self: end;
+    min-height: 1.7rem;
+    padding: 0.24rem 0.65rem;
+    border-radius: 999px;
+    font-family: var(--flow-sans);
+    font-size: 0.7rem;
+    font-weight: 700;
+    line-height: 1;
+    white-space: nowrap;
+}
+.pb__status--upcoming { color: #075aa6; background: #e3f2ff; }
+.pb__status--complete { color: #176348; background: #ddf4e8; }
+.pb__status--cancelled { color: #8f1d18; background: #ffe5e2; border-color: #ef6b62; }
 .pb__price {
+    grid-column: 2 / -1;
     font-family: var(--flow-sans);
     font-size: 0.88rem;
     font-weight: 600;
     color: var(--color-text);
-    margin-left: auto;
+    margin-top: -0.5rem;
     font-variant-numeric: tabular-nums;
 }
 .pb__body { padding: 0 0.95rem 0.95rem; }
+.pb__actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.55rem;
+    padding: 0 1rem 1rem;
+}
+.pb__action {
+    min-height: 2.75rem;
+    padding: 0.65rem 1rem;
+    border: 1px solid var(--color-border);
+    border-radius: 9px;
+    font-family: var(--flow-sans);
+    font-size: 0.84rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+.pb__action--primary {
+    color: #fff;
+    border-color: var(--color-dark);
+    background: var(--color-dark);
+}
+.pb__action--primary:hover { border-color: var(--color-accent); background: var(--color-accent); }
+.pb__action--secondary { color: var(--color-dark); background: var(--color-bg-light); }
+.pb__action--secondary:hover { border-color: #a8c9e4; background: #eef6fd; }
+
+/* The collapsed card owns the prominent Reschedule action. The original
+   trigger remains in the DOM as the single scheduling implementation, but is
+   visually replaced by the clearer card-level control. */
+.booking-card--actionable .sched__row > .sched__btn:not(.sched__btn--quiet) { display: none; }
+
+@media (max-width: 520px) {
+    .pb__sum { grid-template-columns: 3.35rem minmax(0, 1fr); gap: 0.7rem; }
+    .pb__date { width: 3.35rem; height: 3.35rem; }
+    .pb__status { grid-column: 2; justify-self: start; margin-top: 0.1rem; }
+    .pb__price { grid-column: 2; margin-top: 0; }
+}
 /* Sub-heading inside an open booking — smaller than the portal's own h2,
    since it labels a block within a row rather than a section of the page. */
 .pb__h {
@@ -5323,20 +5480,25 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
 
 /* The live cards use the same restrained elevation as the reference: borders
    still define controls, while shadow is reserved for containers. */
-.portal-body :is(.pb, .pq, .vp__svc, .tk-room, .tk-partner, .tk-seek, .plan, .mplan, .sched__confirm, .portal__note) {
+.portal-body :is(.booking-card, .pb, .pq, .vp__svc, .tk-room, .tk-partner, .tk-seek, .plan, .mplan, .sched__confirm, .portal__note) {
     border-color: var(--portal-line);
     border-radius: var(--portal-radius);
     box-shadow: 0 5px 18px rgba(21, 52, 83, 0.045);
 }
-.portal-body :is(.pb, .pq, .vp__svc, .tk-room, .mplan--saved) {
+.portal-body :is(.booking-card, .pb, .pq, .vp__svc, .tk-room, .mplan--saved) {
     background: var(--portal-card);
 }
 .portal-body :is(.tk-partner, .tk-seek, .sc, .plan, .mplan, .sched__confirm) {
     background: #f8fbfe;
 }
-.portal-body :is(.pb[open], .tk-room[open]) {
+.portal-body :is(.booking-card:has(.pb[open]), .tk-room[open]) {
     border-color: #9cc9ec;
     box-shadow: 0 13px 30px rgba(15, 75, 126, 0.09);
+}
+.portal-body .booking-card > .pb {
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
 }
 .portal-body :is(.pb__sum, .tk-room__sum) {
     min-height: 3.75rem;

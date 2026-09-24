@@ -217,6 +217,24 @@
         return days[d.getDay()] + ', ' + mons[d.getMonth()] + ' ' + d.getDate();
     }
 
+    /* The compact calendar tile used on booking cards. It repeats only the
+       date, not the time: the full readable schedule stays beside it. */
+    function dateTile(iso) {
+        var p = String(iso || '').split('-');
+        if (p.length !== 3) return { month: 'DATE', day: 'TBD' };
+        var d = new Date(+p[0], +p[1] - 1, +p[2]);
+        if (!isFinite(d.getTime())) return { month: 'DATE', day: 'TBD' };
+        var mons = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+        return { month: mons[d.getMonth()], day: String(d.getDate()) };
+    }
+
+    function greeting() {
+        var hour = new Date().getHours();
+        if (hour < 12) return 'Good morning';
+        if (hour < 18) return 'Good afternoon';
+        return 'Good evening';
+    }
+
     /* One line per fact, never the same fact twice. A booking made on a time
        PREFERENCE has no date, and `time` and `when` then hold the same
        sentence — see the same rule in ticket.js. */
@@ -550,6 +568,12 @@
        ======================================================== */
     function renderBookings() {
         var list = model.bookings || [];
+        var intro = el('div', 'portal__intro');
+        intro.appendChild(el('h1', 'portal__greeting',
+            greeting() + (model.firstName ? ', ' + model.firstName : '')));
+        intro.appendChild(el('p', 'portal__lede',
+            'Here’s what’s happening with your cleaning services.'));
+        bodyEl.appendChild(intro);
         /* Before the empty check: somebody returning from Stripe must be told
            what happened even in the odd case that the list will not render. */
         add(bodyEl, payBanner());
@@ -1361,7 +1385,8 @@
             status.className = 'tk-save is-bad';
         }
 
-        if (moveBtn) moveBtn.addEventListener('click', function () {
+        function openMove() {
+            if (!moveBtn || moveBtn.disabled) return;
             moveBtn.disabled = true;
             confirmRow.hidden = true;
             pickWrap.hidden = false;
@@ -1386,7 +1411,9 @@
                     status.className = 'tk-save';
                 }));
             });
-        });
+        }
+
+        if (moveBtn) moveBtn.addEventListener('click', openMove);
 
         if (go) go.addEventListener('click', function () {
             if (!picked.date || !picked.time) return;
@@ -1462,6 +1489,10 @@
             .catch(ask);
         });
 
+        /* bookingRow exposes a clear Reschedule button on the collapsed card.
+           It calls this same path rather than maintaining a second scheduler. */
+        wrap.openReschedule = openMove;
+        wrap.canReschedule = !!moveBtn;
         return wrap;
     }
 
@@ -1478,6 +1509,9 @@
 
     /** The title line is service + date, as asked; the detail opens on click. */
     function bookingRow(b) {
+        var card = el('article', 'booking-card' +
+            (b.completed ? ' booking-card--done' : '') +
+            (b.cancelled ? ' booking-card--cancelled' : ''));
         var det = document.createElement('details');
         det.className = 'pb' + (b.completed ? ' pb--done' : '') +
                                (b.cancelled ? ' pb--cancelled' : '');
@@ -1485,8 +1519,21 @@
 
         var sum = document.createElement('summary');
         sum.className = 'pb__sum';
-        sum.appendChild(el('span', 'pb__title', b.serviceLabel));
-        sum.appendChild(el('span', 'pb__when', whenLine(b) || 'Date to be confirmed'));
+        var calendar = dateTile(b.date);
+        var dateBox = el('span', 'pb__date');
+        dateBox.appendChild(el('span', 'pb__month', calendar.month));
+        dateBox.appendChild(el('span', 'pb__day', calendar.day));
+        sum.appendChild(dateBox);
+
+        var main = el('span', 'pb__main');
+        main.appendChild(el('span', 'pb__title', b.serviceLabel));
+        main.appendChild(el('span', 'pb__when', whenLine(b) || 'Date to be confirmed'));
+        sum.appendChild(main);
+
+        var statusText = b.cancelled ? 'Cancelled' : b.completed ? 'Complete' : 'Upcoming';
+        var statusClass = 'pb__status pb__status--' +
+            (b.cancelled ? 'cancelled pb__tag' : b.completed ? 'complete' : 'upcoming');
+        sum.appendChild(el('span', statusClass, statusText));
         var price = money(b.price);
         /* The summary is the line a customer scans without opening anything,
            so it has to distinguish money TAKEN from money merely held — those
@@ -1494,6 +1541,7 @@
         if (price) sum.appendChild(el('span', 'pb__price',
             price + (b.paid ? ' · paid' : b.authorized ? ' · authorized' : '')));
         det.appendChild(sum);
+        card.appendChild(det);
 
         var inner = el('div', 'pb__body');
         if (b.propertyLabel) add(inner, line('Home', b.propertyLabel));
@@ -1509,12 +1557,11 @@
            later stamps as completed is a data problem to look at, not a receipt
            to show the customer. */
         if (b.cancelled) {
-            sum.appendChild(el('span', 'pb__tag', 'Cancelled'));
             inner.appendChild(el('p', 'tk-note',
                 'This visit was cancelled and nobody is coming. ' +
                 'Book again whenever you need us.'));
             det.appendChild(inner);
-            return det;
+            return card;
         }
         if (b.completed) {
             if (typeof ServePhotos !== 'undefined') {
@@ -1533,7 +1580,7 @@
             inner.appendChild(el('p', 'tk-note',
                 'Finished bookings are a record — they can no longer be edited.'));
             det.appendChild(inner);
-            return det;
+            return card;
         }
 
         /* THREE STATES, AND THE MIDDLE ONE IS THE WHOLE POINT (r50).
@@ -1600,10 +1647,37 @@
         /* Last in the panel, deliberately. Everything above is something the
            customer is adding to the visit; this is the pair of actions that
            change whether it happens at all. */
-        add(inner, scheduleControls(b));
+        var schedule = scheduleControls(b);
+        add(inner, schedule);
 
         det.appendChild(inner);
-        return det;
+
+        var actions = el('div', 'pb__actions');
+        var view = el('button', 'pb__action pb__action--primary', 'View details');
+        view.type = 'button';
+        function updateViewLabel() {
+            view.textContent = det.open ? 'Hide details' : 'View details';
+        }
+        view.addEventListener('click', function () {
+            det.open = !det.open;
+            updateViewLabel();
+        });
+        det.addEventListener('toggle', updateViewLabel);
+        actions.appendChild(view);
+
+        if (schedule.canReschedule) {
+            var reschedule = el('button', 'pb__action pb__action--secondary', 'Reschedule');
+            reschedule.type = 'button';
+            reschedule.addEventListener('click', function () {
+                det.open = true;
+                updateViewLabel();
+                schedule.openReschedule();
+            });
+            actions.appendChild(reschedule);
+            card.className += ' booking-card--actionable';
+        }
+        card.appendChild(actions);
+        return card;
     }
 
     /* ========================================================
