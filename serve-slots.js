@@ -59,6 +59,15 @@
         });
     }
 
+    function slotDateParts(str) {
+        var d = parseSlotDate(str);
+        return {
+            weekday: d.toLocaleDateString('en-US', { weekday: 'short' }),
+            month: d.toLocaleDateString('en-US', { month: 'short' }).toUpperCase(),
+            day: String(d.getDate()),
+        };
+    }
+
     /* Bookable = open > 0, today through the three-week horizon. */
     function filterSlots(slots) {
         if (!slots || !slots.length) return [];
@@ -143,7 +152,23 @@
                 days.push(day);
                 var head = document.createElement('div');
                 head.className = 'scheduler-day__head';
-                head.textContent = formatSlotDate(s.date);
+                head.setAttribute('aria-label', formatSlotDate(s.date));
+                var parts = slotDateParts(s.date);
+                var weekday = document.createElement('span');
+                weekday.className = 'scheduler-day__weekday';
+                weekday.textContent = parts.weekday;
+                var date = document.createElement('span');
+                date.className = 'scheduler-day__date';
+                var month = document.createElement('span');
+                month.className = 'scheduler-day__month';
+                month.textContent = parts.month;
+                var number = document.createElement('span');
+                number.className = 'scheduler-day__number';
+                number.textContent = parts.day;
+                date.appendChild(month);
+                date.appendChild(number);
+                head.appendChild(weekday);
+                head.appendChild(date);
                 rowEl = document.createElement('div');
                 rowEl.className = 'scheduler-day__times';
                 day.appendChild(head);
@@ -157,6 +182,24 @@
             chip.setAttribute('data-date', s.date);
             chip.setAttribute('data-time', s.time);
             chip.setAttribute('aria-pressed', 'false');
+            /* THE DATE HAS TO BE IN THE NAME, not only in the layout.
+               The visible chip says "9:00 AM" and the date it belongs to is
+               two elements away in .scheduler-day__head — fine for an eye
+               scanning a column, useless to anything reading names. Three
+               weeks of slots collapsed to exactly TWO distinct accessible
+               names, "9:00 AM" and "1:30 PM", repeated seven times each.
+
+               Found 2026-09-24 by driving the booking flow as an agent would.
+               Somebody told to book Saturday at nine sees seven identical
+               buttons and has to infer the day from pixel position; pick the
+               wrong one and the booking is for the wrong date, silently,
+               because the confirmation looks correct either way. A screen
+               reader user has had exactly this problem all along.
+
+               formatSlotDate is reused rather than a second format invented
+               here — the day heading above already labels itself with it, so
+               the two cannot drift apart. */
+            chip.setAttribute('aria-label', formatSlotDate(s.date) + ' at ' + s.time);
             if (onPick) {
                 chip.addEventListener('click', function () {
                     (wrap.querySelectorAll('.slot-chip') || []).forEach(function (c) {

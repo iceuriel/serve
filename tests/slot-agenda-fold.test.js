@@ -175,6 +175,39 @@ head('F8  the button cannot be mistaken for a slot, by a customer or by code');
     [more.getAttribute('data-date'), more.getAttribute('data-time')], [null, null]);
 }
 
+head('F8b  every chip says WHICH DAY it books, not just the time');
+{
+  /* Added 2026-09-24 after driving the booking flow as an agent would.
+     Twenty-one days of slots carried exactly TWO distinct accessible names —
+     "9:00 AM" and "1:30 PM" — because the date lives in the day heading two
+     elements away and in a data- attribute, neither of which is part of a
+     button's name. Anything reading names rather than pixels sees a column of
+     identical buttons.
+
+     The consequence is not a missed click. It is the WRONG DAY booked, with a
+     confirmation that looks correct to everyone, which is the failure this
+     repo keeps meeting: healthy from the outside, wrong on the inside.
+
+     Uniqueness is the assertion that matters. A label of "9:00 AM" on every
+     chip would satisfy "has an aria-label" and fix nothing. */
+  const chips = all(WIDE, 'slot-chip');
+  const names = chips.map((c) => c.getAttribute('aria-label'));
+
+  t('every chip carries an aria-label', names.every((n) => !!n), true);
+  t('every one of them is unique across the whole agenda',
+    new Set(names).size, chips.length);
+  t('each names its own date and its own time',
+    chips.every((c) => {
+      const n = c.getAttribute('aria-label') || '';
+      return n.indexOf(c.getAttribute('data-time')) !== -1 && /\d/.test(n) && n.length > 8;
+    }), true);
+  /* The folded days are built and hidden, so they must be labelled too — the
+     tail is what a "show more" reveals straight into an agent's hands. */
+  t('the folded tail is labelled as well, not just the visible week',
+    chips.length > shown(WIDE, 'slot-chip').length &&
+    names.slice(shown(WIDE, 'slot-chip').length).every((n) => !!n), true);
+}
+
 head('F9  folding is display only — it narrows nothing');
 {
   /* The horizon rules decide what is bookable; this decides what is drawn.
