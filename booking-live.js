@@ -10,7 +10,14 @@
         status.className = 'booking-live';
         status.setAttribute('role', 'status');
         status.textContent = 'Updates automatically';
-        root.parentNode.insertBefore(status, root);
+        /* WHERE THE LINE SITS IS THE PAGE'S CHOICE, not this file's. Directly
+           above the view it describes is the default; a page that hands over
+           somewhere quieter — its footer — gets it there instead. On a phone
+           that matters: parked above the body it filled the whole band between
+           the tabs and the first heading with a sentence nobody came to read,
+           and it sat outside the page's own gutter while doing it. */
+        if (opts.statusInto) opts.statusInto.appendChild(status);
+        else root.parentNode.insertBefore(status, root);
         function editing() {
             return !!root.querySelector('.is-dirty, .tk-save.is-bad, [data-photo-busy], button:disabled, fieldset:disabled, dialog[open]') ||
                 (root.contains(document.activeElement) && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName));
@@ -36,6 +43,13 @@
                         if (window.ServePhotos) window.ServePhotos.release(root);
                         root.textContent = '';
                         root.hidden = true;
+                        /* It has stopped being a footnote. With the view gone
+                           this sentence is the only thing left to read, so it
+                           comes back above the emptied body wherever the page
+                           had parked it — a closed link explained in the
+                           footer of a blank page is not explained. */
+                        status.className = 'booking-live booking-live--closed';
+                        root.parentNode.insertBefore(status, root);
                         status.textContent = 'This link has closed. Contact Serve if you need help.';
                         return;
                     }

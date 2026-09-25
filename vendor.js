@@ -103,7 +103,7 @@
         start();
         if (typeof ServeLive !== 'undefined') ServeLive.watch({
             url: LOAD,
-            view: 'vendor', root: bodyEl, initial: d,
+            view: 'vendor', root: bodyEl, initial: d, statusInto: footEl,
             onData: function (next) { model = next; paint(); }
         });
     });

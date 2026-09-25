@@ -128,7 +128,7 @@
         render(d);
         if (typeof ServeLive !== 'undefined') ServeLive.watch({
             url: LOAD,
-            view: view, root: bodyEl, initial: d, onData: render
+            view: view, root: bodyEl, initial: d, statusInto: footEl, onData: render
         });
     });
 

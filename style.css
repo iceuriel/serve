@@ -4733,6 +4733,11 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
     list-style: none;
 }
 .pb__sum::-webkit-details-marker { display: none; }
+/* The vendor portal's job rows carry no date tile (vendor.js, jobRow), so the
+   3.5rem column reserved for one was squeezing their title into it — "Deep
+   clean" broke across two lines inside a box meant for a number. Nothing to
+   reserve, so reserve nothing. */
+.pb__sum:not(:has(.pb__date)) { grid-template-columns: minmax(0, 1fr) auto; }
 .pb__date {
     display: flex;
     width: 3.5rem;
@@ -4836,10 +4841,17 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
 .booking-card--actionable .sched__row > .sched__btn:not(.sched__btn--quiet) { display: none; }
 
 @media (max-width: 520px) {
-    .pb__sum { grid-template-columns: 3.35rem minmax(0, 1fr); gap: 0.7rem; }
+    .pb__sum { grid-template-columns: 3.35rem minmax(0, 1fr); gap: 0.45rem 0.7rem; }
     .pb__date { width: 3.35rem; height: 3.35rem; }
-    .pb__status { grid-column: 2; justify-self: start; margin-top: 0.1rem; }
-    .pb__price { grid-column: 2; margin-top: 0; }
+    /* FLUSH WITH THE CARD, NOT INDENTED PAST THE DATE TILE. The pill and the
+       price are facts about the whole booking, not a third and fourth line of
+       the title beside it — parked in column 2 they started in the middle of
+       the card with nothing above or below them to line up against. */
+    .pb__status { grid-column: 1 / -1; justify-self: start; margin-top: 0; }
+    .pb__price { grid-column: 1 / -1; margin-top: 0; }
+    /* One column on a phone, so a long service name has the card's whole
+       width and every line of the row starts in the same place. */
+    .pb__sum:not(:has(.pb__date)) { grid-template-columns: minmax(0, 1fr); }
 }
 /* Sub-heading inside an open booking — smaller than the portal's own h2,
    since it labels a block within a row rather than a section of the page. */
@@ -5070,6 +5082,28 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
 
 /* Shared booking updates and private room photos. */
 .booking-live { color: #68766f; font-size: .8rem; margin: 0 0 16px; }
+
+/* Its home on the three portals is the page footer — see `statusInto` in
+   booking-live.js. Quiet, inside the page's own gutter, and out of the band
+   between the tabs and the first heading. */
+.ticket__foot .booking-live { margin: .4rem 0 0; font-size: .75rem; }
+
+/* Until the link closes, when it is promoted back above the emptied view and
+   is the only thing left on the page to read. */
+.booking-live--closed {
+    margin: 1.25rem 1rem;
+    max-width: 42rem;
+    padding: .85rem 1rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    background: #fff;
+    color: var(--color-text);
+    font-size: .95rem;
+}
+/* It takes the emptied view's place, so it takes its grid cell too — without
+   this it is auto-placed and runs off the right of the page. Inert below
+   720px, where the portal is not a grid. */
+.portal-body--account .booking-live--closed { grid-area: body; align-self: start; }
 .room-photos { margin-top: 14px; width: 100%; }
 .room-photos__grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .room-photos__card { min-width: 0; }
@@ -5909,10 +5943,13 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
     background: var(--portal-blue-soft);
     box-shadow: inset 3px 0 0 #4d9ad5;
 }
+/* Phone values; the ≥720px block below repaints both with room to breathe.
+   2rem of air under the sticky tabs pushed the greeting most of a thumb-scroll
+   down a phone screen, for nothing. */
 .portal-body--account .portal__body,
 .portal-body--account .portal > .ticket__state {
     min-width: 0;
-    padding: 2rem 1rem 1rem;
+    padding: 1.25rem 1rem 1rem;
 }
 .portal-body--account .portal__h {
     display: flex;

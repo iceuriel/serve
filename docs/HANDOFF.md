@@ -6,7 +6,7 @@ assistant with no access to this repo. Self-contained on purpose.
 **Companion doc:** `/docs/SCHEMA.md` — authoritative for every column's meaning
 and who writes it. This file is the narrative; that file is the contract.
 
-**Latest session: 2026-09-25.** Jump to
+**Latest session: 2026-09-25 (portal phone layout, front-end only).** Jump to
 [what changed on 2026-09-08 / 09](#session-2026-09-08--09) for the current
 state. The sections below it describe earlier builds and remain accurate
 except where a later section supersedes them.
@@ -104,6 +104,59 @@ cannot drift from the code without going red.
 The **booking horizon is 21 days and a Stripe hold lasts 7**, so every booking
 made more than a week out has a hold that dies before the cleaner arrives. See
 the r61 entry below and shared memory. Unchanged by this session.
+
+---
+
+## Current work — 2026-09-25, Claude Code: the portals on a phone
+
+**Front-end only. No Apps Script, no Worker, no sheet, no schema change**, so
+nothing here waits on a deploy and nothing can ship in the wrong order.
+Uncommitted as of this entry. 42 test files pass.
+
+Founder's report: on a phone `/h` wastes the whole band between the tabs and
+the greeting, and the Upcoming pill and the price sit "awkwardly in the
+centerish left" of the card. Desktop was fine and stays untouched — every rule
+below is either inside `@media (max-width: 520px)` or overridden by the
+existing `min-width: 720px` block.
+
+### What changed
+
+- **`booking-live.js` takes a `statusInto` mount.** "Updates automatically" was
+  inserted before the body on all three portals: it filled the band under the
+  sticky tabs with a sentence nobody opens the page to read, and sat outside
+  the page's own gutter while doing it. `portal.js`, `ticket.js` and
+  `vendor.js` now hand it their footer. The old position is still the default
+  for a caller that names no mount.
+- **A closed link overrides that choice.** With the view emptied and hidden,
+  that sentence is all there is left to read, so it is promoted back above the
+  body as `.booking-live--closed` — a real notice, not a footnote at the bottom
+  of a blank page. `grid-area: body` on the account portal, or it is
+  auto-placed into an implicit grid row and runs off the right of the page.
+- **The pill and the price go `grid-column: 1 / -1` under 520px.** They were in
+  column 2, which is reserved for the text beside the date tile, so they began
+  in the middle of the card with nothing above or below to line up against.
+- **Top padding under the tabs 2rem → 1.25rem on phones only.**
+- **Found while checking `/v`: the vendor job rows have no date tile**, so the
+  3.5rem column reserved for one was squeezing their title into it — "Deep
+  clean" broke across two lines inside a box meant for a number, on desktop as
+  well as phone. Fixed with `.pb__sum:not(:has(.pb__date))`. Pre-existing, not
+  caused by the changes above, and outside what the founder asked for — flagged
+  to him.
+
+### What was verified
+
+- **Seen, not asserted.** A scratchpad Node server served the real repo files
+  with stubbed `/api/portal`, `/api/job`, `/api/slots` and `/api/vendor`, and
+  all three portals were rendered in Chrome in a 390px iframe — this Chrome
+  will not size a window below ~500px, and an iframe gets a real viewport width
+  for media queries, which a cropped screenshot does not.
+- **Both states of the live line**: quiet in the footer, and promoted to a
+  contained notice when the link closes (16px gutters at 390px, inside the body
+  column at 1280px).
+- **`tests/booking-live.test.js` covers where the line sits**, and all three
+  ways of breaking it were confirmed to go red before being trusted: ignoring
+  `statusInto`, leaving a closed link buried in the footer, and keeping the
+  quiet class on the closed notice.
 
 ---
 

@@ -170,7 +170,7 @@
         warmSlots(d);
         if (typeof ServeLive !== 'undefined') ServeLive.watch({
             url: LOAD,
-            view: 'portal', root: bodyEl, initial: d,
+            view: 'portal', root: bodyEl, initial: d, statusInto: footEl,
             onData: function (next) { model = next; paint(); }
         });
     });
