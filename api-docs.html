@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API for agents | Serve Home Cleaning</title>
+    <meta name="description" content="Serve's public API for AI agents: instant home cleaning quotes for Greater Boston, live availability, and a prefilled booking handoff. No key, no account.">
+    <!-- Extensionless, matching sitemap.xml and every link on the site. -->
+    <link rel="canonical" href="https://servecleaning.com/api-docs">
+    <link rel="icon" type="image/x-icon" href="images/favicon.ico">
+    <link rel="icon" type="image/svg+xml" href="images/favicon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="images/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="images/favicon-192.png">
+    <link rel="apple-touch-icon" href="images/apple-touch-icon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Montserrat:wght@500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- NAV -->
+    <nav class="nav">
+        <div class="nav__inner">
+            <a href="/" class="nav__logo">Serve</a>
+            <ul class="nav__links">
+                <li><a href="/">Home</a></li>
+                <li><a href="/#quote" class="nav__cta">Instant Booking</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <main class="legal">
+        <div class="legal__inner">
+            <h1 class="legal__title">API for agents</h1>
+            <p class="legal__updated">Last updated: September 25, 2026</p>
+
+            <p class="legal__lede">Serve is a home cleaning service in Greater Boston. Most
+            cleaning companies cannot quote a home without a phone call or a visit. Serve prices
+            one from a postal code and a room count in a single request, publishes the times it
+            can actually clean, and takes the booking on an ordinary web page with no account to
+            create. This page is the contract for all three.</p>
+
+            <div class="legal__callout">
+                <p><strong>No key, no account, no allow-list.</strong> Both endpoints below are
+                public and open to every origin. There is nothing to sign up for and nothing to
+                authenticate. If you are building an agent that shops for home cleaning, you can
+                call them right now.</p>
+            </div>
+
+            <h2>What an agent can do end to end</h2>
+            <ol class="api__steps">
+                <li><strong>Price the home</strong> — <code>POST /api/quote</code>, one request,
+                no key. You get a firm number, not a range.</li>
+                <li><strong>Get real times</strong> — <code>GET /api/slots</code> returns the
+                dates and times Serve can actually clean, up to three weeks out.</li>
+                <li><strong>Hand over a prefilled booking</strong> — send your customer to
+                <code>servecleaning.com</code> with the configuration you quoted on the query
+                string. The page opens already filled in, and the price it shows is the price
+                you were given.</li>
+                <li><strong>Manage it afterwards</strong> — every booking is emailed a permanent
+                private link where the visit can be rescheduled, cancelled, or paid for.</li>
+            </ol>
+
+            <p>There is no booking endpoint, and that is deliberate rather than unfinished. The
+            final confirmation collects the customer's own SMS consent and their own card
+            details, and neither is something a third party should assert on their behalf. The
+            steps an agent can do without a human — pricing and comparing — are the steps that
+            are open.</p>
+
+            <h2>Service area</h2>
+            <p>Greater Boston and nearby towns: roughly 60 postal codes across Boston, Cambridge,
+            Somerville, Brookline, Newton, Quincy, Medford, Malden, Watertown, Arlington and
+            their neighbours. A postal code outside the area is <strong>refused, not priced</strong>
+            — see <code>out_of_area</code> below. Do not cache the list; ask, because it grows.</p>
+
+            <h2>1 &middot; Price a home</h2>
+            <p class="api__endpoint"><span class="api__verb">POST</span>
+            https://servecleaning.com/api/quote</p>
+
+            <p>Send <code>Content-Type: application/json</code>. Typical response time is well
+            under a second.</p>
+
+            <h3>Request</h3>
+            <div class="api__table-wrap">
+            <table class="api__table">
+                <thead><tr><th>Field</th><th>Type</th><th>Notes</th></tr></thead>
+                <tbody>
+                <tr><td><code>zip</code></td><td>string</td>
+                    <td><strong>Required.</strong> 5-digit US postal code. A leading zero may be
+                    omitted — <code>2116</code> and <code>"02116"</code> are the same place.</td></tr>
+                <tr><td><code>bedrooms</code></td><td>number</td>
+                    <td>0 for a studio. Homes of 5 or more are priced by hand — see
+                    <code>price_failed</code>.</td></tr>
+                <tr><td><code>bathrooms</code></td><td>number</td>
+                    <td>Halves allowed: <code>1.5</code>.</td></tr>
+                <tr><td><code>levels</code></td><td>number</td>
+                    <td>Floors in the home. Defaults to 1.</td></tr>
+                <tr><td><code>service</code></td><td>string</td>
+                    <td><code>first_clean</code> or <code>move_out</code>. A move-in / move-out
+                    clean covers an empty home, inside every cabinet, the fridge and the oven.</td></tr>
+                <tr><td><code>condition</code></td><td>string</td>
+                    <td><code>light</code>, <code>standard</code> or <code>heavy</code>. Defaults
+                    to <code>standard</code>. See the note below.</td></tr>
+                <tr><td><code>frequency_selected</code></td><td>string</td>
+                    <td><code>once</code>, <code>weekly</code>, <code>biweekly</code> or
+                    <code>monthly</code>. Defaults to <code>once</code>.</td></tr>
+                <tr><td><code>addon_fridge</code></td><td>boolean</td>
+                    <td>Inside the fridge. First Clean only — a move clean already includes it.</td></tr>
+                <tr><td><code>addon_oven</code></td><td>boolean</td>
+                    <td>Inside the oven. Same rule.</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <div class="legal__callout">
+                <p><strong>On <code>condition</code>.</strong> Serve's own booking form never asks
+                a customer to grade their home. It asks two things they can actually answer — when
+                it was last cleaned professionally, and whether there are pets — and derives the
+                grade from those. Grading a home is a professional judgement, and asking an
+                untrained person for it rewards whoever guesses lowest. If you want to match what
+                the form would have said: cleaned recently and no pets is <code>light</code>;
+                anything within a few months, or any home with pets, is <code>standard</code>; a
+                long time or never is <code>heavy</code>.</p>
+            </div>
+
+            <h3>Response</h3>
+            <pre class="api__code"><code>{
+  "ok": true,
+  "price": 195,
+  "recurring": { "weekly": 121, "biweekly": 173, "monthly": 298 },
+  "pricing_version": "2026-08-24",
+  "quote_sig": "q1.1790362338.32802a14bd1111fd…",
+  "quote_scope": "q1|02116|2|1|1|first_clean|standard|0|0|biweekly",
+  "expires_at": 1790362338
+}</code></pre>
+
+            <ul>
+                <li><code>price</code> — the all-in total for this visit, in whole US dollars.
+                Nothing is added later: no travel fee, no supplies charge, no per-room extra.</li>
+                <li><code>recurring</code> — what each later visit would cost at each cadence, for
+                this same home. Present whenever the home has a recurring track.</li>
+                <li><code>quote_sig</code> and <code>quote_scope</code> — Serve's signature over
+                this exact configuration, so the price can be honoured at booking. Pass them
+                through unchanged if you have somewhere to put them; ignore them otherwise.</li>
+                <li><code>expires_at</code> — Unix seconds. Signatures last two hours. The price
+                itself does not change on that schedule; the signature does.</li>
+            </ul>
+
+            <h3>When it says no</h3>
+            <p>Every outcome below is <strong>HTTP 200 with <code>ok: false</code></strong>, except
+            a malformed body (400) and a non-POST method (405). This endpoint is on the booking
+            path and is built never to fail in a way that blocks a customer.</p>
+            <div class="api__table-wrap">
+            <table class="api__table">
+                <thead><tr><th><code>error</code></th><th>Meaning</th></tr></thead>
+                <tbody>
+                <tr><td><code>out_of_area</code></td>
+                    <td>Serve does not clean that postal code. The response echoes the
+                    <code>zip</code> it refused and carries no price and no signature. Do not
+                    fall back to a guess — there is no number here to use.</td></tr>
+                <tr><td><code>no_zip</code></td><td>No postal code was sent.</td></tr>
+                <tr><td><code>price_failed</code></td>
+                    <td>This home is outside the flat-rate table — most often 5 or more bedrooms.
+                    It is quotable, by a person. Send the customer to the site.</td></tr>
+                <tr><td><code>cannot_price</code></td>
+                    <td>Serve's pricing engine is unavailable. Rare, and worth retrying.</td></tr>
+                <tr><td><code>bad_body</code></td><td>Not JSON, empty, or over 10 KB. HTTP 400.</td></tr>
+                <tr><td><code>method_not_allowed</code></td>
+                    <td>This endpoint takes <code>POST</code>. A <code>GET</code> will not price
+                    anything. HTTP 405.</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3>Example</h3>
+            <pre class="api__code"><code>curl -s https://servecleaning.com/api/quote \
+  -H 'Content-Type: application/json' \
+  -d '{"zip":"02116","bedrooms":2,"bathrooms":1,
+       "service":"first_clean","condition":"standard",
+       "frequency_selected":"biweekly"}'</code></pre>
+
+            <h2>2 &middot; Get real times</h2>
+            <p class="api__endpoint"><span class="api__verb">GET</span>
+            https://servecleaning.com/api/slots</p>
+
+            <p>No parameters, no key. Returns the times Serve can currently clean, everywhere in
+            the service area.</p>
+
+            <pre class="api__code"><code>{
+  "ok": true,
+  "generated": "2026-09-25T16:55:36.270Z",
+  "count": 39,
+  "slots": [
+    { "date": "2026-09-26", "time": "9:00 AM",  "open": 1 },
+    { "date": "2026-09-26", "time": "1:30 PM",  "open": 1 }
+  ]
+}</code></pre>
+
+            <ul>
+                <li><code>date</code> is a calendar date with no timezone. <code>time</code> is
+                local to Boston (US Eastern).</li>
+                <li>Times start at least <strong>18 hours</strong> out and run up to
+                <strong>21 days</strong> ahead.</li>
+                <li><code>open</code> is always <code>1</code> on a listed slot. A time that
+                cannot be booked is not listed. It is a flag, not a capacity count.</li>
+                <li><code>generated</code> is when the feed was built. It is rebuilt at most
+                every five minutes, so <strong>polling faster than that returns the same
+                payload</strong> — please do not.</li>
+                <li>An <code>ok: false</code> body means availability is temporarily unreadable.
+                It is still HTTP 200, and it means "ask again", not "no times exist".</li>
+            </ul>
+
+            <p>A slot listed here is not held for you. Availability is published, not reserved,
+            and a time can be taken by someone else between your request and the booking.</p>
+
+            <h2>3 &middot; Hand over a prefilled booking</h2>
+            <p>Send your customer to the booking form with the configuration you quoted on the
+            query string. The form opens already filled in and shows the same price.</p>
+
+            <pre class="api__code"><code>https://servecleaning.com/?zip=02116&amp;bedrooms=2&amp;bathrooms=1
+    &amp;service=first_clean&amp;frequency=biweekly&amp;addon_oven=true#quote</code></pre>
+
+            <p>It accepts the same names and the same values as <code>/api/quote</code>:
+            <code>zip</code>, <code>bedrooms</code>, <code>bathrooms</code>, <code>levels</code>,
+            <code>service</code>, <code>frequency</code>, <code>condition</code>,
+            <code>addon_fridge</code> and <code>addon_oven</code>. Booleans accept
+            <code>true</code> or <code>1</code>.</p>
+
+            <div class="legal__callout">
+                <p><strong>Do not put your customer's name, phone, email or street address on
+                that link.</strong> A URL is written to logs by every network it crosses, kept in
+                browser history, and pasted into chats. The shape of the home belongs on a link;
+                the person living in it does not. Those fields are typed into the form, where
+                they travel in the request body instead.</p>
+            </div>
+
+            <p>Your customer completes the form, chooses one of the times from step 2, gives their
+            own SMS consent, and authorizes their own card through Stripe. Serve emails them a
+            confirmation with a permanent private link to the booking.</p>
+
+            <h2>4 &middot; After the booking</h2>
+            <p>That private link is the same one every time, it does not expire, and it needs no
+            password — the link itself is the key. From it, a customer or an agent they have
+            given it to can see each visit and its price, reschedule, cancel, authorize payment,
+            and record how to get in, where to park and whether there are pets.</p>
+
+            <p>Treat it the way you would treat a password. Anyone holding it can act on that
+            customer's bookings. Access codes for entry are the one thing it will never read
+            back, to anyone, including the customer.</p>
+
+            <h2>Fair use</h2>
+            <p>There is no rate limit and no key, which is a choice that depends on people not
+            abusing it. Two requests, please:</p>
+            <ul>
+                <li>Do not poll <code>/api/slots</code> faster than once every five minutes. It
+                is rebuilt no more often than that, so a faster loop costs Serve real capacity
+                and returns you an identical payload.</li>
+                <li>Quote the homes your customer is actually asking about, rather than
+                enumerating the price table.</li>
+            </ul>
+            <p>If you are building something that needs more than this, write to us — the address
+            is at the bottom of this page — rather than working around it.</p>
+
+            <h2>Terms</h2>
+            <p>Use of these endpoints, and any booking made through them, is governed by Serve's
+            <a href="/terms">Terms of Service</a>. Section 4 covers acting on a customer's behalf
+            as an AI agent, and section 5 covers when a card is authorized and when it is charged.
+            The <a href="/privacy">Privacy Policy</a> covers what Serve stores.</p>
+        </div>
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="footer">
+        <div class="footer__inner">
+            <div class="footer__brand">
+                <span class="footer__logo">Serve</span>
+                <p>Professional home cleaning for Greater Boston.</p>
+            </div>
+            <div class="footer__contact">
+                <p>Questions? Reach us at:</p>
+                <a href="mailto:management@servecos.com">management@servecos.com</a>
+                <a href="tel:+16178047201">(617) 804-7201</a>
+            </div>
+        </div>
+        <div class="footer__copy">
+            <p class="footer__legal">
+                <a href="/terms">Terms of Service</a> &middot;
+                <a href="/privacy">Privacy Policy</a> &middot;
+                <a href="/sms-terms">SMS Terms</a>
+            </p>
+            <p>&copy; 2026 Serve Cleaning. All rights reserved.</p>
+        </div>
+    </footer>
+
+</body>
+</html>

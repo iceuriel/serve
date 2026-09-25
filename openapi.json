@@ -1,0 +1,343 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Serve Home Cleaning",
+    "version": "2026-09-25",
+    "summary": "Instant home cleaning quotes and live availability for Greater Boston.",
+    "description": "Serve is a home cleaning service in Greater Boston. Most cleaning companies cannot quote a home without a phone call or a site visit; Serve prices one from a postal code and a room count in a single request, and publishes the times it can actually clean.\n\nBoth operations are public: no API key, no account, no allow-list, and CORS is open to every origin.\n\nThere is deliberately no booking operation. A booking is completed on the web page at https://servecleaning.com/, which an agent can drive or hand to the customer prefilled, because the final step collects the customer's own SMS consent and their own card details — neither of which a third party should assert on their behalf. See https://servecleaning.com/api-docs for the handoff.",
+    "contact": {
+      "name": "Serve Home Cleaning",
+      "url": "https://servecleaning.com/api-docs",
+      "email": "management@servecos.com"
+    },
+    "termsOfService": "https://servecleaning.com/terms"
+  },
+  "servers": [
+    { "url": "https://servecleaning.com", "description": "Production" }
+  ],
+  "externalDocs": {
+    "description": "Written documentation, including the prefilled booking handoff",
+    "url": "https://servecleaning.com/api-docs"
+  },
+  "paths": {
+    "/api/quote": {
+      "post": {
+        "operationId": "getQuote",
+        "summary": "Price one home",
+        "description": "Returns a firm all-in price for a single cleaning visit, plus what each recurring cadence would cost for the same home. Typically answers in well under a second.\n\nEvery business outcome is HTTP 200. A refusal is `ok: false` with an `error` code, because this endpoint sits on the booking path and is built never to fail in a way that blocks a customer. Only a malformed body (400) and a wrong method (405) are non-200.\n\nA postal code outside the service area is REFUSED rather than priced: the response carries no price and no signature. Do not substitute an estimate.",
+        "tags": ["Quoting"],
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/QuoteRequest" },
+              "examples": {
+                "twoBedBiweekly": {
+                  "summary": "A 2-bedroom in Back Bay, every two weeks",
+                  "value": {
+                    "zip": "02116",
+                    "bedrooms": 2,
+                    "bathrooms": 1,
+                    "levels": 1,
+                    "service": "first_clean",
+                    "condition": "standard",
+                    "frequency_selected": "biweekly"
+                  }
+                },
+                "moveOut": {
+                  "summary": "An empty 3-bedroom being moved out of",
+                  "value": {
+                    "zip": "02139",
+                    "bedrooms": 3,
+                    "bathrooms": 2,
+                    "levels": 2,
+                    "service": "move_out",
+                    "condition": "heavy"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "A price, or a refusal. Check `ok` before reading any other field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    { "$ref": "#/components/schemas/Quote" },
+                    { "$ref": "#/components/schemas/QuoteRefused" }
+                  ]
+                },
+                "examples": {
+                  "priced": {
+                    "summary": "Priced",
+                    "value": {
+                      "ok": true,
+                      "price": 195,
+                      "recurring": { "weekly": 121, "biweekly": 173, "monthly": 298 },
+                      "pricing_version": "2026-08-24",
+                      "quote_sig": "q1.1790362338.32802a14bd1111fdffbb029fc4f283f4db3aa0f9cf46c9d73ed45e49a17c2cc7",
+                      "quote_scope": "q1|02116|2|1|1|first_clean|standard|0|0|biweekly",
+                      "expires_at": 1790362338
+                    }
+                  },
+                  "outOfArea": {
+                    "summary": "Outside the service area — no price is returned",
+                    "value": {
+                      "ok": false,
+                      "error": "out_of_area",
+                      "zip": "90210",
+                      "serves": false,
+                      "area": "Greater Boston and nearby towns"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Body was not JSON, was empty, or exceeded 10 KB.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/QuoteRefused" },
+                "example": { "ok": false, "error": "bad_body" }
+              }
+            }
+          },
+          "405": {
+            "description": "Method other than POST or OPTIONS.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/QuoteRefused" },
+                "example": { "ok": false, "error": "method_not_allowed" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/slots": {
+      "get": {
+        "operationId": "listSlots",
+        "summary": "List bookable times",
+        "description": "The dates and times Serve can currently clean, across the whole service area. No parameters.\n\nTimes begin at least 18 hours out and run up to 21 days ahead. The feed is rebuilt at most every five minutes and `generated` says when — polling faster returns an identical payload, so please do not.\n\nA listed slot is published, not reserved: it can be taken by someone else between this request and a booking.",
+        "tags": ["Availability"],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The feed, or `ok: false` when availability is temporarily unreadable. The second means \"ask again\", not \"no times exist\".",
+            "headers": {
+              "X-Serve-Slots": {
+                "description": "Where this answer came from: `fresh` (held copy, still inside the upstream rebuild window), `live` (just fetched), or `stale` (held copy served because the upstream was slow).",
+                "schema": { "type": "string", "enum": ["fresh", "live", "stale"] }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SlotFeed" },
+                "example": {
+                  "ok": true,
+                  "generated": "2026-09-25T16:55:36.270Z",
+                  "count": 2,
+                  "slots": [
+                    { "date": "2026-09-26", "time": "9:00 AM", "open": 1 },
+                    { "date": "2026-09-26", "time": "1:30 PM", "open": 1 }
+                  ]
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method other than GET, HEAD or OPTIONS."
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {},
+    "schemas": {
+      "QuoteRequest": {
+        "type": "object",
+        "required": ["zip"],
+        "additionalProperties": true,
+        "properties": {
+          "zip": {
+            "type": "string",
+            "description": "5-digit US postal code. A leading zero may be omitted: 2116 and \"02116\" are the same place. Outside the service area the request is refused, not priced.",
+            "examples": ["02116"]
+          },
+          "bedrooms": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0 for a studio. Homes of 5 or more bedrooms are outside the flat-rate table and return `price_failed`; they are quotable by a person.",
+            "examples": [2]
+          },
+          "bathrooms": {
+            "type": "number",
+            "minimum": 0,
+            "multipleOf": 0.5,
+            "description": "Halves allowed.",
+            "examples": [1.5]
+          },
+          "levels": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 1,
+            "description": "Floors in the home."
+          },
+          "service": {
+            "type": "string",
+            "enum": ["first_clean", "move_out"],
+            "default": "first_clean",
+            "description": "`move_out` is a move-in / move-out clean of an empty home: inside every cabinet, the fridge and the oven, all included."
+          },
+          "service_type": {
+            "type": "string",
+            "enum": ["first_clean", "move_out"],
+            "description": "Accepted as an alias for `service`."
+          },
+          "condition": {
+            "type": "string",
+            "enum": ["light", "standard", "heavy"],
+            "default": "standard",
+            "description": "Serve's own booking form never asks a customer to grade their home — it asks when the home was last cleaned professionally and whether there are pets, and derives this. To match it: cleaned recently with no pets is `light`; within a few months, or any home with pets, is `standard`; a long time or never is `heavy`."
+          },
+          "frequency_selected": {
+            "type": "string",
+            "enum": ["once", "weekly", "biweekly", "monthly"],
+            "default": "once",
+            "description": "The cadence the customer intends. Does not change the first visit's price; it selects which recurring figure applies afterwards."
+          },
+          "addon_fridge": {
+            "type": "boolean",
+            "default": false,
+            "description": "Clean inside the fridge. First Clean only — a move clean already includes it."
+          },
+          "addon_oven": {
+            "type": "boolean",
+            "default": false,
+            "description": "Clean inside the oven. First Clean only — a move clean already includes it."
+          }
+        }
+      },
+      "Quote": {
+        "type": "object",
+        "required": ["ok", "price", "pricing_version"],
+        "properties": {
+          "ok": { "const": true },
+          "price": {
+            "type": "integer",
+            "description": "All-in total for this visit in whole US dollars. Nothing is added later: no travel fee, no supplies charge, no per-room extra.",
+            "examples": [195]
+          },
+          "recurring": {
+            "type": ["object", "null"],
+            "description": "What each later visit would cost for this same home, per cadence. Null when the home has no recurring track.",
+            "properties": {
+              "weekly": { "type": "integer" },
+              "biweekly": { "type": "integer" },
+              "monthly": { "type": "integer" }
+            }
+          },
+          "pricing_version": {
+            "type": "string",
+            "description": "The pricing engine that produced this number.",
+            "examples": ["2026-08-24"]
+          },
+          "quote_sig": {
+            "type": ["string", "null"],
+            "description": "Serve's signature over this exact configuration, so the price can be honoured at booking. Pass it through unchanged if you have somewhere to put it; ignore it otherwise. Null when signing is unavailable, which does not affect the price.",
+            "pattern": "^q1\\.[0-9]+\\.[0-9a-f]{64}$"
+          },
+          "quote_scope": {
+            "type": "string",
+            "description": "The configuration the signature covers, pipe-delimited. Opaque: treat it as a token to carry, not a format to parse."
+          },
+          "expires_at": {
+            "type": "integer",
+            "description": "Unix seconds at which `quote_sig` stops being valid — two hours after issue. The price itself is not on that schedule."
+          }
+        }
+      },
+      "QuoteRefused": {
+        "type": "object",
+        "required": ["ok", "error"],
+        "properties": {
+          "ok": { "const": false },
+          "error": {
+            "type": "string",
+            "enum": ["out_of_area", "no_zip", "price_failed", "cannot_price", "bad_body", "method_not_allowed"],
+            "description": "`out_of_area`: Serve does not clean that postal code — no price is returned and none should be guessed. `no_zip`: no postal code sent. `price_failed`: home outside the flat-rate table, most often 5+ bedrooms; quotable by a person. `cannot_price`: pricing engine unavailable, worth retrying. `bad_body`: not JSON, empty, or over 10 KB. `method_not_allowed`: not a POST."
+          },
+          "zip": {
+            "type": "string",
+            "description": "On `out_of_area`, the postal code that was refused."
+          },
+          "serves": {
+            "type": "boolean",
+            "description": "On `out_of_area`, always false."
+          },
+          "area": {
+            "type": "string",
+            "description": "On `out_of_area`, a plain description of where Serve does work.",
+            "examples": ["Greater Boston and nearby towns"]
+          }
+        }
+      },
+      "SlotFeed": {
+        "type": "object",
+        "required": ["ok"],
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "description": "False means availability is temporarily unreadable, not that no times exist."
+          },
+          "generated": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this feed was built. Rebuilt at most every five minutes."
+          },
+          "count": {
+            "type": "integer",
+            "description": "Number of entries in `slots`."
+          },
+          "slots": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Slot" }
+          }
+        }
+      },
+      "Slot": {
+        "type": "object",
+        "required": ["date", "time"],
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "description": "Calendar date, no timezone.",
+            "examples": ["2026-09-26"]
+          },
+          "time": {
+            "type": "string",
+            "description": "Start time, local to Boston (US Eastern).",
+            "examples": ["9:00 AM"]
+          },
+          "open": {
+            "type": "integer",
+            "const": 1,
+            "description": "Always 1 on a listed slot. A time that cannot be booked is not listed. This is a flag, not a capacity count."
+          }
+        }
+      }
+    }
+  },
+  "security": [],
+  "tags": [
+    { "name": "Quoting", "description": "Price a home without a phone call or a visit." },
+    { "name": "Availability", "description": "The times Serve can actually clean." }
+  ]
+}

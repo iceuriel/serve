@@ -62,7 +62,15 @@ mkdir -p "$OUT"
 # throw on a feed that answered perfectly, land in the same catch as a network
 # error, and silently serve the earlier/later radios instead — a working site
 # quietly losing its live availability, in production only.
-cp index.html pricing.html services.html privacy.html terms.html sms-terms.html serve-geo-data.js pricing-engine.js serve-services.js serve-scope.js serve-slots.js script.js style.css "$OUT"/
+#
+# api-docs.html is served at /api-docs and openapi.json at /openapi.json. They
+# are the contract for the two public endpoints, /api/quote and /api/slots, and
+# they exist for AI agents that shop on a customer's behalf rather than for
+# people. Both are linked from robots.txt and listed in sitemap.xml, and the
+# openapi.json URL is what was submitted to a connector programme — so a file
+# advertised in three places and staged in none would 404 for exactly the
+# audience it was written for, while working perfectly on a local file open.
+cp index.html pricing.html services.html privacy.html terms.html sms-terms.html api-docs.html openapi.json serve-geo-data.js pricing-engine.js serve-services.js serve-scope.js serve-slots.js script.js style.css "$OUT"/
 
 # j.html is served at /j and renders ONE job from an id in the query string.
 # It is not in the sitemap and carries noindex both in the markup and as an
@@ -112,10 +120,24 @@ echo "--- published files ---"
 find "$OUT" -type f | sort
 
 # --- guard: nothing private may reach the artifact ---
-if find "$OUT" -type f \( -name '*.md' -o -name '*.gs' -o -name '*.json' -o -name '*.toml' -o -name '*.sh' \) | grep -q .; then
+#
+# THE ONE PERMITTED .json IS openapi.json, named rather than pattern-matched.
+# The extension is on this list because package.json, wrangler.toml and the
+# Apps Script sources all end up in the repo root and none of them may ship;
+# the API spec is the single deliberate exception, and it is spelled out in
+# full so that adding a SECOND .json still has to be an argued decision rather
+# than something a loosened glob lets through silently.
+# The patterns stay INLINE and quoted. Holding them in a variable and expanding
+# it unquoted lets the shell glob `*.md` against the working directory before
+# find ever sees it, which turns this guard into a syntax error — briefly true
+# on 2026-09-25, and a guard that errors is a guard that stops guarding.
+leaked=$(find "$OUT" -type f \
+  \( -name '*.md' -o -name '*.gs' -o -name '*.json' -o -name '*.toml' -o -name '*.sh' \) \
+  ! -name 'openapi.json')
+if [ -n "$leaked" ]; then
   echo ""
   echo "ERROR: private-looking files staged for publication:"
-  find "$OUT" -type f \( -name '*.md' -o -name '*.gs' -o -name '*.json' -o -name '*.toml' -o -name '*.sh' \)
+  echo "$leaked"
   exit 1
 fi
 

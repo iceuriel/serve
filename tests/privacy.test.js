@@ -112,8 +112,19 @@ console.log('\n=== 4b. scripts/build-site.sh publishes an allow-list ===');
 const bs = fs.readFileSync(path.join(REPO_ROOT, 'scripts', 'build-site.sh'), 'utf8');
 ['index.html', 'script.js', 'style.css', 'images'].forEach(a =>
   t('stages ' + a, new RegExp('cp\\s+(-r\\s+)?[^\\n]*' + a.replace('.', '\\.')).test(bs)));
+/* MATCHED AS A WHOLE ARGUMENT, NOT AS A SUBSTRING. `\bdocs\b` also matches
+   inside `api-docs.html`, which is a published page — so the guard failed on a
+   file it was never meant to be about, on 2026-09-25. What it is actually
+   forbidding is the DIRECTORY: `docs`, `docs/`, `./docs`. Anchoring on the
+   whitespace before the argument keeps `api-docs.html` out of it while still
+   catching every real way of staging the folder. */
 ['docs', 'apps-script', 'tests', 'CLAUDE.md'].forEach(p =>
-  t('never stages ' + p, !new RegExp('cp\\s+(-r\\s+)?[^\\n]*\\b' + p.replace('.', '\\.') + '\\b').test(bs)));
+  t('never stages ' + p,
+    /* The middle group is OPTIONAL so the name is caught as the FIRST argument
+       too — `cp CLAUDE.md "$OUT"/` has its boundary eaten by `cp\s+` and
+       survived an earlier draft of this very fix. */
+    !new RegExp('cp\\s+(-r\\s+)?([^\\n]*[\\s"\'])?\\.?/?' +
+                p.replace('.', '\\.') + '[/\\s"\']').test(bs)));
 t('guards against private file types', /ERROR: private-looking files/.test(bs));
 t('fails the build on a guard hit', /exit 1/.test(bs));
 

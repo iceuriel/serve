@@ -2659,6 +2659,112 @@ a {
 
 
 /* ============================================================
+   API DOCS  (/api-docs)
+   ------------------------------------------------------------
+   Reuses the .legal page shell — same nav, width, headings and callouts as
+   /terms — and adds only what prose does not have: endpoints, request tables
+   and code. Namespaced .api__ so none of it can reach the legal pages.
+
+   THE TABLE SCROLLS RATHER THAN SQUASHING. A field reference at 390px with
+   three columns crushed to nothing is unreadable, and wrapping `addon_fridge`
+   mid-word is worse than a sideways swipe.
+   ============================================================ */
+
+.api__endpoint {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.95rem;
+    word-break: break-all;
+    background: var(--color-bg-light);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 0.7rem 0.9rem;
+    margin-bottom: 1rem;
+}
+
+.api__verb {
+    display: inline-block;
+    background: var(--color-dark);
+    color: #fff;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    border-radius: 4px;
+    padding: 0.15rem 0.45rem;
+    margin-right: 0.5rem;
+    vertical-align: 0.05em;
+}
+
+.legal code,
+.api__code code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.9em;
+}
+
+.legal p > code,
+.legal li > code,
+.legal td > code,
+.legal th > code {
+    background: var(--color-bg-light);
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    padding: 0.05em 0.35em;
+    white-space: nowrap;
+}
+
+.api__code {
+    background: var(--color-bg-light);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 0.9rem 1rem;
+    margin-bottom: 1.25rem;
+    overflow-x: auto;
+    line-height: 1.55;
+}
+
+.api__code code {
+    background: none;
+    border: 0;
+    padding: 0;
+    white-space: pre;
+}
+
+.api__steps {
+    margin-bottom: 1.25rem;
+    padding-left: 1.2rem;
+}
+
+.api__steps li {
+    margin-bottom: 0.5rem;
+}
+
+.api__table-wrap {
+    overflow-x: auto;
+    margin-bottom: 1.25rem;
+}
+
+.api__table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 30rem;
+    font-size: 0.95rem;
+}
+
+.api__table th,
+.api__table td {
+    text-align: left;
+    vertical-align: top;
+    padding: 0.55rem 0.7rem;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.api__table th {
+    font-weight: 700;
+    background: var(--color-bg-light);
+}
+
+
+/* ============================================================
    JOB TICKET  (/j)
    ------------------------------------------------------------
    The only surface a contractor ever touches, and the customer's record of

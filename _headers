@@ -88,6 +88,29 @@
   Content-Type: text/html; charset=utf-8
   Cache-Control: public, max-age=0, must-revalidate
 
+# The agent-facing API contract. api-docs.html describes /api/quote and
+# /api/slots; openapi.json is the same contract in machine-readable form and is
+# the URL handed to a connector programme. Both must revalidate for the same
+# reason the legal pages do: a reviewer or an agent re-fetching a cached copy
+# after a field changed would build against a contract Serve no longer honours.
+#
+# openapi.json is declared application/json explicitly. Served as text/plain it
+# still renders for a human and is silently rejected by every spec parser that
+# matters, which is the kind of failure nobody notices until a submission is
+# already refused.
+/api-docs
+  Content-Type: text/html; charset=utf-8
+  Cache-Control: public, max-age=0, must-revalidate
+
+/api-docs.html
+  Content-Type: text/html; charset=utf-8
+  Cache-Control: public, max-age=0, must-revalidate
+
+/openapi.json
+  Content-Type: application/json; charset=utf-8
+  Cache-Control: public, max-age=0, must-revalidate
+  Access-Control-Allow-Origin: *
+
 # Published pricing and scope. Both render their tables from script.js, so a
 # stale copy of either would show numbers that no longer match the calculator —
 # the one thing the shared price function exists to prevent. Same revalidate
