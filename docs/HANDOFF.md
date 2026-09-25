@@ -13,6 +13,100 @@ except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-09-25, Claude Code: Serve becomes callable by an agent
+
+**Three commits, none pushed: `e52b0c4`, `ad60554`, `5278624`.** All site and
+Worker changes — no Apps Script change, so nothing here waits on a deploy. 42
+test files pass.
+
+Done for the Muse connector application, whose technical-specs form asks for an
+API URL, a documentation URL and an OpenAPI spec. Two of those did not exist
+and the first was quietly wrong.
+
+### The two bugs this found, both on the agent path
+
+**`/api/quote` priced Beverly Hills.** `POST` with `zip: 90210` answered
+`ok:true` and a confident **$183** beside a real signature. `zipTier()` returns
+`'unknown'` for a ZIP in neither tier and `serveGeo()` falls back to neutral
+geography for one, so nothing refused it. The booking *form* never showed that
+number — the browser gates on the same tier and offers the waitlist — but this
+endpoint had no gate, and **it is the one an agent calls.** Now
+`ok:false, error:"out_of_area"`, ZIP echoed, no price, no signature.
+
+**The prefill link and the API spoke different languages.** The API takes
+`bedrooms`/`bathrooms`/`service=first_clean|move_out`; the link took
+`beds`/`baths`/`service=deep|recurring|moveinout`, a vocabulary invented for the
+published price tables. An agent that quoted through the API and built a link
+from the words it had just learned got a page that **loaded and ignored every
+parameter** — no error, no console message. Both vocabularies work now; the
+three table tokens are permanent (they are in live hrefs and in links already
+sent).
+
+### What is now public
+
+| Route | Shape | Why it is safe |
+|---|---|---|
+| `POST /api/quote` | unchanged, plus the ZIP gate | pure computation, no credential |
+| `GET /api/slots` | **newly cross-origin** | read-only, and its upstream cost is now capped |
+
+`/api/slots` needed two changes before it could be published:
+
+- **It was broadcasting the order book.** Each slot carried `open` — how many
+  cleanings could still be sold at that hour. Verbatim, it read: two slots a
+  day, every day for three weeks, every one open. A precise machine-readable
+  statement that Serve has no bookings, free to any agent or competitor.
+  Clamped to `1` rather than dropped, because `serve-slots.js` filters on
+  `s.open > 0` and removing the field would empty the booking form's own picker.
+- **Every caller cost an Apps Script execution**, and the *same daily quota
+  takes bookings.* A public documented endpoint polled once a second would have
+  burned the budget by lunch and taken `/api/submit` down with it — the first
+  symptom of a scraper would have been customers unable to book. Now capped:
+  `availability.gs` caches 300s and stamps `generated`, so a held feed younger
+  than that window is served without touching the upstream at all
+  (`X-Serve-Slots: fresh`). A feed with no stamp, or one stamped in the future,
+  is never assumed fresh.
+
+### The documents
+
+`/api-docs` (prose) and `/openapi.json` (OpenAPI 3.1). Both state plainly that
+**there is no booking endpoint**, and why: the final step collects the
+customer's own SMS consent and their own card, neither of which a third party
+should assert. `tests/api-docs.test.js` types nothing twice — services and
+conditions read from `pricing-engine.js`, error codes from `handleQuote`, the
+18h/21d horizon and 300s cache from `availability.gs`, the 2h signature TTL from
+`QUOTE_TTL_S`, the prefill names from `script.js`'s own reader — so the docs
+cannot drift from the code without going red.
+
+### Three things found while wiring up publication
+
+- `privacy.test.js`'s "never stages docs" guard matched `\bdocs\b`, which also
+  matches inside `api-docs.html`. Tightened to mean the *directory* and
+  re-verified against seven real ways of staging one — including
+  `cp CLAUDE.md "$OUT"/`, which survived the first fix because `cp\s+` had
+  already eaten the word boundary.
+- `build-site.sh` refuses to stage any `*.json`. `openapi.json` is now the one
+  named exception, spelled out rather than loosened to a glob.
+- Holding that guard's patterns in a shell variable and expanding it unquoted
+  let the shell glob `*.md` against the working directory before `find` saw it,
+  turning the guard into a syntax error. **A guard that errors is a guard that
+  stops guarding.**
+
+### What was NOT verified
+
+- Nothing is pushed, so none of this is in production. Every probe above is
+  against the local suite or a local copy of the staged `_site`.
+- The 390px reflow of `/api-docs` was not seen — this Chrome will not size a
+  window below ~500px. The mobile claim rests on the asserted `overflow-x: auto`
+  rule, not on a screenshot.
+
+### Still open, and the founder's call
+
+The **booking horizon is 21 days and a Stripe hold lasts 7**, so every booking
+made more than a week out has a hold that dies before the cleaner arrives. See
+the r61 entry below and shared memory. Unchanged by this session.
+
+---
+
 ## Current work — 2026-09-25, Claude Code: somebody is told the card moved
 
 **Apps Script r61. NOT LIVE until it is pasted and deployed.** Committed as
