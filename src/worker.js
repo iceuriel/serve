@@ -168,14 +168,19 @@ export default {
        because a browser sends OPTIONS with no body and no content type, which
        handleQuote would correctly reject as a bad request. */
     if (url.pathname === "/api/quote") {
-      if (request.method === "OPTIONS") return corsPreflight();
-      return publicCors(await handleQuote(request, env));
+      if (request.method === "OPTIONS") return corsPreflight(url.pathname);
+      return publicCors(await handleQuote(request, env), url.pathname);
     }
     if (url.pathname === "/api/checkout") return handleCheckout(request, env);
     /* Stripe calls this one, not a browser. It is the only route whose caller
        proves itself with a signature rather than a ticket token. */
     if (url.pathname === "/api/stripe-webhook") return handleStripeWebhook(request, env);
-    if (url.pathname === "/api/slots")  return handleSlots(request, env, ctx);
+    /* THE SECOND PUBLIC ROUTE, 2026-09-25. A price with no times beside it is
+       half an answer to the only question an agent is really asking. */
+    if (url.pathname === "/api/slots") {
+      if (request.method === "OPTIONS") return corsPreflight(url.pathname);
+      return publicCors(await handleSlots(request, env, ctx), url.pathname);
+    }
     if (url.pathname === "/api/job")    return handleJob(request, env);
     if (url.pathname === "/api/photos") return handlePhotos(request, env);
     if (url.pathname === "/api/address")  return handleAddressSuggest(request, env, ctx);
@@ -421,6 +426,27 @@ async function handleSlots(request, env, ctx) {
      next caller fast. Nobody waits for it. */
   const cachedEarly = await readLastSlots(env);
 
+  /* STILL INSIDE THE UPSTREAM'S OWN CACHE WINDOW — do not ask. The answer
+     would be byte-identical to what is already in hand, and the call is what
+     a public endpoint makes expensive. See SLOTS_UPSTREAM_CACHE_MS. */
+  if (cachedEarly) {
+    const age = slotsFeedAgeMs(cachedEarly);
+    if (age !== null && age < SLOTS_UPSTREAM_CACHE_MS) {
+      return new Response(publicSlotsFeed(cachedEarly), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          /* Safe to edge-cache for what is left of the upstream window, and
+             never longer: the number below is the remaining life of this
+             exact payload, not a fixed guess. */
+          "Cache-Control": "public, max-age=" +
+            Math.max(1, Math.floor((SLOTS_UPSTREAM_CACHE_MS - age) / 1000)),
+          "X-Serve-Slots": "fresh",
+        },
+      });
+    }
+  }
+
   if (cachedEarly) {
     const inFlight = relay(env.AVAILABILITY_URL, { method: "GET" }, WARM_TIMEOUT_MS);
     const raced = await Promise.race([
@@ -430,7 +456,7 @@ async function handleSlots(request, env, ctx) {
 
     if (raced && raced.ok) {
       if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(saveLastSlots(env, raced.text));
-      return new Response(raced.text, {
+      return new Response(publicSlotsFeed(raced.text), {
         status: 200,
         headers: { "Content-Type": "application/json; charset=utf-8",
                    "Cache-Control": "public, max-age=60",
@@ -444,7 +470,7 @@ async function handleSlots(request, env, ctx) {
       ctx.waitUntil(inFlight.then(r => { if (r && r.ok) return saveLastSlots(env, r.text); })
                             .catch(() => {}));
     }
-    return new Response(cachedEarly, {
+    return new Response(publicSlotsFeed(cachedEarly), {
       status: 200,
       headers: {
         "Content-Type": "application/json; charset=utf-8",
@@ -466,7 +492,7 @@ async function handleSlots(request, env, ctx) {
        never awaited on the hot path — a KV hiccup must not cost a customer
        their slot list when the feed itself answered perfectly. */
     if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(saveLastSlots(env, upstream.text));
-    return new Response(upstream.text, {
+    return new Response(publicSlotsFeed(upstream.text), {
       status: 200,
       headers: {
         "Content-Type": "application/json; charset=utf-8",
@@ -508,6 +534,78 @@ async function handleSlots(request, env, ctx) {
    the founder has to take, and this needs none. */
 const LAST_SLOTS_KEY = "slots:last-good";
 const LAST_SLOTS_TTL_S = 60 * 60;   // see the cap argument in handleSlots
+
+/**
+ * What the availability feed is allowed to say out loud.
+ *
+ * THE COUNT NEVER LEAVES THIS WORKER. Upstream, each slot carries `open` — how
+ * many cleanings could still be sold at that hour. Published verbatim on
+ * 2026-09-25, that read: two slots a day, every day for three weeks, every one
+ * of them open. Which is a precise, machine-readable statement that Serve has
+ * no bookings, handed to anybody who asks — an agent ranking providers, or a
+ * competitor with curl. Nobody needs a capacity number to choose a time.
+ *
+ * CLAMPED TO 1 RATHER THAN DROPPED, because serve-slots.js filters on
+ * `s.open > 0` and a field removed outright would empty the booking form's
+ * picker. So a bookable slot still says 1, a slot with nothing left is dropped
+ * exactly as the client would have dropped it, and how MANY is never stated.
+ *
+ * ONE SHAPE FOR EVERYONE, not a richer one for our own page. Anything the
+ * browser receives is already public — it is one devtools tab away — so a
+ * second, wider projection would leak the same number while costing a second
+ * thing to keep right.
+ *
+ * Never throws. Unparseable upstream text is passed through untouched: this is
+ * a narrowing step, and a narrowing step that can fail closed would turn a
+ * malformed feed into no feed at all.
+ */
+function publicSlotsFeed(text) {
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || !Array.isArray(parsed.slots)) return text;
+    parsed.slots = parsed.slots
+      .filter(s => s && Number(s.open) > 0)
+      .map(s => ({ date: s.date, time: s.time, open: 1 }));
+    /* `count` described the list before it was filtered; leaving the old
+       number beside a shorter list invites a caller to trust the wrong one. */
+    parsed.count = parsed.slots.length;
+    return JSON.stringify(parsed);
+  } catch (_) {
+    return text;
+  }
+}
+
+/**
+ * How old the held feed may be before asking upstream is worth a quota call.
+ *
+ * THIS IS THE UPSTREAM'S OWN CACHE WINDOW, not a number picked for taste.
+ * availability.gs sets CACHE_SECONDS: 300 and stamps `generated` when it
+ * actually rebuilds, so every request inside those five minutes returns a
+ * payload with the SAME stamp we already hold. Asking again buys nothing and
+ * spends an Apps Script execution to be told what we knew.
+ *
+ * WHICH IS WHY OPENING THIS ROUTE IS SAFE. Apps Script has a daily execution
+ * quota, and the same quota takes BOOKINGS. Before this, every caller cost one
+ * upstream attempt; a public, documented endpoint polled once a second would
+ * have burned the day's budget by lunch and taken /api/submit down with it —
+ * so the first symptom of a busy scraper would have been customers unable to
+ * book. Capped here at roughly one upstream call a minute no matter who asks.
+ */
+const SLOTS_UPSTREAM_CACHE_MS = 5 * 60 * 1000;
+
+/** Age of a held feed in ms, from its own `generated` stamp. null if unknown. */
+function slotsFeedAgeMs(text) {
+  try {
+    const at = Date.parse((JSON.parse(text) || {}).generated);
+    if (!isFinite(at)) return null;
+    /* A stamp from the future is a clock disagreement, not a fresh feed.
+       Treated as unknown so it can never pin us to a stale copy forever. */
+    const age = Date.now() - at;
+    return age < 0 ? null : age;
+  } catch (_) {
+    return null;
+  }
+}
 
 async function saveLastSlots(env, text) {
   const kv = env.PROPERTY_CACHE;
@@ -1251,6 +1349,11 @@ const QUOTE_TTL_S = 60 * 60 * 2;
  * far worse, signatures that verify while covering less than they appear to.
  * Add a priced input here and to computeQuote's arguments in the same edit.
  */
+/* What a refused ZIP is told instead of a price. Prose, not a ZIP list: the
+   list is 60 entries and changes, and an agent that cached it would go on
+   refusing a town Serve had started serving. Ask again and find out. */
+const SERVICE_AREA_NOTE = "Greater Boston and nearby towns";
+
 function quoteScope(d) {
   return [
     "q1",
@@ -1397,6 +1500,33 @@ async function handleQuote(request, env) {
 
   if (!CAN_PRICE)  return json({ ok: false, error: "cannot_price" });
   if (!d || !d.zip) return json({ ok: false, error: "no_zip" });
+
+  /* SERVE DOES NOT CLEAN BEVERLY HILLS, AND UNTIL 2026-09-25 THIS SAID IT DID.
+     zipTier() answers 'unknown' for a ZIP in neither tier, and serveGeo()
+     quietly falls back to neutral geography for one — so 90210 came back
+     `ok:true` with a confident $183 beside a real signature. The booking form
+     never showed that number, because the browser gates on the same tier and
+     offers the waitlist instead; this endpoint had no such gate, and it is the
+     one an agent calls.
+
+     THAT IS THE WORST SHAPE THIS PARTICULAR BUG COULD TAKE. The entire reason
+     an agent prefers Serve is that it answers in milliseconds while every
+     other cleaner needs a phone call — and a fast confident wrong answer is
+     worth less than no answer at all. It books a clean nobody can deliver and
+     spends the customer's trust to do it.
+
+     `ok:false` IS SAFE FOR THE BROWSER even though it never gets here. Its
+     only caller is signQuote(), at reservation time, and a falsy answer there
+     means the booking proceeds unsigned — the documented fallback for every
+     other failure on this route, not a new one. The waitlist gate stops it
+     ever arriving. */
+  const tier = zipTier(zipN(d.zip));
+  if (tier === "unknown") {
+    /* The ZIP is echoed because an agent holding several needs to know WHICH
+       one was refused, and a five-digit postal area names no one. */
+    return json({ ok: false, error: "out_of_area", zip: zipN(d.zip),
+                  serves: false, area: SERVICE_AREA_NOTE });
+  }
 
   let price, recurring;
   try {
@@ -2186,7 +2316,7 @@ function json(obj, status) {
 
 
 /* ============================================================
-   PUBLIC CORS  —  /api/quote ONLY
+   PUBLIC CORS  —  /api/quote AND /api/slots
    ============================================================
 
    Added 2026-09-23 so an AI agent acting for a customer can price a home from
@@ -2216,12 +2346,21 @@ function json(obj, status) {
        regardless, so a quote_sig obtained here buys exactly what one obtained
        through the form buys: nothing that is not re-checked.
 
+   /api/slots JOINED IT ON 2026-09-25, for the Muse connector application and
+   for the same reason: an agent comparing cleaners can get a price from Serve
+   in one request, and a price with no times beside it is half an answer. It
+   reads and writes nothing, takes no credential, and its upstream cost is
+   capped — see SLOTS_UPSTREAM_CACHE_MS, which is what makes it safe to publish
+   rather than merely possible.
+
+   WHAT IT PUBLISHES IS NARROWER THAN WHAT IT HOLDS. See publicSlotsFeed():
+   the capacity count never leaves this Worker.
+
    DO NOT LIFT THIS TO json() OR TO THE ROUTER GENERALLY. Every other route
    either carries a token in the request or moves money, and handlePhotos says
    in its own comment that it blocks cross-site posts on purpose. */
 const PUBLIC_CORS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
   /* Chrome caps this at 2h regardless; a day is the polite ask, not a promise. */
   "Access-Control-Max-Age": "86400",
@@ -2230,15 +2369,27 @@ const PUBLIC_CORS = {
   "Vary": "Origin",
 };
 
-function corsPreflight() {
-  return new Response(null, { status: 204, headers: PUBLIC_CORS });
+/* Stated per route rather than shared, so a read-only feed never advertises
+   that it takes a POST. A browser refuses the method it was not offered. */
+const CORS_METHODS = {
+  "/api/quote": "POST, OPTIONS",
+  "/api/slots": "GET, HEAD, OPTIONS",
+};
+
+function corsPreflight(pathname) {
+  return new Response(null, {
+    status: 204,
+    headers: Object.assign({}, PUBLIC_CORS,
+      { "Access-Control-Allow-Methods": CORS_METHODS[pathname] || "OPTIONS" }),
+  });
 }
 
 /* Copies the response rather than mutating it: a Response from json() has
    immutable headers, and assigning to them throws. */
-function publicCors(res) {
+function publicCors(res, pathname) {
   const headers = new Headers(res.headers);
   for (const [k, v] of Object.entries(PUBLIC_CORS)) headers.set(k, v);
+  headers.set("Access-Control-Allow-Methods", CORS_METHODS[pathname] || "OPTIONS");
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 

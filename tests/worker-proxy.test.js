@@ -381,13 +381,23 @@ console.log('\n=== 4c. r56: GET /api/booking-status — the cheap question behin
   }
 }
 
+/* THE TIMES A CALLER ACTUALLY RECEIVES, whatever wrapping happened on the way.
+   Byte-identity stopped being the right assertion on 2026-09-25, when this
+   route started narrowing what it publishes — see publicSlotsFeed. Shared by
+   sections 5, 5b and 5c so all three ask the same question of the answer. */
+const FEED_FIXTURE =
+  '{"ok":true,"count":2,"slots":[{"date":"2026-08-07","time":"12:00 PM","open":1}]}';
+const times = b => JSON.parse(b).slots.map(s => s.date + ' ' + s.time).join(', ');
+
 console.log('\n=== 5. GET /api/slots — degrades, never blocks booking ===');
 {
-  const feed = '{"ok":true,"count":2,"slots":[{"date":"2026-08-07","time":"12:00 PM","open":1}]}';
+  const feed = FEED_FIXTURE;
+  const FEED_TIMES = times(feed);
+
   const { worker, calls } = loadWorker(ok(feed));
   const res  = await worker.fetch(get('/api/slots'), ENV);
   const body = await res.text();
-  t('feed passed through verbatim', body === feed);
+  t('every time in the feed reaches the caller', times(body) === FEED_TIMES, body);
   t('called AVAILABILITY_URL', calls.find(c => c.target).target === ENV.AVAILABILITY_URL);
   t('briefly cacheable — the feed is already 5 min stale upstream',
     /max-age=\d+/.test(res.headers.get('Cache-Control')));
@@ -434,7 +444,8 @@ console.log('\n=== 5b. a cold upstream must not cost the customer their slot lis
      time, and the page looked healthy throughout. These tests exist so it
      cannot go quiet again. */
 
-  const feed = '{"ok":true,"count":2,"slots":[{"date":"2026-08-07","time":"12:00 PM","open":1}]}';
+  const feed = FEED_FIXTURE;
+  const FEED_TIMES = times(feed);
   const kvBox = () => {
     const store = new Map();
     return { store,
@@ -462,7 +473,7 @@ console.log('\n=== 5b. a cold upstream must not cost the customer their slot lis
     const { worker, calls } = loadWorker(boom('ETIMEDOUT'));
     const res = await worker.fetch(get('/api/slots'), { ...ENV, PROPERTY_CACHE: kv }, ctx);
     const body = await res.text();
-    t('a timeout serves the cached feed, not ok:false', body === feed, body.slice(0, 60));
+    t('a timeout serves the cached feed, not ok:false', times(body) === FEED_TIMES, body.slice(0, 80));
     t('and says so, so it is measurable from outside',
       res.headers.get('X-Serve-Slots') === 'stale', res.headers.get('X-Serve-Slots'));
     /* A stale answer handed to everyone for the next minute would keep the
@@ -501,7 +512,7 @@ console.log('\n=== 5b. a cold upstream must not cost the customer their slot lis
     const took = Date.now() - started;
     const body = await res.text();
     t('a slow upstream is abandoned well inside the browser\'s 5s budget', took < 4000, took + 'ms');
-    t('and the customer still gets a real slot list', body === feed);
+    t('and the customer still gets a real slot list', times(body) === FEED_TIMES, body.slice(0, 80));
     t('labelled stale, so the cause is visible', res.headers.get('X-Serve-Slots') === 'stale',
       res.headers.get('X-Serve-Slots'));
   }
@@ -561,7 +572,162 @@ console.log('\n=== 5b. a cold upstream must not cost the customer their slot lis
     const ctx = ctxBox();
     const { worker } = loadWorker(ok(feed));
     const res = await worker.fetch(get('/api/slots'), ENV, ctx);
-    t('works with no KV bound', (await res.text()) === feed);
+    t('works with no KV bound', times(await res.text()) === FEED_TIMES);
+  }
+
+  /* ============================================================
+     5c. THE FEED GOES PUBLIC  —  2026-09-25
+     ============================================================
+     Opened cross-origin for the Muse connector application: an agent that can
+     get a price from Serve in one request but no TIMES has half an answer.
+     Two things had to change first, and both are asserted here rather than
+     assumed. */
+  console.log('\n=== 5c. /api/slots is public, and narrower than it was ===');
+
+  /* ---- what it must no longer say ---- */
+  {
+    /* Upstream, `open` is how many cleanings could still be sold at that hour.
+       Published verbatim it read: two slots a day, every day for three weeks,
+       every one open — a precise machine-readable statement that Serve has no
+       bookings, handed to any agent or competitor that asks. */
+    const busy = JSON.stringify({ ok: true, count: 3, slots: [
+      { date: '2026-08-07', time: '9:00 AM',  open: 4 },
+      { date: '2026-08-07', time: '1:30 PM',  open: 1 },
+      { date: '2026-08-08', time: '9:00 AM',  open: 0 },
+    ] });
+    const { worker } = loadWorker(ok(busy));
+    const out = JSON.parse(await (await worker.fetch(get('/api/slots'), ENV)).text());
+
+    t('a capacity of 4 is never published',
+      out.slots.every(s => s.open === 1), out.slots);
+    t('   and the times themselves are untouched',
+      out.slots.map(s => s.time).join() === '9:00 AM,1:30 PM', out.slots);
+    /* CLAMPED, NOT DROPPED: serve-slots.js filters on `s.open > 0`, so a field
+       removed outright would empty the booking form's own picker. */
+    t('   but `open` still EXISTS, or the booking form shows no times at all',
+      out.slots.every(s => 'open' in s), out.slots);
+    t('a slot with nothing left is dropped, as the client would have dropped it',
+      out.slots.length === 2, out.slots);
+    t('   and `count` is corrected to match, never left describing the old list',
+      out.count === 2, out.count);
+    t('no field beyond date/time/open survives the projection',
+      out.slots.every(s => Object.keys(s).sort().join() === 'date,open,time'), out.slots);
+  }
+  {
+    /* A narrowing step that failed closed would turn a malformed feed into no
+       feed, which is strictly worse than the malformed feed. */
+    const { worker } = loadWorker(ok('not json at all'));
+    const res = await worker.fetch(get('/api/slots'), ENV);
+    t('an unparseable upstream body is passed through, not swallowed',
+      (await res.text()) === 'not json at all', res.status);
+  }
+  {
+    /* AND THE CASE THAT IS NOT MALFORMED AT ALL. The upstream answers
+       `{ok:false}` when availability is unconfigured or erroring, and the site
+       treats that exactly like an empty feed — it shows the earlier/later
+       radios and the booking continues. A projection that replaced an
+       unrecognised shape with something of its own would turn that documented
+       fallback into a body the site cannot read. Mutation testing found this
+       gap: the previous case only covered text that fails to parse. */
+    const down = '{"ok":false,"error":"upstream_busy"}';
+    const { worker } = loadWorker(ok(down));
+    const res = await worker.fetch(get('/api/slots'), ENV);
+    t('valid JSON carrying no slot list is passed through untouched',
+      (await res.text()) === down, res.status);
+  }
+
+  /* ---- the CORS headers, and the methods they name ---- */
+  {
+    const { worker } = loadWorker(ok(feed));
+    const res = await worker.fetch(get('/api/slots'), ENV);
+    t('the feed answers any origin', res.headers.get('Access-Control-Allow-Origin') === '*',
+      res.headers.get('Access-Control-Allow-Origin'));
+    /* A read-only feed must not advertise that it takes writes. */
+    const allow = res.headers.get('Access-Control-Allow-Methods') || '';
+    t('and offers only read methods', /GET/.test(allow) && !/POST/.test(allow), allow);
+    t('   while /api/quote still offers POST, not GET',
+      (await (await worker.fetch(new Request('https://servecleaning.com/api/quote',
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }), ENV))
+        .headers.get('Access-Control-Allow-Methods') || '').includes('POST'));
+
+    const pre = await worker.fetch(new Request('https://servecleaning.com/api/slots',
+      { method: 'OPTIONS' }), ENV);
+    t('a preflight is answered 204', pre.status === 204, pre.status);
+    t('   naming the read methods', /GET/.test(pre.headers.get('Access-Control-Allow-Methods') || ''),
+      pre.headers.get('Access-Control-Allow-Methods'));
+    /* With Allow-Origin: * the pair is rejected by every browser anyway, and
+       adding it to a route that later grew a cookie is the quiet mistake. */
+    t('   and never allows credentials',
+      pre.headers.get('Access-Control-Allow-Credentials') === null);
+  }
+
+  /* ---- the quota cap that makes publishing it safe ---- */
+  {
+    /* Apps Script has a daily execution quota and the SAME quota takes
+       bookings. Before this, every caller cost one upstream attempt; a public
+       documented endpoint polled once a second would have burned the day's
+       budget by lunch and taken /api/submit down with it. availability.gs
+       caches 300s and stamps `generated` when it rebuilds, so asking again
+       inside that window returns a payload we already hold. */
+    const fresh = JSON.stringify({ ok: true, count: 1, generated: new Date().toISOString(),
+      slots: [{ date: '2026-08-07', time: '9:00 AM', open: 1 }] });
+    const kv = kvBox(), ctx = ctxBox();
+    kv.store.set('slots:last-good', fresh);
+    const { worker, calls } = loadWorker(ok(feed));
+    const res = await worker.fetch(get('/api/slots'), { ...ENV, PROPERTY_CACHE: kv }, ctx);
+    await settle(ctx);
+
+    t('a feed still inside the upstream cache window costs NO upstream call',
+      calls.filter(c => c.target === ENV.AVAILABILITY_URL).length === 0,
+      calls.map(c => c.target));
+    t('   and is labelled fresh, so the saving is measurable from outside',
+      res.headers.get('X-Serve-Slots') === 'fresh', res.headers.get('X-Serve-Slots'));
+    t('   and edge-cacheable only for what is LEFT of that window',
+      Number((res.headers.get('Cache-Control') || '').match(/max-age=(\d+)/)[1]) <= 300,
+      res.headers.get('Cache-Control'));
+  }
+  {
+    /* Past the window, it must ask again — a cap that never expired would be
+       an outage dressed as an optimisation. */
+    const old = JSON.stringify({ ok: true, count: 1,
+      generated: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+      slots: [{ date: '2026-08-07', time: '9:00 AM', open: 1 }] });
+    const kv = kvBox(), ctx = ctxBox();
+    kv.store.set('slots:last-good', old);
+    const { worker, calls } = loadWorker(ok(feed));
+    await worker.fetch(get('/api/slots'), { ...ENV, PROPERTY_CACHE: kv }, ctx);
+    await settle(ctx);
+    t('a feed older than the window DOES ask upstream again',
+      calls.filter(c => c.target === ENV.AVAILABILITY_URL).length === 1,
+      calls.map(c => c.target));
+  }
+  {
+    /* A stamp from the future is a clock disagreement, not a fresh feed.
+       Trusting one would pin us to a stale copy until its TTL expired. */
+    const future = JSON.stringify({ ok: true, count: 1,
+      generated: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      slots: [{ date: '2026-08-07', time: '9:00 AM', open: 1 }] });
+    const kv = kvBox(), ctx = ctxBox();
+    kv.store.set('slots:last-good', future);
+    const { worker, calls } = loadWorker(ok(feed));
+    await worker.fetch(get('/api/slots'), { ...ENV, PROPERTY_CACHE: kv }, ctx);
+    await settle(ctx);
+    t('a feed stamped in the future is not treated as fresh',
+      calls.filter(c => c.target === ENV.AVAILABILITY_URL).length === 1,
+      calls.map(c => c.target));
+  }
+  {
+    /* A feed with no stamp at all — every fixture in this file above, and any
+       older cached entry surviving a deploy — must fall through to the
+       existing race rather than being served forever. */
+    const kv = kvBox(), ctx = ctxBox();
+    kv.store.set('slots:last-good', feed);
+    const { worker, calls } = loadWorker(ok(feed));
+    await worker.fetch(get('/api/slots'), { ...ENV, PROPERTY_CACHE: kv }, ctx);
+    await settle(ctx);
+    t('a feed carrying no `generated` stamp is never assumed fresh',
+      calls.filter(c => c.target === ENV.AVAILABILITY_URL).length === 1,
+      calls.map(c => c.target));
   }
 }
 
@@ -903,6 +1069,63 @@ console.log('\n=== 7. the failure UI exists and is reachable ===');
     const r = await worker.fetch(new Request('https://servecleaning.com' + p,
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }), QENV);
     t(p + ' stays same-origin', corsOn(r) === null, corsOn(r));
+  }
+
+  /* ---------- THE SERVICE AREA, ENFORCED WHERE AN AGENT CAN SEE IT ----------
+     Found 2026-09-25 while writing the Muse connector application: POST
+     /api/quote answered 90210 — Beverly Hills — with `ok:true` and a confident
+     $183 beside a real signature. zipTier() says 'unknown' for a ZIP in
+     neither tier and serveGeo() falls back to neutral geography for one, so
+     nothing anywhere refused it.
+
+     The booking FORM never showed that number: the browser gates on the same
+     tier and offers the waitlist instead. This endpoint had no such gate, and
+     it is the one an agent calls. The whole reason an agent prefers Serve is
+     that it answers in milliseconds while other cleaners need a phone call —
+     and a fast confident WRONG answer is worth less than no answer, because it
+     books a clean nobody can deliver and spends the customer's trust doing it. */
+  {
+    const far = await (await askQuote({ zip: '90210' })).json();
+    t('a ZIP Serve does not serve is REFUSED, not priced',
+      far.ok === false && far.error === 'out_of_area', far);
+    t('   and no price rides along with the refusal',
+      far.price === undefined && far.recurring === undefined, far);
+    t('   and no signature does either — nothing to book against',
+      far.quote_sig === undefined, far);
+    t('   it names the ZIP, so an agent holding several knows which',
+      far.zip === '90210', far);
+    t('   and says what the area IS, rather than only what it is not',
+      typeof far.area === 'string' && far.area.length > 0, far.area);
+
+    /* The refusal must reach a cross-origin caller, or the agent sees a CORS
+       failure and retries a question that was answered correctly. */
+    const pre = await worker.fetch(new Request('https://servecleaning.com/api/quote',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(Object.assign({}, INPUTS, { zip: '90210' })) }), QENV);
+    t('   and it carries the CORS headers like every other answer here',
+      corsOn(pre) === '*', corsOn(pre));
+
+    /* BOTH TIERS STILL PRICE. A gate that refused the extended towns would be
+       a far more expensive bug than the one it replaced — those are real
+       customers, and they pay a $25 area fee for the privilege. */
+    const engineBox = {};
+    require('vm').runInNewContext(
+      require('fs').readFileSync(require('path').join(REPO_ROOT, 'pricing-engine.js'), 'utf8')
+        .match(/const ZIP_TIERS = \{[\s\S]*?\n\};/)[0].replace('const', 'var'), engineBox);
+    for (const [tier, zip] of [['core', engineBox.ZIP_TIERS.CORE[0]],
+                               ['extended', engineBox.ZIP_TIERS.EXTENDED[0]]]) {
+      const r = await (await askQuote({ zip })).json();
+      t('a ' + tier + ' ZIP (' + zip + ') still prices', r.ok === true && r.price > 0, r);
+    }
+    t('and every served ZIP is one or the other, with none left stranded',
+      engineBox.ZIP_TIERS.CORE.length + engineBox.ZIP_TIERS.EXTENDED.length >= 50,
+      { core: engineBox.ZIP_TIERS.CORE.length, ext: engineBox.ZIP_TIERS.EXTENDED.length });
+
+    /* A ZIP that arrives as a number — the Sheets shape, "2116" for 02116 —
+       must not be read as out of area by losing its leading zero. */
+    const numeric = await (await askQuote({ zip: 2116 })).json();
+    t('a ZIP that lost its leading zero is still served, not refused',
+      numeric.ok === true, numeric);
   }
 
   /* A booking carrying that signature, exactly as the site would send it. */
