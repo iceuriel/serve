@@ -6,10 +6,116 @@ assistant with no access to this repo. Self-contained on purpose.
 **Companion doc:** `/docs/SCHEMA.md` — authoritative for every column's meaning
 and who writes it. This file is the narrative; that file is the contract.
 
-**Latest session: 2026-09-24.** Jump to
+**Latest session: 2026-09-25.** Jump to
 [what changed on 2026-09-08 / 09](#session-2026-09-08--09) for the current
 state. The sections below it describe earlier builds and remain accurate
 except where a later section supersedes them.
+
+---
+
+## Current work — 2026-09-25, Claude Code: somebody is told the card moved
+
+**Apps Script r61. NOT LIVE until it is pasted and deployed.** Committed as
+source of truth; the running deployment is r60 until someone does
+Extensions → Apps Script → paste → Deploy → Manage deployments → New version.
+Saving the editor is not deploying. Probe `/exec` and read the `version` field
+before believing otherwise.
+
+**Site, Worker, routes, sheet and schema are all unchanged**, so the
+deploy-order rule that bit r59 and r60 does not apply here — there is no site
+half that can ship ahead of the script. Nothing in production behaves
+differently until the script is deployed; nothing breaks if it never is.
+
+### What was wrong
+
+Every other thing that can happen to a booking emailed the founder —
+reservation, plan started, visit moved, visit cancelled. The one event
+involving a real card emailed nothing. `handlePaymentEvent` wrote
+`payment_status` and returned. A hold could be placed on a Tuesday and be known
+to no human until somebody opened the sheet.
+
+### Why that is not merely untidy
+
+**A hold expires.** Serve authorizes at booking and captures by hand in the
+Stripe dashboard, and Stripe releases an uncaptured card authorization about
+seven days after it is created. Nothing watched that clock. Money held on
+Tuesday is gone the Tuesday after, and the first symptom is a finished clean
+that cannot be charged for.
+
+### The structural finding — the horizon is 3× the hold window
+
+`DAYS_AHEAD` in `availability.gs` is **21**. `HORIZON_DAYS` in `serve-slots.js`
+is **21**. The Stripe card hold is **7 days**. So:
+
+> **Every booking made more than a week ahead has a hold that dies before the
+> cleaner arrives.** Not an edge case — a guarantee.
+
+It is partly self-healing and only on the sheet. When Stripe expires the
+intent it cancels it, which arrives as `payment_intent.canceled` →
+`released` → rank 0, and the portal correctly starts offering the Authorize
+button again. **Nobody is told.** The customer last read "Card authorized —
+charged after your clean", so they have no reason to look.
+
+**This release does not fix that, and deliberately.** The three ways out —
+shorten the booking horizon to the hold window, re-authorize before the visit,
+or capture at booking — are three different promises to a customer about when
+their card is charged. That is a founder decision, not an engineering one. It
+is recorded in shared memory as open.
+
+### What r61 actually does
+
+`handlePaymentEvent` now calls `sendPaymentStateEmail` after a successful
+write. Four states, four different subjects, because each needs a different
+thing done about it:
+
+| State | Subject | The point |
+|---|---|---|
+| `authorized` | Serve Card Authorized | No money has moved; here is the expiry date |
+| `paid` | Serve Payment Captured | Money actually moved |
+| `refunded` | Serve Refund | Money went back |
+| `released` | Serve Hold Released | **Loud** unless the booking is cancelled |
+
+The authorize email carries a `— THE CLOCK —` block naming the expiry date and
+the visit date, and when the visit falls after the expiry it flags
+`HOLD LAPSES BEFORE THE VISIT` in the subject and says so in the body. The
+`released` email is calm when `job_status` is `cancelled` (the cancellation
+email already went out; this is just the card letting go) and flags
+`LIVE BOOKING, NO CARD` when it is not.
+
+Three properties worth keeping:
+
+- **`current !== state` is the whole dedupe.** Stripe retries a delivery it did
+  not see acknowledged. Re-writing the cell is harmless; a second identical
+  email is not, because a founder who learns to ignore a repeated subject line
+  is worse off than one who was never told.
+- **The mail call is wrapped.** The cell is already written by then. An
+  exception escaping would answer Stripe non-200 → Stripe retries → the retry
+  finds the state applied and says so, so a MailApp quota outage would end up
+  reported as a payment that was never recorded. It logs and moves on.
+- **Stripe's `amount_cents` beats the sheet's `quoted_price`.** The first is
+  what was actually encumbered; the second is what was asked for. An email
+  about money that reports the asking price is worse than no email.
+
+No address, no portal link, no card data. This email is about a card and needs
+none of them.
+
+### What was checked
+
+- `tests/stripe-payments.test.js` gained section **8b**, 34 assertions. Its
+  fixtures compute every date relative to today, so the suite cannot rot into
+  one that passes because its dates went stale.
+- **Mutation tested, 10 mutants, 10 caught.** Loosening `visit > expires` to
+  `>=` is caught by the window-edge assertion; removing the dedupe is caught by
+  the redelivery assertion; removing the try/catch is caught by two assertions
+  and *only* two — a first pass patched that mutant so crudely it left an
+  unclosed comment, which made the whole file unparseable and every assertion
+  fail. That mutant proved nothing and was redone.
+- Full suite: **40 files, all passing**, including the `doGet`-vs-`VERSION
+  STAMP` agreement check now reading r61 from both places.
+- **Not verified in production**, because the script is not deployed. The next
+  real authorization is the first live test.
+
+Affected files: `apps-script/webhook.gs`, `tests/stripe-payments.test.js`.
 
 ---
 

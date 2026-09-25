@@ -598,12 +598,13 @@ console.log('\n=== 8. THE RANK GUARD — a late event must not undo a capture ==
 
   const HEADERS = ['job_id', 'quoted_price', 'payment_status', 'payment_ref', 'job_status'];
 
-  function sheet(rows) {
-    const data = [HEADERS.slice()].concat(rows.map(r => r.slice()));
+  function sheet(rows, headers) {
+    headers = headers || HEADERS;
+    const data = [headers.slice()].concat(rows.map(r => r.slice()));
     return { _rows: data,
       getName: () => 'JOBS',
       getLastRow: () => data.length,
-      getLastColumn: () => HEADERS.length,
+      getLastColumn: () => headers.length,
       getDataRange: () => ({ getValues: () => data.map(r => r.slice()) }),
       getRange: (r, c, nr, nc) => ({
         getValues: () => { const o = []; for (let i = 0; i < (nr || 1); i++) {
@@ -613,9 +614,11 @@ console.log('\n=== 8. THE RANK GUARD — a late event must not undo a capture ==
       }) };
   }
 
-  function build(rows, props) {
-    const jobs = sheet(rows);
+  function build(rows, props, opts) {
+    opts = opts || {};
+    const jobs = sheet(rows, opts.headers);
     const logs = [];
+    const mails = [];
     const store = Object.assign({ PAYMENT_BRIDGE_SECRET: 'bridge-secret-value' }, props || {});
     const ssObj = { getSheetByName: n => (n === 'JOBS' ? jobs : null),
                     insertSheet: () => { throw new Error('should not create tabs'); },
@@ -626,7 +629,10 @@ console.log('\n=== 8. THE RANK GUARD — a late event must not undo a capture ==
       SpreadsheetApp: { openById: () => ssObj, getActiveSpreadsheet: () => ssObj },
       ContentService: { MimeType: { JSON: 'json' },
         createTextOutput: s => ({ getContent: () => s, setMimeType() { return this; } }) },
-      MailApp: { sendEmail() {} },
+      MailApp: { sendEmail(to, subject, body) {
+        mails.push({ to, subject, body });
+        if (opts.mailThrows) throw new Error('mail quota exceeded');
+      } },
       LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
       Session: { getScriptTimeZone: () => 'America/New_York',
                  getEffectiveUser: () => ({ getEmail: () => 'ops@example.com' }) },
@@ -649,7 +655,7 @@ console.log('\n=== 8. THE RANK GUARD — a late event must not undo a capture ==
       const row = jobs._rows.find(r => r[0] === id) || [];
       return { status: row[2], ref: row[3] };
     };
-    return { send, statusOf, jobs, logs };
+    return { send, statusOf, jobs, logs, mails };
   }
 
   const ROWS = [['SRV-1', 239, '', '', 'new']];
@@ -812,6 +818,233 @@ console.log('\n=== 8. THE RANK GUARD — a late event must not undo a capture ==
     t('and says so in the log rather than failing',
       B.logs.some(l => /payment_ref/.test(l)), B.logs.slice(-3));
     HEADERS.length = 0; saved.forEach(h => HEADERS.push(h));
+  }
+
+  /* ============================================================
+     8b. SOMEBODY IS TOLD  —  r61
+     ============================================================
+
+     THE GAP THIS CLOSES. Every other thing that can happen to a booking
+     emailed the founder; the one event involving a real card emailed nothing.
+     A hold could be placed and be known to no human until somebody opened the
+     sheet.
+
+     AND THE HOLD IS ON A CLOCK. Stripe releases an uncaptured authorization
+     about seven days after it is created, while the slot feed sells 21 days
+     out. Any booking made more than a week ahead has a hold that dies before
+     the cleaner arrives — so the test that matters most in this block is not
+     "an email was sent", it is that the email SAYS SO when the dates say it
+     will happen, and stays quiet when they do not.
+     ============================================================ */
+  console.log('\n=== 8b. THE FOUNDER IS TOLD, AND TOLD WHAT THE CLOCK IS DOING ===');
+
+  /* Every date here is relative to today, so this file cannot rot into a
+     suite that passes because its fixtures went stale. */
+  const isoIn = n => {
+    const d = new Date();
+    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + n))
+      .toISOString().slice(0, 10);
+  };
+  /* Rendered independently of prettyDate — asserting a body against the very
+     function that wrote it would prove only that the function is itself. */
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const dayLabel = ymd => {
+    const p = ymd.split('-').map(Number);
+    return MONTHS[p[1] - 1] + ' ' + p[2];
+  };
+
+  const RICH = ['job_id', 'quoted_price', 'payment_status', 'payment_ref', 'job_status',
+                'name', 'scheduled_date', 'start_time', 'service_type', 'zip',
+                'vendor_id', 'final_price', 'address'];
+  const richRow = (visit, status) =>
+    [['SRV-1', 239, '', '', status || 'new', 'Dana R', visit, '9:00 AM',
+      'First Clean', '02116', '', '', '700 Boylston St']];
+  const rich = (visit, status, props, opts) =>
+    build(richRow(visit, status), props, Object.assign({ headers: RICH }, opts || {}));
+
+  /* ---- an ordinary hold, comfortably inside the window ---- */
+  {
+    const soon = isoIn(3);
+    const B = rich(soon);
+    B.send({ job_id: 'SRV-1', state: 'authorized', payment_ref: 'pi_a', amount_cents: 13700 });
+
+    t('an authorization sends exactly one email', B.mails.length === 1, B.mails.length);
+    t('to the operator, never to the customer',
+      B.mails.length === 1 && B.mails[0].to === 'ops@example.com',
+      B.mails[0] && B.mails[0].to);
+    t('the subject says a card was authorized',
+      /Card Authorized/.test(B.mails[0].subject), B.mails[0].subject);
+    t('and names the customer', /Dana R/.test(B.mails[0].subject), B.mails[0].subject);
+
+    /* STRIPE'S NUMBER, NOT THE SHEET'S. quoted_price is 239; the card was
+       actually held for 137. An email about money that reports the asking
+       price rather than the amount encumbered is worse than no email. */
+    t('the amount is what STRIPE held, not what the sheet quoted',
+      /\$137\.00/.test(B.mails[0].subject) && !/\$239/.test(B.mails[0].subject),
+      B.mails[0].subject);
+
+    t('the body says plainly that no money has moved',
+      /NO MONEY HAS MOVED/.test(B.mails[0].body), B.mails[0].body.slice(0, 200));
+    t('it names the expiry date so the clock is visible',
+      B.mails[0].body.indexOf(dayLabel(isoIn(7))) !== -1, B.mails[0].body);
+    t('it names the PaymentIntent to search the dashboard for',
+      /pi_a/.test(B.mails[0].body), B.mails[0].body);
+
+    /* The quiet case. A visit three days out is covered by the hold, and an
+       alarm raised here would train the founder to ignore the real one. */
+    t('a visit INSIDE the window raises no alarm',
+      !/LAPSES BEFORE/.test(B.mails[0].subject) &&
+      !/DIES BEFORE THE CLEAN/.test(B.mails[0].body), B.mails[0].subject);
+  }
+
+  /* ---- THE ONE THIS SECTION EXISTS FOR ----
+     21-day horizon, 7-day hold. A booking two weeks out is authorized today
+     and unauthorized long before anybody arrives to clean. */
+  {
+    const far = isoIn(14);
+    const B = rich(far);
+    B.send({ job_id: 'SRV-1', state: 'authorized', payment_ref: 'pi_a', amount_cents: 13700 });
+
+    t('a visit BEYOND the hold window is flagged in the subject',
+      /HOLD LAPSES BEFORE THE VISIT/.test(B.mails[0].subject), B.mails[0].subject);
+    t('and the body says the hold dies before the clean',
+      /DIES BEFORE THE CLEAN/.test(B.mails[0].body), B.mails[0].body.slice(0, 300));
+    t('naming BOTH dates, so the gap is checkable rather than asserted',
+      B.mails[0].body.indexOf(dayLabel(isoIn(7))) !== -1 &&
+      B.mails[0].body.indexOf(dayLabel(far)) !== -1, B.mails[0].body);
+    t('and it says what the customer currently believes',
+      /already authorized/.test(B.mails[0].body), B.mails[0].body);
+  }
+
+  /* The boundary. Exactly seven days out is covered; eight is not. */
+  {
+    const edge = rich(isoIn(7));
+    edge.send({ job_id: 'SRV-1', state: 'authorized', amount_cents: 13700 });
+    t('a visit exactly at the window edge is NOT flagged',
+      !/LAPSES BEFORE/.test(edge.mails[0].subject), edge.mails[0].subject);
+
+    const over = rich(isoIn(8));
+    over.send({ job_id: 'SRV-1', state: 'authorized', amount_cents: 13700 });
+    t('and one day past it IS', /LAPSES BEFORE/.test(over.mails[0].subject),
+      over.mails[0].subject);
+  }
+
+  /* ---- the other three states ---- */
+  {
+    const B = rich(isoIn(3), 'new');
+    B.send({ job_id: 'SRV-1', state: 'paid', payment_ref: 'pi_a', amount_cents: 13700 });
+    t('a capture is announced as money that actually moved',
+      /Payment Captured/.test(B.mails[0].subject) &&
+      /Money has actually moved/.test(B.mails[0].body), B.mails[0].subject);
+  }
+  {
+    const B = build([['SRV-1', 239, 'paid', 'pi_a', 'new']]);
+    B.send({ job_id: 'SRV-1', state: 'refunded', amount_cents: 13700 });
+    t('a refund is announced', /Serve Refund/.test(B.mails[0].subject), B.mails[0].subject);
+    t('and it records where the money went from', /Was:\s+paid/.test(B.mails[0].body),
+      B.mails[0].body);
+  }
+
+  /* ---- released: the same event means two completely different things ---- */
+  {
+    /* Expected. The customer called the visit off; the cancellation email has
+       already been sent, and this is just the card letting go. */
+    const B = rich(isoIn(3), 'cancelled');
+    B.jobs._rows[1][2] = 'authorized';
+    B.send({ job_id: 'SRV-1', state: 'released' });
+    t('a hold released on a CANCELLED booking is calm',
+      !/LIVE BOOKING, NO CARD/.test(B.mails[0].subject), B.mails[0].subject);
+    t('and says nothing is owed', /Nothing is owed/.test(B.mails[0].body), B.mails[0].body);
+  }
+  {
+    /* THE DANGEROUS ONE. Nobody cancelled anything — either a hold was voided
+       by hand or Stripe's seven days ran out. The booking is still going
+       ahead, the customer was last told their card WAS authorized, and the
+       portal will quietly start asking them to pay again without telling them
+       why. This is the case the whole feature is for. */
+    const B = rich(isoIn(3), 'new');
+    B.jobs._rows[1][2] = 'authorized';
+    B.send({ job_id: 'SRV-1', state: 'released' });
+    t('a hold released on a LIVE booking is loud',
+      /LIVE BOOKING, NO CARD/.test(B.mails[0].subject), B.mails[0].subject);
+    t('and says the customer has no reason to look',
+      /no reason\s*\n?\s*\*\*\* to look|no reason/.test(B.mails[0].body), B.mails[0].body);
+  }
+
+  /* ---- what must NOT produce an email ---- */
+  {
+    /* Stripe retries a delivery it did not see acknowledged. The write is
+       idempotent and harmless; a second identical email is not, because a
+       founder who learns to ignore a repeated subject is worse off than one
+       who was never told. */
+    const B = rich(isoIn(3));
+    B.send({ job_id: 'SRV-1', state: 'authorized', payment_ref: 'pi_a' });
+    B.send({ job_id: 'SRV-1', state: 'authorized', payment_ref: 'pi_a' });
+    t('a REDELIVERED event is written again but emailed once',
+      B.mails.length === 1, B.mails.length);
+  }
+  {
+    const B = build([['SRV-1', 239, 'paid', 'pi_a', 'new']]);
+    const out = B.send({ job_id: 'SRV-1', state: 'authorized' });
+    t('a stale event the rank guard declined emails nothing',
+      out.applied === false && B.mails.length === 0, B.mails.length);
+  }
+  {
+    const B = build(ROWS);
+    B.send({ job_id: 'SRV-1', state: 'paid', bridge_token: 'wrong-secret' });
+    t('a refused bridge call emails nothing', B.mails.length === 0, B.mails.length);
+  }
+  {
+    const B = build(ROWS);
+    B.send({ job_id: 'SRV-NOPE', state: 'paid' });
+    t('a payment for an unknown job emails nothing', B.mails.length === 0, B.mails.length);
+    B.send({ job_id: 'SRV-1', state: 'nonsense' });
+    t('and neither does an unreadable state', B.mails.length === 0, B.mails.length);
+  }
+
+  /* ---- the notification must never cost us the money trail ---- */
+  {
+    /* MailApp has a daily quota. When it runs out, the cell is ALREADY
+       written — so an exception escaping would answer Stripe non-200, Stripe
+       would retry, and the retry would find the state already applied. A mail
+       outage would end up reported as a payment that was never recorded. */
+    const B = rich(isoIn(3), 'new', null, { mailThrows: true });
+    const out = B.send({ job_id: 'SRV-1', state: 'authorized', payment_ref: 'pi_a' });
+    t('a FAILING mail still records the payment',
+      out.ok === true && out.applied === true, out);
+    t('and the row really reads authorized',
+      B.jobs._rows[1][2] === 'authorized', B.jobs._rows[1][2]);
+    t('and the failure is logged rather than swallowed',
+      B.logs.some(l => /notification failed/.test(l)), B.logs.slice(-3));
+  }
+
+  /* ---- privacy, and a sheet that has barely any columns ---- */
+  {
+    const B = rich(isoIn(3));
+    B.send({ job_id: 'SRV-1', state: 'authorized', payment_ref: 'pi_a', amount_cents: 13700 });
+    /* The address sits on the row and is deliberately not carried. This email
+       is about a card; it needs no street to be acted on, and every copy of a
+       customer's address is another place it can leak from. */
+    t('the address is on the row and still not in the email',
+      B.jobs._rows[1][12] === '700 Boylston St' &&
+      !/Boylston/.test(B.mails[0].body), B.mails[0].body);
+    t('nor any card number, which this file never even receives',
+      !/\b\d{12,}\b/.test(B.mails[0].body), B.mails[0].body);
+  }
+  {
+    /* The minimal sheet: no name, no date, no service. It must still send,
+       and it must not paper the gaps with the word "undefined". */
+    const B = build(ROWS);
+    B.send({ job_id: 'SRV-1', state: 'authorized', payment_ref: 'pi_a', amount_cents: 13700 });
+    t('a sparse sheet still produces an email', B.mails.length === 1, B.mails.length);
+    t('with no "undefined" anywhere in it',
+      !/undefined/.test(B.mails[0].subject + B.mails[0].body),
+      B.mails[0] && B.mails[0].body);
+    t('and no clock line it has no date to fill',
+      !/Visit:/.test(B.mails[0].body), B.mails[0].body);
+    t('but the amount and the job id are still there',
+      /SRV-1/.test(B.mails[0].body) && /\$137\.00/.test(B.mails[0].subject),
+      B.mails[0].subject);
   }
 }
 

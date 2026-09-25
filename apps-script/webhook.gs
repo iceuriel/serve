@@ -1,7 +1,39 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-24  ·  master  ·  r60 — a refund is not "never paid"
+ * VERSION STAMP:  2026-09-25  ·  master  ·  r61 — somebody is told the card moved
+ *
+ * r61 = THE ONE EVENT INVOLVING A REAL CARD NOW SENDS AN EMAIL.
+ *       INCLUDES r60 BELOW — this is one paste, not two.
+ *
+ *       SCRIPT-ONLY. No site file changes with it, so the deploy order that
+ *       bit r59 and r60 does not apply: paste and deploy whenever.
+ *
+ *       Every other thing that happens to a booking mailed the founder —
+ *       reservation, plan started, visit moved, visit cancelled. A payment
+ *       mailed nothing. handlePaymentEvent wrote payment_status and returned,
+ *       so a hold could be placed on a Tuesday and be known to nobody.
+ *
+ *       THE REASON IT IS NOT MERELY UNTIDY: a hold expires. Serve authorizes
+ *       at booking and captures by hand, and Stripe releases an uncaptured
+ *       card authorization about seven days after it is created. Nothing
+ *       watched that clock, so money that was held on Tuesday is gone the
+ *       Tuesday after and the first symptom is a finished clean nobody can
+ *       charge for.
+ *
+ *       AND THE SLOT FEED PUBLISHES 21 DAYS OUT — three times the hold
+ *       window. Any booking made more than a week ahead has a hold that dies
+ *       before the cleaner arrives. The authorize email says so, by name and
+ *       by date, whenever the two dates say it will happen. It does not fix
+ *       it: shortening the horizon, re-authorizing before the visit and
+ *       capturing at booking are three different promises about when a card
+ *       is charged, and that is the founder's call.
+ *
+ *       A LAPSE IS SILENT TODAY EXCEPT ON THE SHEET. Stripe cancels the
+ *       expired intent, which lands here as `released` and correctly re-offers
+ *       the Authorize button. The customer is not told, and they last heard
+ *       their card WAS authorized — so the `released` email is loud whenever
+ *       the booking is still live.
  *
  * r60 = THE PORTAL CAN FINALLY TELL A REFUND FROM A BOOKING NEVER PAID FOR.
  *       INCLUDES r59 BELOW — this is one paste, not two.
@@ -1902,7 +1934,7 @@ function routeGet(e) {
      health stamp below rather than creating anything. */
   if (p.booking) return handleBookingStatus(p.booking);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-24 r60" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-25 r61" });
 }
 
 
@@ -5492,7 +5524,204 @@ function handlePaymentEvent(ss, data) {
   }
 
   console.log("payment_status " + jobId + ": " + (current || "(blank)") + " -> " + state);
+
+  /* TELL A HUMAN, r61. Only on a real transition, and never at the cost of the
+     write above.
+
+     `current !== state` IS THE WHOLE DEDUPE. Stripe retries a delivery it did
+     not see acknowledged, and a redelivery of an event already applied lands
+     here with the cell already reading `state`. Writing it again is harmless;
+     emailing again is not, and a founder who learns to ignore a repeated
+     subject line is worse off than one who was never told.
+
+     WRAPPED BECAUSE THE CELL IS ALREADY WRITTEN. An exception escaping here
+     would answer Stripe non-200, Stripe would retry, and the retry would find
+     the state already applied and say so — so a mail outage would turn into a
+     payment this file reports as never recorded. MailApp has a daily quota; it
+     is allowed to run out without taking the money trail with it. */
+  if (current !== state) {
+    try {
+      sendPaymentStateEmail({
+        jobId: jobId, from: current, to: state, ref: ref,
+        amountCents: data.amount_cents,
+        fields: jobRowFields(jobs, found),
+      });
+    } catch (err) {
+      console.error("payment recorded but the notification failed for " +
+                    jobId + " (" + state + "): " + err);
+    }
+  }
+
   return json({ ok: true, applied: true, job_id: jobId, state: state });
+}
+
+/** One JOBS row as a name->value object. Absent headers simply do not appear. */
+function jobRowFields(jobs, found) {
+  var h = found.headers;
+  var row = jobs.getRange(found.rowNumber, 1, 1, h.length).getValues()[0];
+  var out = {};
+  for (var i = 0; i < h.length; i++) out[String(h[i]).trim()] = row[i];
+  return out;
+}
+
+
+/* ============================================================
+   TELLING A HUMAN THAT MONEY MOVED  —  r61
+   ============================================================
+
+   UNTIL r61 NOTHING ANNOUNCED A PAYMENT. handlePaymentEvent wrote the cell and
+   returned. Every other thing that can happen to a booking — a reservation, a
+   plan started, a visit moved, a visit cancelled — sends the founder an email,
+   and the one event involving an actual card sent nothing at all. A hold could
+   be placed on a Tuesday and nobody would learn of it unless they happened to
+   open the sheet.
+
+   THAT MATTERS BECAUSE A HOLD IS NOT PERMANENT. Serve authorizes at booking
+   and captures by hand later, and Stripe expires an uncaptured card
+   authorization about seven days after it is created. Nothing here watched
+   that clock. Money that was held on Tuesday is simply gone the Tuesday after,
+   and the first symptom is a finished clean that cannot be charged for.
+
+   AND THE BOOKING HORIZON IS THREE TIMES THE HOLD WINDOW. The slot feed
+   publishes 21 days out (DAYS_AHEAD in availability.gs), so a card authorized
+   for a visit more than seven days away WILL lapse before the cleaner arrives.
+   That is not an edge case — it is every booking made more than a week ahead.
+
+   THESE EMAILS DO NOT FIX THAT. They are what makes it visible, on the day the
+   hold is placed, naming the date it dies. The fix is a choice between
+   shortening the horizon, re-authorizing before the visit, and capturing at
+   booking; each is a different promise to the customer about when their card
+   is charged, and that is the founder's decision, not this file's.
+
+   THE EXPIRY IS SELF-HEALING ON THE SHEET AND ONLY THERE. When Stripe expires
+   an uncaptured intent it cancels it, which arrives here as `released` and
+   correctly re-offers the Authorize button in the portal. Nobody is told. The
+   customer believes they paid at booking, so the `released` email below is
+   loud whenever the booking is still live — that is a customer who needs
+   asking again, not a status change.
+   ============================================================ */
+
+/* Stripe's card default for an uncaptured PaymentIntent. Other payment methods
+   differ and Stripe may change it; the dashboard is the source of truth, which
+   is why every line built from this number says "about". */
+const HOLD_WINDOW_DAYS = 7;
+
+/** Today + n days as "YYYY-MM-DD". UTC on both sides, as prettyDate is. */
+function isoDaysFromToday(n) {
+  var now = new Date();
+  var d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + n));
+  return d.getUTCFullYear() + "-" +
+         ("0" + (d.getUTCMonth() + 1)).slice(-2) + "-" +
+         ("0" + d.getUTCDate()).slice(-2);
+}
+
+/**
+ * The founder's email for one payment state change.
+ *
+ * EVERY FIELD IS OPTIONAL. This reads a JOBS row whose columns are whatever
+ * that sheet actually has; a missing `name` or `scheduled_date` drops a line
+ * and never throws. The four states each need a different thing done about
+ * them, so they get different subjects rather than one "payment updated".
+ */
+function sendPaymentStateEmail(ctx) {
+  var f = ctx.fields || {};
+  var name = String(f.name || "").trim();
+  var visit = String(f.scheduled_date || "").trim();
+  var cancelled = String(f.job_status || "").trim().toLowerCase() === CANCELLED_JOB_STATUS;
+
+  /* STRIPE'S NUMBER BEATS THE SHEET'S. quoted_price is what was asked for;
+     amount_cents is what was actually held, captured or given back, and when
+     the two disagree the second one is the true statement about a card. */
+  var amount = (Number(ctx.amountCents) > 0)
+    ? "$" + (Number(ctx.amountCents) / 100).toFixed(2)
+    : money(firstSet(f.final_price, f.quoted_price));
+
+  var expires = isoDaysFromToday(HOLD_WINDOW_DAYS);
+  /* Plain string comparison, which is exactly right for two ISO dates and
+     wrong for nothing. An unparseable or blank visit date compares false and
+     simply raises no alarm — silence is the correct output for "unknown". */
+  var lapsesFirst = ctx.to === "authorized" &&
+                    /^\d{4}-\d{2}-\d{2}$/.test(visit) && visit > expires;
+
+  var flags = [];
+  var warn = "";
+  var lead = "";
+  var verb = "";
+
+  if (ctx.to === "authorized") {
+    verb = "Card Authorized";
+    lead = "A card has been authorized for this booking.\n" +
+           "NO MONEY HAS MOVED. This is a hold, and it expires — see the clock below.\n";
+    if (lapsesFirst) {
+      flags.push("HOLD LAPSES BEFORE THE VISIT");
+      warn += "*** THIS HOLD DIES BEFORE THE CLEAN HAPPENS. ***\n" +
+              "*** Authorized today, expires about " + prettyDate(expires) + ",\n" +
+              "*** and the visit is " + prettyDate(visit) + ". On the day the cleaner\n" +
+              "*** arrives there will be NO payment on file, and the customer has\n" +
+              "*** been told their card is already authorized.\n" +
+              "*** Ask them to authorize again nearer the date, or capture early. ***\n\n";
+    }
+  } else if (ctx.to === "paid") {
+    verb = "Payment Captured";
+    lead = "Money has actually moved. The hold on this booking was captured.\n";
+  } else if (ctx.to === "refunded") {
+    verb = "Refund";
+    lead = "A captured payment was refunded.\n" +
+           "The customer's portal now reads \"Refunded\" and offers them no pay button.\n";
+  } else {
+    verb = "Hold Released";
+    if (cancelled) {
+      lead = "The hold on a CANCELLED booking was released. Nothing is owed and\n" +
+             "nothing was taken — this is the cancellation letting go of the card.\n";
+    } else {
+      /* The dangerous one, and the reason this email exists at all. */
+      flags.push("LIVE BOOKING, NO CARD");
+      lead = "A hold was released on a booking that is still going ahead.\n";
+      warn += "*** THE CARD FOR A LIVE BOOKING IS NO LONGER AUTHORIZED. ***\n" +
+              "*** Either somebody voided it, or the " + HOLD_WINDOW_DAYS + "-day Stripe hold\n" +
+              "*** expired on its own. Nothing was taken and nothing is held.\n" +
+              "*** The portal will ask them to authorize again — but they were\n" +
+              "*** last told their card WAS authorized, so they have no reason\n" +
+              "*** to look. Ask them. ***\n\n";
+    }
+  }
+
+  var clock = "";
+  if (ctx.to === "authorized") {
+    clock = "\n— THE CLOCK —\n" +
+            "Authorized:   today, as this event arrived\n" +
+            "Expires:      about " + prettyDate(expires) + " — Stripe releases an\n" +
+            "              uncaptured authorization about " + HOLD_WINDOW_DAYS + " days after it\n" +
+            "              is created. Capture it by hand in the Stripe dashboard\n" +
+            "              when the partner has accepted the job.\n" +
+            (visit ? "Visit:        " + prettyDate(visit) + "\n" : "");
+  }
+
+  MailApp.sendEmail(
+    notifyEmail(),
+    "Serve " + verb + " — " + (name || "Unknown") + " · " + amount +
+      (flags.length ? " · " + flags.join(" · ") : ""),
+    warn + lead + "\n" +
+    "— WHAT —\n" +
+    "job_id:    " + ctx.jobId + "\n" +
+    "Amount:    " + amount + (Number(ctx.amountCents) > 0 ? " (from Stripe)" : " (from the sheet)") + "\n" +
+    "Was:       " + (ctx.from || "(nothing recorded)") + "\n" +
+    "Now:       " + ctx.to + "\n" +
+    "Booking:   " + (cancelled ? CANCELLED_JOB_STATUS.toUpperCase()
+                               : (String(f.job_status || "").trim() || "(no status)")) + "\n" +
+    (visit ? "Visit:     " + prettyDate(visit) +
+             (isSet(f.start_time) ? " at " + f.start_time : "") + "\n" : "") +
+    (isSet(f.service_type) ? "Service:   " + f.service_type + "\n" : "") +
+    (isSet(f.zip) ? "ZIP:       " + f.zip + "\n" : "") +
+    (isSet(f.vendor_id) ? "Assigned:  " + f.vendor_id + "\n" : "") +
+    clock +
+    "\n— IN STRIPE —\n" +
+    (ctx.ref ? "Search the dashboard for " + ctx.ref + "\n"
+             : "No PaymentIntent came with this event.\n") +
+    /* No portal link and no address. This email is about a card, it is the one
+       Serve email whose subject line alone says money moved, and it needs
+       none of that to be acted on. */
+    "");
 }
 
 /** Is this booking already called off? */
