@@ -15,9 +15,13 @@ except where a later section supersedes them.
 
 ## Current work — 2026-09-25, Claude Code: Serve becomes callable by an agent
 
-**Three commits, none pushed: `e52b0c4`, `ad60554`, `5278624`.** All site and
-Worker changes — no Apps Script change, so nothing here waits on a deploy. 42
-test files pass.
+**Three commits: `e52b0c4`, `ad60554`, `5278624`.** All site and Worker changes
+— no Apps Script change, so nothing here waits on a deploy. 42 test files pass.
+
+**PUSHED AND LIVE 2026-09-25**, carried up by `cfbaa22` (the portal phone
+layout entry above). They were unpushed when this was written; the "What was
+NOT verified" section below still reflects that moment and is now stale on
+that point alone.
 
 Done for the Muse connector application, whose technical-specs form asks for an
 API URL, a documentation URL and an OpenAPI spec. Two of those did not exist
@@ -111,7 +115,21 @@ the r61 entry below and shared memory. Unchanged by this session.
 
 **Front-end only. No Apps Script, no Worker, no sheet, no schema change**, so
 nothing here waits on a deploy and nothing can ship in the wrong order.
-Uncommitted as of this entry. 42 test files pass.
+42 test files pass.
+
+**SHIPPED. `cfbaa22`, pushed to master.** Workers Builds check run read
+`completed success`, and production was then probed for the actual strings
+rather than trusted: `statusInto` is present in the live `booking-live.js`,
+`portal.js`, `ticket.js` and `vendor.js`, and both new rules are in the live
+`style.css`. What was NOT re-verified in production is the *render* — the
+portals need a real signed token, so the 390px reflow was seen against local
+copies of the identical files, not against servecleaning.com.
+
+**This push also carried the four commits that had been sitting unpushed** —
+`e52b0c4`, `ad60554`, `5278624`, `882ce75`. See the entry above: `/api-docs`,
+`/openapi.json`, the out-of-area gate on `POST /api/quote` and the prefill
+vocabulary went live with it. The entry above still says "none pushed"; it is
+describing the moment it was written, and this is the correction.
 
 Founder's report: on a phone `/h` wastes the whole band between the tabs and
 the greeting, and the Upcoming pill and the price sit "awkwardly in the
