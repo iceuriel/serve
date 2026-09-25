@@ -1869,8 +1869,15 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
        Published price tables are only useful if clicking a number puts that
        configuration into the calculator. Both routes end up here:
 
-         cross-page   /?beds=2&baths=1&service=deep#quote
+         cross-page   /?beds=2&baths=1&service=deep#quote          (our pages)
+         agent        /?zip=02116&bedrooms=2&bathrooms=1&service=first_clean
+                       &frequency=biweekly&addon_oven=true#quote
          same-page    window.ServeQuote.applyPrefill(...) from a teaser row
+
+       THE SECOND FORM SPEAKS /api/quote's VOCABULARY, word for word, so an
+       agent that has just priced a home can hand its customer a link carrying
+       the configuration it quoted — and the price on the page is the price it
+       promised. See PREFILL_SERVICES for why both spellings are permanent.
 
        WHY THIS LANDS ON BUILD, NOT PRICE, WHEN THERE IS NO ZIP
        ------------------------------------------------------------
@@ -1891,12 +1898,65 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
     /* The published tables speak in services; the calculator speaks in a
        service plus a frequency. `recurring` is not a third service type — it is
        a First Clean with a plan attached, so it maps to biweekly, the middle
-       option and the one most recurring customers pick. */
+       option and the one most recurring customers pick.
+
+       AND SINCE 2026-09-25 SO DOES `/api/quote`, IN DIFFERENT WORDS. The API
+       names the two real services — `first_clean` and `move_out` — because
+       that is what the pricing engine prices. An agent that has just quoted a
+       home through it holds those words, and builds its follow-on link out of
+       them. Before this, such a link LOADED AND SILENTLY DID NOTHING: the
+       token matched no key, the service radio never moved, and the customer
+       met a form that had forgotten everything the agent had just told them.
+       No error, nothing in a console — the worst shape a bug can take on a
+       page whose whole job is to look effortless.
+
+       Both vocabularies map here now. The three table tokens are kept
+       FOREVER: they sit in hrefs on /pricing and /services, a test asserts
+       one, and they are in links already sent to real people. The API's are
+       the ones the docs teach an agent.
+
+       THE API TOKENS CARRY NO FREQUENCY, and that is the point of the null.
+       `?service=first_clean&frequency=biweekly` must keep its biweekly; a
+       service token that overwrote it would make the two params fight, and
+       the more specific one would lose. A table token still carries one,
+       which is the entire reason `recurring` exists as a word. */
     const PREFILL_SERVICES = {
-        deep:      { service: 'first_clean', frequency: 'once' },
-        recurring: { service: 'first_clean', frequency: 'biweekly' },
-        moveinout: { service: 'move_out',    frequency: 'once' },
+        /* published tables — page to page */
+        deep:        { service: 'first_clean', frequency: 'once' },
+        recurring:   { service: 'first_clean', frequency: 'biweekly' },
+        moveinout:   { service: 'move_out',    frequency: 'once' },
+        /* the API's own words — agent to page */
+        first_clean: { service: 'first_clean', frequency: null },
+        move_out:    { service: 'move_out',    frequency: null },
     };
+
+    /* Read from the engine rather than listed here, so a cadence added to
+       PRICING.FREQ is accepted by a link on the same deploy that prices it. */
+    const PREFILL_FREQUENCIES = ['once'].concat(Object.keys(PRICING.FREQ || {}));
+
+    /* The inverse of CONDITION_FROM — one canonical pair of answers per grade.
+       `/api/quote` takes `condition` directly, so an agent holding a quote
+       holds a GRADE. This form refuses to ask for a grade on purpose (see
+       CONDITION_FROM: it hands a professional assessment to the person least
+       able to make it, and prices their guess). So a grade arriving on a link
+       is translated back into the two answers that produce it, and what the
+       customer then sees is the pair of radios they can correct. Nothing on a
+       URL can reach a condition the form could not reach by itself. */
+    const CONDITION_ANSWERS = {
+        light:    { last_clean: 'recent', pets: false },
+        standard: { last_clean: 'months', pets: false },
+        heavy:    { last_clean: 'long',   pets: false },
+    };
+
+    /** Check a radio the way a click would, so its change handler still runs. */
+    function pickRadio(name, value) {
+        const el = buildForm.querySelector(
+            'input[name="' + name + '"][value="' + value + '"]');
+        if (!el || el.checked) return false;
+        el.checked = true;
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+    }
 
     function applyPrefill(cfg) {
         cfg = cfg || {};
@@ -1906,20 +1966,59 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
                 evaluateZip();
             }
 
-            if (cfg.beds  != null && stepperSet['stepper-bedrooms'])  stepperSet['stepper-bedrooms'](Number(cfg.beds));
-            if (cfg.baths != null && stepperSet['stepper-bathrooms']) stepperSet['stepper-bathrooms'](Number(cfg.baths));
+            if (cfg.beds   != null && stepperSet['stepper-bedrooms'])  stepperSet['stepper-bedrooms'](Number(cfg.beds));
+            if (cfg.baths  != null && stepperSet['stepper-bathrooms']) stepperSet['stepper-bathrooms'](Number(cfg.baths));
+            if (cfg.levels != null && stepperSet['stepper-levels'])    stepperSet['stepper-levels'](Number(cfg.levels));
 
             const map = PREFILL_SERVICES[cfg.service];
             if (map) {
-                const radio = buildForm.querySelector('input[name="service"][value="' + map.service + '"]');
-                if (radio && !radio.checked) {
-                    radio.checked = true;
-                    /* Dispatch rather than assigning state directly: the change
-                       handler is what clears add-ons when the service is not a
-                       First Clean, and skipping it leaves them armed. */
-                    radio.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-                state.frequency = map.frequency;
+                /* Dispatched rather than assigned: the change handler is what
+                   clears add-ons when the service is not a First Clean, and
+                   skipping it leaves them armed. */
+                pickRadio('service', map.service);
+                if (map.frequency) state.frequency = map.frequency;
+            }
+
+            /* EVERYTHING BELOW RUNS AFTER THE SERVICE RADIO, NEVER BEFORE.
+               Its change handler calls syncAddonsToService(), which clears both
+               add-on boxes on a Move Out — so add-ons set first would be handed
+               straight back, and the customer would see a price missing the $45
+               the agent had already quoted them. */
+            if (cfg.frequency && state.service === 'first_clean' &&
+                PREFILL_FREQUENCIES.indexOf(cfg.frequency) !== -1) {
+                state.frequency = cfg.frequency;
+            }
+
+            if (cfg.addon_fridge != null && addonFridge) {
+                addonFridge.checked = cfg.addon_fridge;
+                state.addonFridge   = cfg.addon_fridge;
+            }
+            if (cfg.addon_oven != null && addonOven) {
+                addonOven.checked = cfg.addon_oven;
+                state.addonOven   = cfg.addon_oven;
+            }
+            /* HERE, NOT ONLY IN THE PRICED BRANCH BELOW. A Move Out prices the
+               fridge and oven in and hides both boxes, so add-ons named on such
+               a link must be cleared — but the call further down runs only when
+               a ZIP resolves. Without this line, `?service=move_out&addon_oven=true`
+               with no ZIP left the box ticked and invisible, to reappear still
+               ticked if the visitor switched back to a First Clean. Found by
+               mutation testing this block, 2026-09-25. */
+            syncAddonsToService();
+
+            /* A grade sets the pair of answers that derive it; an explicit
+               answer overrides that half. So `?condition=heavy&pets=true` is
+               heavy WITH pets, rather than either input quietly winning. */
+            const graded  = CONDITION_ANSWERS[cfg.condition] || null;
+            const answers = (graded || cfg.last_clean || cfg.pets != null)
+                ? { last_clean: cfg.last_clean || (graded && graded.last_clean) || null,
+                    pets:       cfg.pets != null ? cfg.pets : (graded ? graded.pets : null) }
+                : null;
+            if (answers) {
+                /* An unrecognised value matches no radio and is simply ignored,
+                   which is the right outcome for junk on a public URL. */
+                if (answers.last_clean) pickRadio('last_clean', answers.last_clean);
+                if (answers.pets != null) pickRadio('has_pets', answers.pets ? 'yes' : 'no');
             }
 
             if (typeof serveRetirePulse === 'function') serveRetirePulse();
@@ -1982,18 +2081,53 @@ applyHeroSkin(SERVE_ATTRIBUTION.segment);
     (function readPrefillParams() {
         let params;
         try { params = new URLSearchParams(location.search); } catch (_) { return; }
-        const beds    = params.get('beds');
-        const baths   = params.get('baths');
-        const service = params.get('service');
-        const zip     = params.get('zip');
-        if (beds == null && baths == null && service == null) return;   // nothing to do
 
-        applyPrefill({
-            beds:    beds  != null && /^\d+$/.test(beds)  ? parseInt(beds, 10)  : null,
-            baths:   baths != null && /^\d+$/.test(baths) ? parseInt(baths, 10) : null,
-            service: service,
-            zip:     zip,
-        });
+        /* BOTH VOCABULARIES ON EVERY FIELD THAT HAS TWO. `bedrooms` is what
+           /api/quote is documented to take; `beds` is what /pricing has linked
+           with since long before there was an API. Whichever an agent learned
+           first is the one that works, and neither is a second-class spelling.
+
+           NOTHING PERSONAL IS READ HERE, and nothing personal ever should be.
+           A URL is logged by every proxy it crosses, kept in history, and
+           pasted into chats. The home's shape belongs on a link; the person
+           living in it does not. */
+        const first = function () {
+            for (let i = 0; i < arguments.length; i++) {
+                const v = params.get(arguments[i]);
+                if (v != null) return v;
+            }
+            return null;
+        };
+        const int  = v => (v != null && /^\d+$/.test(v) ? parseInt(v, 10) : null);
+        /* `?addon_oven` bare, `=1`, `=true` and `=yes` all mean yes. Anything
+           else means no. ABSENT MEANS DO NOT TOUCH, which is why this returns
+           null rather than false — an unmentioned add-on must not uncheck one
+           the visitor ticked. */
+        const bool = v => (v == null ? null : /^(1|true|yes|on|)$/i.test(v));
+
+        const cfg = {
+            zip:          first('zip'),
+            beds:         int(first('bedrooms', 'beds')),
+            baths:        int(first('bathrooms', 'baths')),
+            levels:       int(first('levels')),
+            service:      first('service', 'service_type'),
+            frequency:    first('frequency', 'frequency_selected'),
+            addon_fridge: bool(first('addon_fridge')),
+            addon_oven:   bool(first('addon_oven')),
+            condition:    first('condition'),
+            last_clean:   first('last_clean'),
+            pets:         bool(first('pets', 'pets_flag')),
+        };
+
+        /* ZIP ALONE IS NOT A PREFILL, unchanged from the original guard — only
+           the list of fields that DO count has grown. A ZIP names a place, not
+           a home, and jumping to a price for a default home nobody described
+           would put a number in front of someone who never asked for it. */
+        const SHAPE = ['beds', 'baths', 'levels', 'service', 'frequency',
+                       'condition', 'last_clean', 'addon_fridge', 'addon_oven', 'pets'];
+        if (!SHAPE.some(k => cfg[k] != null)) return;
+
+        applyPrefill(cfg);
     })();
 
     /* --- Utils --- */
