@@ -36,11 +36,22 @@ also gets typed by hand.
   own per-recipient token for scan-level reporting; stripping it would destroy
   the thing that service is being paid for. It also means `/newhome?src=…`
   can test a variant without a code change.
-- **`src` is the load-bearing tag, not `utm_source`.** `segmentFor()` in
-  `script.js` reads the first dash-segment of `src` to pick the hero and the
-  urgency copy, and `mv` → `movein` is precisely a household that just closed.
-  `/newhome` sends `src=mv-newhome-01`, so a new-owner mailing lands on the
-  move-in hero rather than the no-assumptions default.
+- **`src` is the load-bearing tag, not `utm_source`** — it is what `source`,
+  `src_first` and `src_chain` record. But the prefix is deliberately one
+  `segmentFor()` does **not** know, so it falls to `direct`.
+  **FOUNDER'S CALL, 2026-09-28: printed media lands on the original hero, not
+  the move-in or pro one.** The reasoning to preserve: a mailing list says a
+  household probably moved, it does not say what they came to the site for, and
+  putting the move-in hero in front of someone who wanted a recurring plan is a
+  worse trade than the page that assumes nothing. `/newhome` therefore sends
+  `src=newhome-01`, not `mv-…`. Nothing is lost — `source` keeps the full tag,
+  so these rows can be reclassified later.
+  A key added to `SHORT_LINKS` must not start with a head listed in
+  `SRC_SEGMENTS` (`mv`, `deed`, `db`, `dh`, `qr`, `poster`, `flyer`, `eddm`,
+  `email`, `em`, `ref`) unless that hero is genuinely wanted. Section 5 of the
+  test lifts the **real** `segmentFor()` out of `script.js` and runs it against
+  what the Worker actually sends, so a copied taxonomy cannot agree with itself
+  while the page disagrees.
 - **`utm_content` is deliberately absent.** `readAttribution()` reads only
   `src`, `utm_source`, `utm_medium`, `utm_campaign`; a printed
   `utm_content=navy_welcome_card_1` would look tracked and record nothing. Per
@@ -53,8 +64,10 @@ Worker; a rule configured in the dashboard would be invisible to the repo,
 untested, and one more place to look when a link breaks.
 
 **Verified:** the new file's assertions were confirmed to FAIL against a
-deliberately broken worker (301 instead of 302, `src` prefix changed off `mv`)
-before being trusted. Full suite green. **Not verified: production** — nothing
+deliberately broken worker — 301 instead of 302, and `src` changed to
+`mv-newhome-01`, which the hero guard caught with
+`{"src":"mv-newhome-01","segment":"movein"}` — before being trusted. Full suite
+green. **Not verified: production** — nothing
 pushed at the time of writing, so `/newhome` still 404s live. The card must not
 be ordered until a real scan of the printed preview resolves.
 

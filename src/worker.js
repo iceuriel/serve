@@ -144,12 +144,24 @@ const CRON_WARM_UPSTREAM = "*/5 * * * *";
    scanning phone and by intermediaries, which would make a re-point silently
    fail for exactly the people who already scanned.
 
-   `src` IS THE LOAD-BEARING TAG, NOT `utm_source`. segmentFor() in script.js
-   reads the first dash-segment of `src` to choose which hero and which
-   urgency copy renders — `mv` means someone who just closed on a home, and
-   that is who a new-owner mailing reaches. A link carrying only utm_* tags
-   lands on the default hero, which assumes nothing about why they came. The
-   utm_* trio rides along because the sheet records all three.
+   `src` IS STILL THE LOAD-BEARING TAG, NOT `utm_source` — it is what `source`,
+   `src_first` and `src_chain` record, and the utm_* trio rides along because
+   the sheet keeps all three.
+
+   BUT THE PREFIX HERE IS DELIBERATELY ONE THAT segmentFor() DOES NOT KNOW.
+   That function reads the first dash-segment of `src` to choose which hero and
+   which urgency copy renders, and an unrecognised head falls to `direct` — the
+   default hero, which assumes nothing. That is the intended landing for a
+   printed card (founder's call, 2026-09-28): a mailing list says a household
+   probably moved, it does not say what they came to the site for, and putting
+   the move-in hero in front of someone who wanted a recurring plan is a worse
+   trade than showing them the page that guesses nothing.
+
+   So a key added here must NOT start with a head listed in SRC_SEGMENTS
+   (`mv`, `deed`, `db`, `dh`, `qr`, `poster`, `flyer`, `eddm`, `email`, `em`,
+   `ref`) unless that segment's hero is genuinely wanted. A test enforces it.
+   Nothing is lost by staying out of the taxonomy: `source` keeps the full tag,
+   so these rows can be reclassified later once the tag's meaning is settled.
 
    `utm_content` is deliberately absent: readAttribution() does not read it,
    so it would be a tag that looks tracked and records nothing. Per-design
@@ -159,7 +171,7 @@ const CRON_WARM_UPSTREAM = "*/5 * * * *";
    EDIT ME: one row per printed piece. Key is the path, exactly as printed. */
 const SHORT_LINKS = {
   "/newhome": {
-    src:          "mv-newhome-01",
+    src:          "newhome-01",
     utm_source:   "thanksio",
     utm_medium:   "direct_mail",
     utm_campaign: "boston_new_homeowners_2026",

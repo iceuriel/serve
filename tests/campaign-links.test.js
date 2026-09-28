@@ -52,11 +52,9 @@ console.log('=== 1. the printed path answers ===');
     const dest = new URL(to || 'https://x.invalid/');
     t('lands on the home page', dest.origin + dest.pathname === 'https://servecleaning.com/', to);
 
-    /* src drives segmentFor() -> which hero renders. A new-owner mailing that
-       loses this tag shows the generic hero to someone who just closed. */
+    /* src is what `source`, src_first and src_chain record. Without it the scan
+       is credited to nothing. */
     t('carries a src tag', !!dest.searchParams.get('src'), to);
-    t('src is a movein prefix', /^mv[-_./]/.test(dest.searchParams.get('src') || ''),
-        dest.searchParams.get('src'));
     t('utm_source', dest.searchParams.get('utm_source') === 'thanksio');
     t('utm_medium', dest.searchParams.get('utm_medium') === 'direct_mail');
     t('utm_campaign', dest.searchParams.get('utm_campaign') === 'boston_new_homeowners_2026');
@@ -83,9 +81,9 @@ console.log('=== 2. how it will really be scanned ===');
     t('unknown params pass through', kept.get('r') === 'abc123', tagged.to);
     t('and the campaign tags survive alongside', kept.get('utm_source') === 'thanksio');
 
-    const override = await scan('/newhome?src=mv-newhome-02');
+    const override = await scan('/newhome?src=newhome-02');
     t('an explicit src wins, so a variant can be tested',
-        new URL(override.to).searchParams.get('src') === 'mv-newhome-02', override.to);
+        new URL(override.to).searchParams.get('src') === 'newhome-02', override.to);
 }
 
 console.log('=== 3. nothing else moved ===');
@@ -114,10 +112,31 @@ console.log('=== 4. the page records what the link sends ===');
     const worker = fs.readFileSync(path.join(root, 'src', 'worker.js'), 'utf8');
     const links = (worker.match(/const SHORT_LINKS = \{[\s\S]*?\n\};/) || [''])[0];
     t('no printed link carries utm_content', !/utm_content/.test(links));
+}
 
-    /* mv is what makes the movein hero render. The two files have to agree. */
-    t('script.js still maps mv -> movein',
-        /\['mv',\s*'movein'\]/.test(script));
+console.log('=== 5. a printed card lands on the hero that guesses nothing ===');
+{
+    /* THE REAL segmentFor(), lifted out of the shipped script.js and run
+       against the tags the Worker actually sends. A copy of the taxonomy here
+       would agree with itself forever while the page disagreed.
+       Founder's call 2026-09-28: a mailing list says a household probably
+       moved, not what they came for, so printed media gets the default hero.
+       Adding `mv-` (or dh-, qr-, deed-…) to a printed tag silently swaps it. */
+    const script = fs.readFileSync(path.join(root, 'script.js'), 'utf8');
+    const from = script.indexOf('const SRC_SEGMENTS');
+    const to   = script.indexOf('}', script.indexOf('function segmentFor')) + 1;
+    assert.ok(from > 0 && to > from, 'could not find segmentFor in script.js');
+    const { segmentFor } = vm.runInNewContext(
+        script.slice(from, to) + '\n({ segmentFor });', {});
+
+    t('sanity: the lifted function still classifies a known tag',
+        segmentFor('mv-deedlist-04') === 'movein', segmentFor('mv-deedlist-04'));
+
+    for (const p of ['/newhome']) {
+        const src = new URL((await scan(p)).to).searchParams.get('src');
+        t(p + ' -> default hero (segment "direct")',
+            segmentFor(src) === 'direct', { src, segment: segmentFor(src) });
+    }
 }
 
 console.log(bad ? '\n' + bad + ' FAILED' : '\nall campaign-link checks passed');
