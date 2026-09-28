@@ -6,12 +6,57 @@ assistant with no access to this repo. Self-contained on purpose.
 **Companion doc:** `/docs/SCHEMA.md` — authoritative for every column's meaning
 and who writes it. This file is the narrative; that file is the contract.
 
-**Latest session: 2026-09-25 (portal phone layout, front-end only).** Jump to
-[what changed on 2026-09-08 / 09](#session-2026-09-08--09) for the current
-state. The sections below it describe earlier builds and remain accurate
-except where a later section supersedes them.
+**Latest session: 2026-09-28 (`/newhome` campaign short link, Worker only).**
+Jump to [what changed on 2026-09-08 / 09](#session-2026-09-08--09) for the
+current state. The sections below it describe earlier builds and remain
+accurate except where a later section supersedes them.
 
 ---
+
+## Current work — 2026-09-28, Claude Code: a printed QR code gets a destination
+
+**Worker + one new test file. No Apps Script change, so nothing waits on a
+deploy. 43 test files pass.** Files: `src/worker.js`,
+`tests/campaign-links.test.js`.
+
+For a Thanks.io 4×6 postcard to Boston new homeowners. The QR was going to be
+printed against `servecleaning.com/newhome`, which **404'd** — the Worker handed
+anything non-`/api/` to the static asset server and there is no such page.
+
+**`SHORT_LINKS` in `src/worker.js`, one row per printed piece**, resolved by
+`shortLinkRedirect()` just before the `env.ASSETS.fetch` fall-through. Matching
+is lower-cased and tolerant of a trailing slash, because a short URL on paper
+also gets typed by hand.
+
+- **302, never 301.** A 301 is cached by the scanning phone and by
+  intermediaries, so re-pointing a card already in mailboxes would silently
+  fail for exactly the people who scanned it. `Cache-Control: no-store` for the
+  same reason.
+- **Incoming params win, and unknown ones pass through.** Thanks.io appends its
+  own per-recipient token for scan-level reporting; stripping it would destroy
+  the thing that service is being paid for. It also means `/newhome?src=…`
+  can test a variant without a code change.
+- **`src` is the load-bearing tag, not `utm_source`.** `segmentFor()` in
+  `script.js` reads the first dash-segment of `src` to pick the hero and the
+  urgency copy, and `mv` → `movein` is precisely a household that just closed.
+  `/newhome` sends `src=mv-newhome-01`, so a new-owner mailing lands on the
+  move-in hero rather than the no-assumptions default.
+- **`utm_content` is deliberately absent.** `readAttribution()` reads only
+  `src`, `utm_source`, `utm_medium`, `utm_campaign`; a printed
+  `utm_content=navy_welcome_card_1` would look tracked and record nothing. Per
+  design variants go in the `src` tail, which IS recorded and which `src_chain`
+  keeps. A test asserts both halves so a printed link cannot rely on a tag the
+  page ignores.
+
+**Not a Cloudflare dashboard Redirect Rule.** The zone already runs this
+Worker; a rule configured in the dashboard would be invisible to the repo,
+untested, and one more place to look when a link breaks.
+
+**Verified:** the new file's assertions were confirmed to FAIL against a
+deliberately broken worker (301 instead of 302, `src` prefix changed off `mv`)
+before being trusted. Full suite green. **Not verified: production** — nothing
+pushed at the time of writing, so `/newhome` still 404s live. The card must not
+be ordered until a real scan of the printed preview resolves.
 
 ## Current work — 2026-09-25, Claude Code: Serve becomes callable by an agent
 

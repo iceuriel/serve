@@ -134,6 +134,56 @@ const WARM_TIMEOUT_MS = 25000;
 const CRON_PHOTO_CLEANUP = "17 8 * * *";
 const CRON_WARM_UPSTREAM = "*/5 * * * *";
 
+/* ============================================================
+   CAMPAIGN SHORT LINKS  —  /newhome, and whatever is printed next
+   ------------------------------------------------------------
+   A QR code on a mailed postcard is the one URL in this business that CANNOT
+   be edited after it ships. So the printed address is short, memorable, and
+   carries no parameters, and the tags live here where they can be corrected
+   after the cards are in mailboxes. 302, never 301: a 301 is cached by the
+   scanning phone and by intermediaries, which would make a re-point silently
+   fail for exactly the people who already scanned.
+
+   `src` IS THE LOAD-BEARING TAG, NOT `utm_source`. segmentFor() in script.js
+   reads the first dash-segment of `src` to choose which hero and which
+   urgency copy renders — `mv` means someone who just closed on a home, and
+   that is who a new-owner mailing reaches. A link carrying only utm_* tags
+   lands on the default hero, which assumes nothing about why they came. The
+   utm_* trio rides along because the sheet records all three.
+
+   `utm_content` is deliberately absent: readAttribution() does not read it,
+   so it would be a tag that looks tracked and records nothing. Per-design
+   variants belong in the `src` tail (mv-newhome-02), which IS recorded, and
+   which src_chain keeps even after a second tagged visit.
+
+   EDIT ME: one row per printed piece. Key is the path, exactly as printed. */
+const SHORT_LINKS = {
+  "/newhome": {
+    src:          "mv-newhome-01",
+    utm_source:   "thanksio",
+    utm_medium:   "direct_mail",
+    utm_campaign: "boston_new_homeowners_2026",
+  },
+};
+
+/* Params already on the incoming URL win, and unknown ones pass through: a
+   mail vendor that appends its own per-recipient token must not have it
+   stripped on the way to the site. */
+function shortLinkRedirect(url) {
+  const path = url.pathname.toLowerCase().replace(/\/+$/, "");
+  const tags = SHORT_LINKS[path || "/"];
+  if (!tags) return null;
+
+  const dest = new URL("/", url.origin);
+  for (const [k, v] of Object.entries(tags)) dest.searchParams.set(k, v);
+  for (const [k, v] of url.searchParams) dest.searchParams.set(k, v);
+
+  return new Response(null, {
+    status: 302,
+    headers: { Location: dest.toString(), "Cache-Control": "no-store" },
+  });
+}
+
 export default {
   /* ONE HANDLER, TWO SCHEDULES. controller.cron says which one fired.
 
@@ -187,6 +237,10 @@ export default {
     if (url.pathname === "/api/portal")   return handlePortal(request, env, ctx);
     if (url.pathname === "/api/vendor")   return handleVendor(request, env);
     if (url.pathname === "/api/health")   return handleHealth(env);
+
+    /* Printed QR codes, before the asset server can 404 them. */
+    const short = shortLinkRedirect(url);
+    if (short) return short;
 
     /* Not an API route — hand back to the static asset server. */
     return env.ASSETS.fetch(request);
