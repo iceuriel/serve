@@ -1,7 +1,39 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-25  ·  master  ·  r61 — somebody is told the card moved
+ * VERSION STAMP:  2026-09-29  ·  master  ·  r62 — the portal can ask for a plumber
+ *
+ * r62 = THE PORTAL BECOMES THE PLACE A CUSTOMER ASKS FOR ANYTHING ELSE.
+ *       INCLUDES r61 BELOW — this is one paste, not two.
+ *
+ *       PASTE THIS BEFORE THE SITE IS PUSHED. portal.js grows a third tab that
+ *       reads `requests` off the portal model and writes
+ *       `kind: "service_request"`. A script that does not know either answers
+ *       `unknown_kind` to every submission, so the site change alone ships a
+ *       tab whose only button fails.
+ *
+ *       Founder's request, 2026-09-29: a customer with a portal can report a
+ *       problem or ask for a quote on any category in the homepage's "One
+ *       relationship. Everything your home needs." grid — pick the service,
+ *       say what is wrong, attach a photograph, send. Two new tabs in Leads
+ *       MASTER (SERVICE_REQUESTS, SERVICE_REQUEST_PHOTOS), both auto-created.
+ *
+ *       IT IS A REQUEST AND NOTHING HERE BLURS THAT. No JOBS row, no slot, no
+ *       price, no card, no vendor. The only thing it creates is work for a
+ *       human, and the only thing it promises is that a human will answer.
+ *
+ *       THREE FOUNDER'S CALLS ARE BUILT IN, not defaults to be tidied away
+ *       later. The homepage still reads "Coming to Serve" for five of the six
+ *       categories — a request channel inside the portal commits Serve to
+ *       answering its own customers, while flipping the public grid would
+ *       commit it to answering strangers. No timeframe is promised anywhere,
+ *       because no partner has agreed to one. And nothing is priced.
+ *
+ *       `status` is the operator's column once this writes NEW, and the
+ *       customer never sees the raw cell — requestStatusLabel maps it through
+ *       a whitelist, so an internal note in it cannot reach their page.
+ *
+ *       See the SERVICE REQUESTS section at the foot of this file.
  *
  * r61 = THE ONE EVENT INVOLVING A REAL CARD NOW SENDS AN EMAIL.
  *       INCLUDES r60 BELOW — this is one paste, not two.
@@ -1934,7 +1966,7 @@ function routeGet(e) {
      health stamp below rather than creating anything. */
   if (p.booking) return handleBookingStatus(p.booking);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-25 r61" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-29 r62" });
 }
 
 
@@ -6217,6 +6249,15 @@ function buildPortalModel(ss, contact) {
     /* r45. The plan box for somebody who booked a move — the choice, or the
        plan they chose. null for everybody else. */
     movePlan:  movePlanForPortal(ss, bookings),
+    /* r62. Everything they have asked us to fix or quote that is not a clean.
+       [] is the ordinary answer and the empty state is deliberate: the tab
+       still renders its form, because the form is the point.
+
+       THE CATALOGUE IS NOT SENT. The browser reads serve-services.js for the
+       category list, which is the file that decides what Serve says it does —
+       sending a second copy from here is how the portal would start offering a
+       service the homepage had dropped. */
+    requests:  serviceRequestsForPortal(ss, contact),
     bookings:  bookings.map(function (b) {
       var done = !!b.completedDate;
       /* r43. Called off, and still on the account as a record of what was
@@ -6415,6 +6456,13 @@ function handlePortalWrite(ss, data) {
        price is asked for or any row written. */
     if (kind === "plan_start")  return startMovePlan(ss, contact, bookings, data);
     if (kind === "plan_change") return changeMovePlan(ss, contact, bookings, data);
+
+    /* r62. Asking for a service other than a clean. THE ONE PORTAL WRITE THAT
+       TARGETS NOTHING THE CUSTOMER ALREADY HAS — it creates a new record rather
+       than editing a booking or a home, so there is no target to prove
+       ownership of. The token proving this contact is the whole check, plus
+       property_id when they name one. Nothing on JOBS is touched. */
+    if (kind === "service_request") return createServiceRequest(ss, contact, bookings, data);
 
     return json({ ok: false, error: "unknown_kind" });
 
@@ -9800,6 +9848,9 @@ function handleBookingPhoto(ss, data) {
   try {
     if (lock) lock.waitLock(8000);
     if (data.purpose === "completion") return handleCompletionPhoto(ss, data);
+    /* r62. A photograph on a service request. Routed before the booking checks
+       below because a request has no job and no room to check it against. */
+    if (data.purpose === "request") return handleRequestPhoto(ss, data);
     if (data.action === "cleanup" || data.action === "purged") return cleanupBookingPhotos(ss, data);
     var jobId = String(data.job_id || "");
     var kind = String(data.auth_kind || "");
@@ -9988,3 +10039,520 @@ function cleanupBookingPhotos(ss, data) {
   });
   return json({ ok: true, photos: out });
 }
+
+
+/* ============================================================
+   SERVICE REQUESTS — "everything your home needs", from the portal.   r62
+   ============================================================
+
+   A customer with a portal can report a problem or ask for a quote on any
+   category in Serve's catalogue: pick the service, say what is wrong, attach a
+   photograph. That is the whole feature.
+
+   IT IS A REQUEST, NOT A BOOKING, and nothing here blurs that. No row on JOBS,
+   no slot consumed, no price computed, no card touched, no vendor assigned.
+   The only thing it creates is a piece of work for a human, and the only thing
+   it promises the customer is that a human will answer.
+
+   ITS OWN TAB RATHER THAN AN EVENTS ROW. EVENTS is append-only site telemetry
+   with a fixed schema and nothing reads it back; a request has a status an
+   operator moves along and has to be findable by the person answering it. It
+   is also deliberately NOT a scope_type on BOOKING_INSTRUCTIONS, for the
+   reason recorded above PARTNER_NOTES: sortInstructions files anything it does
+   not recognise as the customer's general note, so a request stored there
+   would overwrite what somebody asked for on their actual clean.
+
+   THE CATEGORY LIST BELOW MUST AGREE WITH serve-services.js, which is the one
+   place that decides what Serve says it does. This script cannot read that
+   file — it is a browser script — so the ids are restated here and
+   service-requests.test.js reads BOTH and fails if they disagree. That is the
+   same guard campaign-links.test.js puts on segmentFor(): two surfaces
+   describing the same thing in different words will drift until something
+   reads both.
+
+   THREE THINGS THIS DELIBERATELY DOES NOT DO, each a founder's call on
+   2026-09-29 rather than an omission:
+
+     1. IT DOES NOT MAKE A PLANNED SERVICE ORDERABLE. The homepage still reads
+        "Coming to Serve" for five of these six. A request channel inside the
+        portal commits Serve to answering its own paying customers; flipping
+        the public grid would commit it to answering strangers, and that is a
+        public capability claim. Portal only.
+     2. IT PROMISES NO TIMEFRAME. The portal says somebody will follow up and
+        names no clock, because no partner has agreed to one. The wording is
+        a promise — treat a change to it as a change to a promise.
+     3. IT PRICES NOTHING. A quote for any of these comes from a human.
+
+   `status` IS THE OPERATOR'S COLUMN once this script has written NEW, and the
+   customer never sees its raw value. requestStatusLabel maps it through a
+   whitelist, so an internal note typed into that cell ("chasing, vendor
+   ghosted us") cannot turn up on the customer's own page. Same discipline as
+   every other view model here: a field reaches a browser because somebody put
+   it there on purpose.
+   ============================================================ */
+const SERVICE_REQUESTS_TAB = "SERVICE_REQUESTS";
+const SERVICE_REQUESTS_HEADERS = ["request_id", "client_ref", "contact_id", "lead_id",
+  "property_id", "property_label", "service", "service_label", "message",
+  "photo_count", "status", "customer_name", "customer_email", "customer_phone",
+  "created_at", "updated_at", "portal_link"];
+
+/** Private photographs attached to a request. Images live in R2, like the
+    room photos; this tab owns authorization and is read by nothing that does
+    not name it. Never passed to cleanupBookingPhotos — that sweep is scoped to
+    the BOOKING_PHOTOS tab and the booking-photos/ prefix, and widening it is
+    how a permanently locked completion photo would get deleted. */
+const SERVICE_REQUEST_PHOTOS_TAB = "SERVICE_REQUEST_PHOTOS";
+const SERVICE_REQUEST_PHOTOS_HEADERS = ["photo_id", "request_id", "contact_id",
+  "object_key", "status", "bytes", "created_at", "updated_at"];
+
+/** Serve's own codes, mirroring serve-services.js. `other` is the portal's and
+    is NOT in the catalogue: it is not a service, it is the guarantee that
+    somebody with a problem Serve has not thought of is never stuck. */
+const REQUEST_SERVICES = {
+  cleaning:    "Cleaning",
+  handyman:    "Handyman",
+  plumbing:    "Plumbing",
+  hvac:        "Heating & Cooling",
+  electrical:  "Electrical",
+  landscaping: "Lawn & Snow",
+  other:       "Something else",
+};
+
+/** What a customer is shown for an operator-owned status. A WHITELIST —
+    anything unrecognised reads as "Received", which is always true of a
+    request that exists. */
+const REQUEST_STATUS_LABELS = {
+  NEW: "Received", RECEIVED: "Received", SEEN: "Received", OPEN: "Received",
+  IN_PROGRESS: "In progress", WORKING: "In progress", SCHEDULING: "In progress",
+  QUOTED: "Quote sent",
+  SCHEDULED: "Scheduled", BOOKED: "Scheduled",
+  DONE: "Closed", CLOSED: "Closed", DECLINED: "Closed", CANCELLED: "Closed",
+};
+
+/** The statuses that stop a request accepting new photographs. */
+const REQUEST_CLOSED_STATUSES = { DONE: true, CLOSED: true, DECLINED: true, CANCELLED: true };
+
+const REQUEST_MESSAGE_MAX = 2000;
+const REQUEST_PHOTO_LIMIT = 3;
+
+/** "In Progress", "in-progress" and "IN_PROGRESS" are one status. */
+function requestStatusKey(v) {
+  return String(v || "").trim().toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+function requestStatusLabel(v) {
+  return REQUEST_STATUS_LABELS[requestStatusKey(v)] || "Received";
+}
+function requestIsOpen(v) {
+  return !REQUEST_CLOSED_STATUSES[requestStatusKey(v)];
+}
+
+/** Auto-created on the first request, exactly like BOOKING_INSTRUCTIONS. */
+function ensureServiceRequestsTab(ss) {
+  assertWritable(SERVICE_REQUESTS_TAB);
+  var sheet = ss.getSheetByName(SERVICE_REQUESTS_TAB);
+  if (!sheet) {
+    sheet = ss.insertSheet(SERVICE_REQUESTS_TAB);
+    sheet.appendRow(SERVICE_REQUESTS_HEADERS);
+    sheet.setFrozenRows(1);
+    console.log('Created the "' + SERVICE_REQUESTS_TAB + '" tab.');
+  }
+  return sheet;
+}
+
+/** Every request row as an object, plus the sheet row it sits on. Values are
+    left RAW: created_at may be text or a Date depending on how Sheets took it,
+    and String()ing it here would hide that from dateCellText. */
+function serviceRequestRows(ss) {
+  var table = readTable(ss, SERVICE_REQUESTS_TAB);
+  if (!table || !table.rows.length) return [];
+  var h = table.headers;
+  return table.rows.map(function (row, i) {
+    var out = { sheetRow: i + 2 };
+    SERVICE_REQUESTS_HEADERS.forEach(function (key) {
+      var c = h.indexOf(key);
+      out[key] = c < 0 || row[c] === null || row[c] === undefined ? "" : row[c];
+    });
+    return out;
+  });
+}
+
+/** Where a request sits, so it can be updated rather than re-found. */
+function findServiceRequestRow(ss, requestId) {
+  var want = String(requestId || "").trim();
+  if (!want) return null;
+  var sheet = ss.getSheetByName(SERVICE_REQUESTS_TAB);
+  if (!sheet) return null;
+  var table = sheetValues(sheet);
+  var c = table.headers.indexOf("request_id");
+  if (c < 0) return null;
+  for (var i = 0; i < table.rows.length; i++) {
+    if (String(table.rows[i][c]).trim() === want) {
+      return { sheet: sheet, headers: table.headers, rowNumber: i + 2, row: table.rows[i] };
+    }
+  }
+  return null;
+}
+
+function setServiceRequestCells(found, fields) {
+  Object.keys(fields).forEach(function (name) {
+    var c = found.headers.indexOf(name);
+    if (c >= 0) found.sheet.getRange(found.rowNumber, c + 1).setValue(fields[name]);
+  });
+}
+
+/** One field off a found row, by header name. "" when the column is absent. */
+function requestField(found, name) {
+  var c = found.headers.indexOf(name);
+  return c < 0 || found.row[c] === null || found.row[c] === undefined ? "" : found.row[c];
+}
+
+/**
+ * A new request. Called by handlePortalWrite, which has already proved the
+ * portal token belongs to this contact.
+ *
+ * IDEMPOTENT ON THE BROWSER'S OWN REFERENCE. A portal write that runs past the
+ * Worker's 12-second budget is reported to the page as a failure while the row
+ * is already written — the r58 lesson, and the reason portal.js asks the
+ * account rather than trusting the round trip. Without a reference the retry
+ * would file a second copy of the same problem, and the founder would call the
+ * customer twice about one leak.
+ */
+function createServiceRequest(ss, contact, bookings, data) {
+  var clientRef = String(data.client_ref || "").trim();
+  /* The browser's own reference, not a credential: it authorises nothing and
+     is checked only for shape so it cannot become a way to write junk. */
+  if (!/^[A-Za-z0-9_.:-]{8,64}$/.test(clientRef)) {
+    return json({ ok: false, error: "bad_request" });
+  }
+
+  var service = String(data.service || "").trim().toLowerCase();
+  if (!REQUEST_SERVICES[service]) return json({ ok: false, error: "unknown_service" });
+
+  var message = String(data.message || "").trim().slice(0, REQUEST_MESSAGE_MAX);
+  /* The message IS the request. A category on its own tells the person who has
+     to answer it nothing they can act on. */
+  if (!message) return json({ ok: false, error: "message_required" });
+
+  /* Which home, when they name one. Optional — somebody may be asking about a
+     property Serve has never cleaned — but a property_id that is not theirs is
+     REFUSED rather than quietly dropped, for the same reason every other
+     portal write refuses one: a valid token authorises one contact. */
+  var propertyId = String(data.property_id || "").trim();
+  var propertyLabel = "";
+  if (propertyId) {
+    var homes = getContactProperties(bookings), owned = null;
+    for (var i = 0; i < homes.length; i++) {
+      if (homes[i].propertyId === propertyId) { owned = homes[i]; break; }
+    }
+    if (!owned) return json({ ok: false, error: "not_found" });
+    propertyLabel = owned.label;
+  }
+
+  var sheet = ensureServiceRequestsTab(ss);
+  /* Fresh, never the request-scoped snapshot: this tab is about to be written
+     and the id of the next request is read off it. */
+  var table = sheetValues(sheet);
+  var h = table.headers;
+  if (SERVICE_REQUESTS_HEADERS.some(function (k) { return h.indexOf(k) < 0; })) {
+    console.error(SERVICE_REQUESTS_TAB + " is missing columns; refusing to write a partial row.");
+    return json({ ok: false, error: "save_failed" });
+  }
+
+  var refCol = h.indexOf("client_ref");
+  for (var r = 0; r < table.rows.length; r++) {
+    if (String(table.rows[r][refCol]).trim() === clientRef) {
+      return json({ ok: true, duplicate: true,
+        request_id: String(table.rows[r][h.indexOf("request_id")] || "") });
+    }
+  }
+
+  /* Name, email and phone denormalised onto the row on purpose. The founder
+     answers these by calling somebody back, and a request he has to join to
+     LEADS before he can reply to is a request that waits. Taken from the
+     newest booking, which is the freshest the customer has given us, and
+     falling back to the contact record. */
+  var newest = bookings && bookings.length ? bookings[0] : null;
+  var requestId = nextSeqId(table.rows, h.indexOf("request_id"), "REQ");
+  /* A REAL DATE, not a text stamp. This tab is one an operator sorts and
+     filters, and dateCellText then gives the portal an exact YYYY-MM-DD
+     through the sheet's own timezone rather than the first ten characters of
+     whatever shape the cell ended up in. BOOKING_PHOTOS and PARTNER_NOTES,
+     the other two auto-created child tabs, already do it this way. */
+  var now = new Date();
+  var record = {
+    request_id:     requestId,
+    client_ref:     clientRef,
+    contact_id:     contact.contactId,
+    lead_id:        contact.leadId,
+    property_id:    propertyId,
+    property_label: propertyLabel,
+    service:        service,
+    service_label:  REQUEST_SERVICES[service],
+    message:        message,
+    photo_count:    0,
+    status:         "NEW",
+    customer_name:  (newest && newest.customerName) || contact.name || "",
+    customer_email: (newest && newest.customerEmail) || contact.leadId || "",
+    customer_phone: (newest && newest.customerPhone) || "",
+    created_at:     now,
+    updated_at:     now,
+    portal_link:    portalUrl(contact.contactId),
+  };
+  /* One appendRow — atomic, all or nothing. */
+  sheet.appendRow(h.map(function (name) {
+    return record[name] === undefined ? "" : record[name];
+  }));
+
+  /* A mail failure must never turn a saved request into one the customer is
+     told did not save. Same wrapper as the r61 payment emails. */
+  try {
+    sendServiceRequestEmail(record);
+  } catch (mailErr) {
+    console.error("service request email failed for " + requestId + ": " + mailErr);
+  }
+
+  return json({ ok: true, request_id: requestId });
+}
+
+/**
+ * Tell a human. This is the entire delivery mechanism for the feature, so it
+ * says everything needed to act without opening the sheet.
+ *
+ * THE PHOTOS ARE NOT IN IT AND CANNOT BE. They upload after this row exists —
+ * the request has to be there for a photo to be attached to — so the email
+ * names the portal link instead, which shows the request with whatever was
+ * attached. photo_count on the sheet is the at-a-glance version.
+ */
+function sendServiceRequestEmail(record) {
+  MailApp.sendEmail(
+    notifyEmail(),
+    "Serve Request — " + record.service_label + " · " +
+      (record.customer_name || record.contact_id),
+    "A portal customer asked for a service other than a booking.\n" +
+    "THIS IS NOT A BOOKING. Nothing is scheduled, priced or charged.\n" +
+    "Nobody has promised them a date or a number — reply to them yourself.\n\n" +
+    "— WHAT —\n" +
+    "Service:   " + record.service_label + " (" + record.service + ")\n" +
+    "Request:   " + record.request_id + "\n" +
+    "Home:      " + (record.property_label || "(not specified)") +
+      (record.property_id ? " · " + record.property_id : "") + "\n" +
+    "\n— WHAT THEY SAID —\n" +
+    record.message + "\n" +
+    "\n— WHO —\n" +
+    "Name:      " + (record.customer_name || "(unknown)") + "\n" +
+    "Email:     " + (record.customer_email || "(unknown)") + "\n" +
+    "Phone:     " + (record.customer_phone || "(unknown)") + "\n" +
+    "Contact:   " + record.contact_id + "\n" +
+    "\n— NEXT —\n" +
+    "Their portal (photos, if they attached any, are on the request):\n" +
+    record.portal_link + "\n\n" +
+    "Move `status` on " + SERVICE_REQUESTS_TAB + " as you work it. The customer\n" +
+    "sees a plain label for it — Received, In progress, Quote sent, Scheduled,\n" +
+    "Closed — and never the raw cell, so notes in it stay internal.\n");
+}
+
+/** Photo rows, with the sheet row each sits on. */
+function serviceRequestPhotoRows(ss) {
+  var table = readTable(ss, SERVICE_REQUEST_PHOTOS_TAB);
+  if (!table || !table.rows.length) return [];
+  var h = table.headers;
+  return table.rows.map(function (row, i) {
+    var out = { sheetRow: i + 2 };
+    SERVICE_REQUEST_PHOTOS_HEADERS.forEach(function (key) {
+      var c = h.indexOf(key);
+      out[key] = c < 0 || row[c] === null || row[c] === undefined ? "" : row[c];
+    });
+    return out;
+  });
+}
+
+/**
+ * This request's readable photographs, as a view model.
+ *
+ * `roomKey` is always "" and that is not laziness — it is what lets the
+ * SHIPPED photo grid render these without a second copy of it. mount() filters
+ * its photos by roomKey and sends room_key on every call, so a request photo
+ * is simply one whose room is blank on both sides.
+ */
+function publicRequestPhotos(rows, requestId) {
+  return rows.filter(function (r) {
+    return String(r.request_id) === String(requestId) && r.status === "READY";
+  }).map(function (r) {
+    // Explicit whitelist. Storage keys never enter a view model.
+    return { id: String(r.photo_id), roomKey: "", createdAt: String(r.created_at) };
+  });
+}
+
+/** A request's date as `YYYY-MM-DD`. The raw created_at never reaches a
+    browser: prettyDate() in portal.js parses three dash-separated parts and
+    silently returns "" for anything else — a date that renders as nothing is
+    how a card would quietly lose the one fact that orders it.
+
+    The slice is for a row an operator retyped by hand as text. A cell this
+    script wrote is a Date, which dateCellText already answers in exactly ten
+    characters. */
+function requestDateText(v, tz) {
+  return String(dateCellText(v, tz) || "").slice(0, 10);
+}
+
+/** This contact's requests, newest first. */
+function serviceRequestsForPortal(ss, contact) {
+  var rows = serviceRequestRows(ss);
+  if (!rows.length) return [];
+  var photos = serviceRequestPhotoRows(ss);
+  var tz = sheetTimeZone(ss);
+  var mine = rows.filter(function (r) {
+    return String(r.contact_id).trim() === contact.contactId;
+  });
+  /* Newest first, by the id the script mints in order. created_at is a stamp
+     whose cell type Sheets decides, so the id is the steadier sort key. */
+  mine.sort(function (a, b) {
+    return String(b.request_id).localeCompare(String(a.request_id));
+  });
+  return mine.map(function (r) {
+    var open = requestIsOpen(r.status);
+    return {
+      requestId:    String(r.request_id),
+      /* The browser's own reference, handed back so a page that never heard
+         whether its write landed can recognise its OWN request rather than
+         counting rows and racing a second tab. */
+      clientRef:    String(r.client_ref),
+      service:      String(r.service),
+      /* The label from OUR whitelist, not the cell. An operator retyping
+         service_label must not be able to rename a category on the customer's
+         page, and a request filed before a rename still reads correctly. */
+      serviceLabel: REQUEST_SERVICES[String(r.service)] || "Home service",
+      message:      String(r.message),
+      propertyLabel: String(r.property_label || ""),
+      createdDate:  requestDateText(r.created_at, tz),
+      statusLabel:  requestStatusLabel(r.status),
+      open:         open,
+      photoLimit:   REQUEST_PHOTO_LIMIT,
+      photos:       publicRequestPhotos(photos, r.request_id),
+    };
+  });
+}
+
+/**
+ * A photograph on a request. Reached from handleBookingPhoto, so the lock and
+ * the bridge token have already been checked — but NOT the customer, which is
+ * this function's job.
+ *
+ * THE BRIDGE TOKEN IS NOT AUTHORISATION. It proves the Worker relayed this,
+ * nothing about whose request it is. Every action below resolves the portal
+ * token to a contact and then proves the request row carries that contact.
+ */
+function handleRequestPhoto(ss, data) {
+  /* Portal credentials only. A ticket token opens one job and has no business
+     reaching a request, and saying so explicitly is cheaper than reasoning
+     about whether the checks below would have caught it. */
+  if (String(data.auth_kind || "") !== "portal") return json({ ok: false, error: "not_found" });
+  var contactId = String(data.contact_id || "");
+  var tok = String(data.t || "");
+  if (!contactId || !tok || portalToken(contactId) !== tok) {
+    return json({ ok: false, error: "not_found" });
+  }
+
+  var found = findServiceRequestRow(ss, String(data.request_id || ""));
+  /* Not theirs, or not a request at all — the same answer either way. */
+  if (!found || String(requestField(found, "contact_id")).trim() !== contactId) {
+    return json({ ok: false, error: "not_found" });
+  }
+
+  var action = String(data.action || "");
+  if (["begin", "commit", "read", "delete"].indexOf(action) < 0) {
+    return json({ ok: false, error: "bad_action" });
+  }
+  /* A closed request keeps its pictures readable and accepts no new ones. */
+  if (action !== "read" && !requestIsOpen(requestField(found, "status"))) {
+    return json({ ok: false, error: "closed" });
+  }
+
+  var photoId = String(data.photo_id || "");
+  if (!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(photoId)) {
+    return json({ ok: false, error: "bad_photo" });
+  }
+  /* A request photo has no room, and the Worker checks that what comes back
+     matches what went out — so a caller inventing one is refused here rather
+     than being silently ignored. */
+  if (String(data.room_key || "") !== "") return json({ ok: false, error: "unknown_room" });
+
+  var requestId = String(requestField(found, "request_id")).trim();
+  var sheet = ss.getSheetByName(SERVICE_REQUEST_PHOTOS_TAB);
+  var rows = serviceRequestPhotoRows(ss);
+  var record = null;
+  rows.forEach(function (r) { if (String(r.photo_id) === photoId) record = r; });
+  /* An id that exists against a different request is somebody else's. */
+  if (record && String(record.request_id) !== requestId) return json({ ok: false, error: "not_found" });
+
+  var now = new Date();
+  function result() {
+    return json({ ok: true, object_key: String(record.object_key), status: String(record.status),
+      photo: { id: photoId, roomKey: "", createdAt: String(record.created_at) } });
+  }
+  function setStatus(value) {
+    var h = sheetHeaders(sheet);
+    sheet.getRange(record.sheetRow, h.indexOf("status") + 1).setValue(value);
+    sheet.getRange(record.sheetRow, h.indexOf("updated_at") + 1).setValue(now);
+    record.status = value;
+  }
+  /* What the founder sees on the request itself. Recounted from the tab rather
+     than incremented, so a lost response cannot drift it. */
+  function recount() {
+    var live = serviceRequestPhotoRows(ss).filter(function (r) {
+      return String(r.request_id) === requestId && r.status === "READY";
+    }).length;
+    var again = findServiceRequestRow(ss, requestId);
+    if (again) setServiceRequestCells(again, { photo_count: live, updated_at: new Date() });
+  }
+
+  if (action === "begin") {
+    if (record) {
+      if (record.status === "READY") return result();
+      // A retry cannot revive a deleted or expired reservation.
+      if (record.status !== "PENDING" || now - new Date(record.created_at) > 600000) {
+        return json({ ok: false, error: "retry_upload" });
+      }
+      return result();
+    }
+    var bytes = Number(data.bytes);
+    if (!Number.isInteger(bytes) || bytes < 4 || bytes > 1500000) {
+      return json({ ok: false, error: "bad_size" });
+    }
+    var counted = rows.filter(function (r) {
+      return String(r.request_id) === requestId &&
+        (r.status === "READY" || (r.status === "PENDING" && now - new Date(r.created_at) <= 600000));
+    }).length;
+    if (counted >= REQUEST_PHOTO_LIMIT) return json({ ok: false, error: "photo_limit" });
+    if (!sheet) {
+      assertWritable(SERVICE_REQUEST_PHOTOS_TAB);
+      sheet = ss.insertSheet(SERVICE_REQUEST_PHOTOS_TAB);
+      sheet.appendRow(SERVICE_REQUEST_PHOTOS_HEADERS);
+      sheet.setFrozenRows(1);
+    }
+    if (SERVICE_REQUEST_PHOTOS_HEADERS.some(function (k) { return sheetHeaders(sheet).indexOf(k) < 0; })) {
+      return json({ ok: false, error: "photo_unavailable" });
+    }
+    record = { photo_id: photoId, request_id: requestId, contact_id: contactId,
+      object_key: "request-photos/" + photoId + ".jpg", status: "PENDING",
+      bytes: bytes, created_at: now, updated_at: now };
+    sheet.appendRow(sheetHeaders(sheet).map(function (k) {
+      return record[k] === undefined ? "" : record[k];
+    }));
+    return result();
+  }
+
+  if (!record) return json({ ok: false, error: "not_found" });
+  if (action === "read") return record.status === "READY" ? result() : json({ ok: false, error: "not_found" });
+  if (action === "delete") { setStatus("DELETED"); recount(); return result(); }
+  if (record.status === "READY") return result();
+  if (record.status !== "PENDING" || now - new Date(record.created_at) > 600000) {
+    return json({ ok: false, error: "retry_upload" });
+  }
+  setStatus("READY");
+  recount();
+  return result();
+}
+
+/* END SERVICE REQUESTS */

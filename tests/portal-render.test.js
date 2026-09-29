@@ -30,6 +30,11 @@ const SCOPE   = fs.readFileSync(path.join(ROOT, 'serve-scope.js'), 'utf8');
    built out of ServeSlots.load and ServeSlots.picker, and stubbing them would
    assert against a fixture of the agenda instead of the one that ships. */
 const SLOTS   = fs.readFileSync(path.join(ROOT, 'serve-slots.js'), 'utf8');
+/* r62: loaded for real, and ALWAYS — h.html loads it on every page view and
+   renderRequests() reads ServeServices.all() with no typeof guard, so a stub
+   would be asserting against a fixture of the catalogue instead of the one
+   file that decides what Serve says it does. */
+const SERVICES = fs.readFileSync(path.join(ROOT, 'serve-services.js'), 'utf8');
 
 let bad = 0;
 const t = (label, got, want) => {
@@ -156,8 +161,16 @@ async function boot(model, opts) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve(q) });
       }
       if (init && init.method === 'POST') {
-        posts.push(JSON.parse(init.body));
-        served = opts.after || Object.assign({}, model, { plan: null });
+        const body = JSON.parse(init.body);
+        posts.push(body);
+        /* r62. `afterPost` is handed the BODY, which `after` cannot be: a
+           service request carries a reference the page invents for itself, and
+           the account has to come back carrying that same reference or the
+           page cannot recognise its own write. `after` is untouched — it is
+           still assigned as-is, including when it is a function the GET calls,
+           which is how r58's "still running" fixture works. */
+        served = (opts.afterPost ? opts.afterPost(body) : opts.after) ||
+                 Object.assign({}, model, { plan: null });
         return Promise.resolve({ ok: true, json: () => Promise.resolve(
           opts.reply || { ok: true, job_id: 'SRV-CONFIRMED' }) });
       }
@@ -185,6 +198,13 @@ async function boot(model, opts) {
   }
   vm.createContext(box);
   vm.runInContext(SCOPE, box);
+  vm.runInContext(SERVICES, box);
+  /* r62. Source to run BEFORE portal.js, for a module this shim cannot load for
+     real. booking-photos.js registers a pagehide listener on window and builds
+     canvases, none of which exist here — so a caller that needs to watch what
+     the page ASKS of ServePhotos supplies a stub through this and asserts on
+     the calls. Never used to replace something loadable. */
+  if (opts.preload) vm.runInContext(opts.preload, box);
   /* r43: SKIPPABLE, so the page can be driven without the slots module. The
      two halves of "change this visit" degrade separately — a missing scheduler
      may cost the move control, but it must never cost the ability to call a

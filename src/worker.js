@@ -2459,6 +2459,30 @@ function publicCors(res, pathname) {
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 
+/* WHAT A PHOTO IS FOR, AND WHERE ITS BYTES LIVE.  r62
+   ------------------------------------------------------------------
+   The purpose is not decoration — it selects the storage prefix, and the
+   prefix is what separates three sets of images with three different rules:
+
+     instruction  the customer showing the cleaner what they mean. Removable,
+                  and swept from R2 by the nightly cron once deleted.
+     completion   the cleaner showing a finished room. Locked indefinitely and
+                  NEVER swept, by explicit instruction — see the R2 lock.
+     request      a photograph on a service request (r62). Its own prefix so
+                  that the cron, which is scoped to booking-photos/ and the
+                  BOOKING_PHOTOS tab, cannot reach it either way.
+
+   A WHITELIST, NOT A TEST FOR ONE VALUE. Until r62 this read
+   `data.purpose === "completion"` and everything else — including a typo —
+   silently became an instruction photo, which would have filed a locked
+   completion image as a deletable customer one. An unknown purpose is now
+   refused. */
+const PHOTO_PURPOSES = {
+  instruction: "booking-photos/",
+  completion:  "completion-photos/",
+  request:     "request-photos/",
+};
+
 /* Private R2 images. All credentials travel in request bodies; the sheet
    authorizes the job/room/photo on EVERY operation, including image reads. */
 async function handlePhotos(request, env) {
@@ -2489,14 +2513,23 @@ async function handlePhotos(request, env) {
   } catch (_) { return reply({ ok: false, error: "bad_upload" }, 400); }
   const action = data.action;
   if (!["upload", "read", "delete"].includes(action)) return reply({ ok: false, error: "bad_action" }, 400);
-  const completion = data.purpose === "completion";
+  /* Absent means instruction, which is what every caller predating r62 sends.
+     Anything else must be a purpose this Worker knows. */
+  const purpose = data.purpose === undefined || data.purpose === null || data.purpose === ""
+    ? "instruction" : String(data.purpose);
+  const prefix = PHOTO_PURPOSES[purpose];
+  if (!prefix) return reply({ ok: false, error: "bad_upload" }, 400);
+  const completion = purpose === "completion";
   if (completion && action === "delete") return reply({ ok: false, error: "bad_action" }, 400);
   // Caller-supplied storage keys, internal actions, and bridge tokens are ignored.
   const auth = { event_type: "booking_photo", bridge_token: env.PHOTO_BRIDGE_SECRET,
     auth_kind: String(data.auth_kind || ""), contact_id: String(data.contact_id || ""),
     job_id: String(data.job_id || ""), room_key: String(data.room_key || ""),
     photo_id: String(data.photo_id || ""), t: String(data.t || ""),
-    vendor_id: String(data.vendor_id || ""), purpose: completion ? "completion" : "instruction" };
+    vendor_id: String(data.vendor_id || ""),
+    /* r62. Which request this belongs to, for purpose "request". Blank for the
+       other two, and the sheet ignores it there. */
+    request_id: String(data.request_id || ""), purpose: purpose };
   if (Object.values(auth).some(v => v.length > 256)) return reply({ ok: false, error: "bad_upload" }, 400);
   const authorize = async (operation, extra = {}) => {
     const upstream = await relay(env.WEBHOOK_URL, { method: "POST",
@@ -2506,7 +2539,7 @@ async function handlePhotos(request, env) {
     const answer = JSON.parse(upstream.text);
     if (!answer || answer.ok !== true) return answer || { ok: false, error: "photo_unavailable" };
     // Old webhook health responses must never authorize storage.
-    if (answer.object_key !== (completion ? "completion-photos/" : "booking-photos/") + auth.photo_id + ".jpg" ||
+    if (answer.object_key !== prefix + auth.photo_id + ".jpg" ||
         !/^[a-f0-9-]{36}$/.test(auth.photo_id) ||
         !answer.photo || answer.photo.id !== auth.photo_id || answer.photo.roomKey !== auth.room_key) {
       throw new Error("photo_unavailable");

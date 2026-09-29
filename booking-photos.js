@@ -94,6 +94,38 @@
         } catch (_) { throw new Error('unsupported_photo'); }
         finally { URL.revokeObjectURL(url); }
     }
+    /* THE ENVELOPE EVERY CALL TRAVELS IN, built in one place.
+       `extra` carries whatever a purpose needs that a room photo does not —
+       request_id, for one — and goes in FIRST so it can never overwrite the
+       action, the photo id or the purpose. */
+    function authBuilder(opts) {
+        var purpose = opts.purpose || 'instruction';
+        return function (action, photoId) {
+            return Object.assign({}, opts.auth, opts.extra, {
+                action: action, job_id: opts.jobId || '', room_key: opts.roomKey || '',
+                photo_id: photoId, purpose: purpose });
+        };
+    }
+    /* ONE PHOTO, COMPRESSED AND STORED — THE ONLY PLACE AN UPLOAD HAPPENS.
+       mount()'s buttons and ServePhotos.store() both come through here, so the
+       compression, the same-id retry and the bytes-already-in-hand cache are
+       written once. `of` is '' or ' 2 of 3' for a batch. */
+    async function send(authFor, file, stage, of) {
+        stage('Preparing photo' + of + '…');
+        var photoId = crypto.randomUUID();
+        var blob = await compress(file);
+        stage('Uploading' + of + '…');
+        var result;
+        // Retry the same ID: a lost response must not create a duplicate.
+        try { result = await request(authFor('upload', photoId), blob); }
+        catch (err) {
+            if (err.message !== 'photo_unavailable' && err.name !== 'AbortError' && !(err instanceof TypeError)) throw err;
+            result = await request(authFor('upload', photoId), blob);
+        }
+        // The stored photo is these exact bytes, so showing it costs no read.
+        remember(cacheKey(authFor('read', photoId)), blob);
+        return result.photo;
+    }
     var messages = {
         not_configured: 'Photo uploads are not available yet. Your written notes still work.',
         photo_limit: 'You can add up to 3 photos per room. Remove one to add another.',
@@ -120,29 +152,22 @@
             urls.forEach(function (u) { URL.revokeObjectURL(u); });
             observers.forEach(function (o) { o.disconnect(); }); active.delete(record); } };
         active.add(record);
-        function auth(action, photoId) { return Object.assign({}, opts.auth, {
-            action: action, job_id: opts.jobId, room_key: opts.roomKey, photo_id: photoId,
-            purpose: completion ? 'completion' : 'instruction' }); }
-        function error(err) { status.textContent = messages[err.message] || 'That did not finish. Please try again.'; }
+        var auth = authBuilder(opts);
+        /* A caller may reword any of these. The defaults are written for a room
+           on a booking, and a service request is neither. */
+        function error(err) {
+            status.textContent = (opts.messages && opts.messages[err.message]) ||
+                messages[err.message] || 'That did not finish. Please try again.';
+        }
         function loading(value) {
             busy = value;
             if (value) wrap.setAttribute('data-photo-busy', 'true'); else wrap.removeAttribute('data-photo-busy');
             wrap.querySelectorAll('button, input').forEach(function (n) { n.disabled = value; });
         }
         function changed() { if (opts.onChange) opts.onChange(photos.slice()); }
-        // One photo, compressed and stored. `of` is '' or ' 2 of 3' for a batch.
         async function upload(file, of) {
-            status.textContent = 'Preparing photo' + of + '…';
-            var photoId = crypto.randomUUID();
-            var blob = await compress(file); status.textContent = 'Uploading' + of + '…';
-            var result;
-            // Retry the same ID: a lost response must not create a duplicate.
-            try { result = await request(auth('upload', photoId), blob); }
-            catch (err) { if (err.message !== 'photo_unavailable' && err.name !== 'AbortError' && !(err instanceof TypeError)) throw err;
-                result = await request(auth('upload', photoId), blob); }
-            // The stored photo is these exact bytes, so showing it costs no read.
-            remember(cacheKey(auth('read', photoId)), blob);
-            photos.push(result.photo); changed(); draw();
+            var photo = await send(auth, file, function (m) { status.textContent = m; }, of);
+            photos.push(photo); changed(); draw();
         }
         function draw() {
             observers.forEach(function (o) { o.disconnect(); }); observers = [];
@@ -240,11 +265,24 @@
                 actions.appendChild(button); actions.appendChild(input);
             });
             wrap.appendChild(actions);
-            wrap.appendChild(node('p', 'room-photos__note', 'Optional · Up to 3 photos. Shared with Serve and your service partner.'));
+            /* The default names the cleaner who is coming, which is true of a
+               room on a booking and NOT of a service request — nobody has been
+               assigned to one of those yet. Overridable for that reason. */
+            wrap.appendChild(node('p', 'room-photos__note', opts.note ||
+                'Optional · Up to 3 photos. Shared with Serve and your service partner.'));
         }
         wrap.appendChild(status); draw(); return wrap;
     }
     function release(root) { active.forEach(function (r) { if (root.contains(r.wrap)) r.release(); }); }
     window.addEventListener('pagehide', function () { active.forEach(function (r) { r.release(); }); });
-    window.ServePhotos = { mount: mount, release: release };
+    /* Store one photo with NO grid on screen. The service-request form holds
+       the files a customer picked while they are still typing — a request has
+       to exist before a photo can be attached to it — and uploads them the
+       moment it does. Same envelope, same compression, same retry, same cache
+       as the buttons above; it resolves to the stored photo, or throws with a
+       message key mount()'s error table already knows. */
+    function store(opts, file, stage) {
+        return send(authBuilder(opts), file, stage || function () {}, '');
+    }
+    window.ServePhotos = { mount: mount, release: release, store: store };
 })();

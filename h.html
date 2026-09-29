@@ -107,6 +107,12 @@
 
     <script src="serve-scope.js"></script>
     <script src="serve-slots.js"></script>
+    <!-- THE SERVICE CATALOGUE. The Home services tab reads it for the category
+         list, so this page offers exactly what the homepage grid advertises and
+         cannot drift from it. Referenced WITHOUT a typeof guard on purpose: a
+         guard would turn a missing script tag into a tab that silently offers
+         nothing, which is the failure static-checks.test.js now refuses. -->
+    <script src="serve-services.js"></script>
     <script src="partner-card.js"></script>
     <script src="booking-live.js"></script>
     <script src="booking-photos.js"></script>

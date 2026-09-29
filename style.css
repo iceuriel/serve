@@ -4974,6 +4974,130 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
     margin: 0 0 0.4rem;
 }
 
+/* --- HOME SERVICES: asking for something other than a clean.  r62 ---
+   Built out of the parts already here. The category and home choosers reuse
+   .pq__opt, which is the access questions' whole-row radio target, and the
+   photo controls reuse .room-photos__actions. The only genuinely new shapes
+   are the two-column option grid and the request card. */
+.svcreq {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 1rem;
+    margin: 0 0 1.4rem;
+    background: #fff;
+}
+.svcreq__h {
+    font-family: var(--flow-sans);
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--color-dark);
+    margin: 0 0 0.9rem;
+}
+.svcreq__group { border: 0; padding: 0; margin: 0 0 1rem; }
+.svcreq__legend {
+    font-family: var(--flow-sans);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    padding: 0;
+    margin-bottom: 0.35rem;
+}
+/* One column on a phone. Seven stacked rows is a lot of thumb travel on a
+   wide screen and nothing at all on a narrow one. */
+.svcreq__grid { display: grid; grid-template-columns: 1fr; gap: 0.1rem; }
+@media (min-width: 520px) {
+    .svcreq__grid { grid-template-columns: 1fr 1fr; column-gap: 0.75rem; }
+}
+.svcreq .tk-edit { padding: 0; margin-bottom: 0.9rem; }
+
+.svcreq__files { margin: 0 0 0.9rem; }
+.svcreq__file {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.5rem 0.65rem;
+    margin-bottom: 0.35rem;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    background: var(--color-bg-light);
+}
+.svcreq__file-name {
+    font-family: var(--flow-sans);
+    font-size: 0.85rem;
+    color: var(--color-dark);
+    /* A phone camera filename is long and the Remove button must not be
+       pushed off the row by it. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.svcreq__file-drop {
+    font-family: var(--flow-sans);
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #b91c1c;
+    background: none;
+    border: 0;
+    padding: 0.35rem 0.25rem;
+    min-height: 32px;
+    cursor: pointer;
+    flex: none;
+}
+.svcreq__send { min-height: 44px; }
+
+/* --- one request already sent --- */
+.svcreq-card {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 0.9rem 1rem 1rem;
+    margin: 0 0 0.85rem;
+    background: #fff;
+}
+.svcreq-card__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+.svcreq-card__title {
+    font-family: var(--flow-sans);
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--color-dark);
+    margin: 0;
+}
+.svcreq-card__tag {
+    font-family: var(--flow-sans);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 0.2rem 0.5rem;
+    border-radius: 999px;
+    color: #1e3a8a;
+    background: #dbeafe;
+    flex: none;
+}
+.svcreq-card__tag.is-closed { color: var(--color-text-muted); background: var(--color-bg-light); }
+.svcreq-card__meta {
+    font-family: var(--flow-sans);
+    font-size: 0.8rem;
+    color: var(--color-text-muted);
+    margin: 0.3rem 0 0;
+}
+.svcreq-card__msg {
+    font-family: var(--flow-sans);
+    font-size: 0.92rem;
+    color: var(--color-dark);
+    margin: 0.55rem 0 0;
+    /* The customer's own typing, newlines and all. */
+    white-space: pre-wrap;
+}
+
 @media (min-width: 720px) {
     /* The nav becomes a sidebar. Same buttons, same handlers — only the box
        they sit in changes. */

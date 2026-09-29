@@ -6,12 +6,184 @@ assistant with no access to this repo. Self-contained on purpose.
 **Companion doc:** `/docs/SCHEMA.md` — authoritative for every column's meaning
 and who writes it. This file is the narrative; that file is the contract.
 
-**Latest session: 2026-09-28 (`/newhome` campaign short link, Worker only).**
+**Latest session: 2026-09-29 (Home services — the portal asks for a plumber).**
 Jump to [what changed on 2026-09-08 / 09](#session-2026-09-08--09) for the
 current state. The sections below it describe earlier builds and remain
 accurate except where a later section supersedes them.
 
 ---
+
+## Current work — 2026-09-29, Claude Code: the portal can ask for anything else
+
+**Apps Script r62 + the Worker + the site + one new test file. 44 test files
+pass.** Files: `apps-script/webhook.gs`, `src/worker.js`, `portal.js`,
+`booking-photos.js`, `h.html`, `style.css`, `tests/service-requests.test.js`,
+plus small additive changes to `tests/portal-render.test.js` and
+`tests/static-checks.test.js`.
+
+> **DEPLOY THE SCRIPT BEFORE PUSHING THE SITE.** portal.js reads `requests` off
+> the portal model and writes `kind: "service_request"`; a script that knows
+> neither answers `unknown_kind` to every submission, so the site alone ships a
+> tab whose only button fails. This is the order that has already caused one
+> live outage — see r59/r60.
+
+**NOTHING IS DEPLOYED OR PUSHED AS THIS IS WRITTEN.** r62 is in the repo and has
+not been pasted into Leads MASTER; the site is not pushed. No production
+verification of any kind has been done — every claim below is from the test
+suite and a local render, not from the live site.
+
+### What it is
+
+Founder's request, 2026-09-29: every client portal, current and future, gets a
+way to report or request any of the other services on the homepage under "One
+relationship. Everything your home needs." Pick the service, write what is
+wrong, attach a picture, send. Deliberately small.
+
+A third tab, **Home services**, between Bookings and Arrival & access. Two new
+auto-created tabs in Leads MASTER: `SERVICE_REQUESTS` and
+`SERVICE_REQUEST_PHOTOS`. Columns and rules are in `docs/SCHEMA.md`.
+
+**It is a request, not a booking, and the code keeps saying so.** No JOBS row,
+no slot consumed, no price computed, no card touched, no vendor assigned. The
+entire delivery mechanism is one email to `NOTIFY_EMAIL` whose body opens with
+`THIS IS NOT A BOOKING`. A test asserts the founder's email carries no `$` and
+no deadline, because that email is what a human acts on.
+
+### Three founder's calls, made on 2026-09-29 and built in
+
+All three were asked directly and answered. None is a default to be tidied away
+later, and `tests/service-requests.test.js` §2 asserts each against the shipped
+files rather than trusting a comment:
+
+1. **The homepage grid is unchanged** — still "Coming to Serve" on five of six.
+   A request channel inside the portal commits Serve to answering its own paying
+   customers; flipping the public grid would commit it to answering strangers,
+   and that is a public capability claim. `serve-services.js` keeps all five at
+   `status: 'planned'`. Portal only.
+2. **No timeframe is promised.** The portal says somebody will follow up and
+   names no clock, because no partner has agreed to one. The test greps the
+   rendered copy for hours, days and "business day". Tightening this later is
+   easy; loosening a promise is not.
+3. **Nothing is priced.** A quote for any of these comes from a human.
+
+The chooser offers all six categories plus **"Something else"**, which is the
+portal's own and deliberately absent from the catalogue: it is not a service, it
+is the guarantee that somebody with a problem Serve has not thought of is never
+stuck on a page with no option that fits.
+
+### The three things most likely to be broken later
+
+**THE CATALOGUE IS ONE LIST AND IT IS `serve-services.js`.** The portal reads
+`ServeServices.all()`; webhook.gs restates the ids in `REQUEST_SERVICES` because
+Apps Script cannot read a browser file. §1 of the new test EXECUTES both — the
+real catalogue and the real constant, sliced out of the shipped script — and
+fails if the ids or the names disagree. Same guard `campaign-links.test.js` puts
+on `segmentFor()`, for the same reason: two surfaces describing one thing in
+different words drift until something reads both. That is exactly how
+`/api/quote` and the prefill link came to speak different languages.
+
+**`status` IS THE OPERATOR'S CELL AND THE CUSTOMER NEVER SEES IT.** It reaches
+the portal only through `requestStatusLabel`, a whitelist that answers
+`Received` to anything it does not recognise. The test types
+`chasing — vendor ghosted us, call Ada Friday` into that cell and asserts the
+word "ghosted" appears nowhere in the payload. Do not "simplify" that into
+passing the cell through.
+
+**THE WRITE IS IDEMPOTENT ON `client_ref`, and that is the r58 lesson, not
+decoration.** A portal write can run past the Worker's 12-second budget and be
+reported to the page as a failure while the row is already on the sheet. Without
+the reference, the retry files a second copy and the founder rings one customer
+twice about one leak. The page therefore asks the account whether it can see its
+OWN request — `settle(landed)` on both the success and the unheard path, never
+`reload()`, because reload repaints and a repaint destroys the status line the
+photo uploads still have to report into.
+
+### Photographs
+
+Reuses the existing pipeline rather than growing a second one.
+`booking-photos.js`'s upload mechanics were factored into one `send()`, and a
+new `ServePhotos.store(opts, file)` uploads a single photo with no grid on
+screen. That is what the form needs: a request has to EXIST before a photograph
+can be attached to it, so the files are held while the customer types and
+uploaded the moment the row is written. The request card afterwards mounts the
+ordinary grid, so a failed upload is recoverable from the same screen — and a
+failed photo never fails the request, which is already saved and already going
+to be read by a person.
+
+`room_key` is blank on both sides. A request has no room, and the blank is
+precisely what lets the shipped grid render these without a second copy of it.
+
+**A LATENT BUG IN THE WORKER WAS CLOSED ON THE WAY PAST.** `handlePhotos` read
+`data.purpose === "completion"` and treated everything else — a typo included —
+as an instruction photo. A mistyped `"completon"` would have filed a
+**permanently locked completion image under `booking-photos/`, the one prefix
+the nightly sweep is allowed to delete from.** `PHOTO_PURPOSES` is now a
+whitelist of three purposes to three prefixes and an unknown one is refused.
+
+**Known gap, accepted rather than missed:** nothing sweeps an abandoned PENDING
+request photo. `cleanupBookingPhotos` and the Worker's cron are both scoped to
+the BOOKING_PHOTOS tab and the literal `booking-photos/` prefix, and widening
+either is how the indefinitely locked completion photos would get deleted. So an
+interrupted upload leaks one R2 object — at most 1.5 MB, unreadable, because the
+row never reaches READY. A *deleted* photo is removed from R2 immediately by the
+Worker, which is the common path. Fix it with a separate scoped action if it
+ever matters; do not loosen the existing sweep's prefix check.
+
+### A general guard added while here
+
+`static-checks.test.js` now asserts that **every local `<script src>` and
+stylesheet on every HTML page in the repo is staged by `build-site.sh`**. There
+was no such check, and build-site.sh publishes an allow-list — so a page that
+grows a dependency works perfectly on a local file open and 404s in production,
+where a missing classic script raises nothing a visitor sees. It leaves an
+undefined global, and whatever reads it dies mid-render with the throw swallowed
+by a `.catch()`. That is the r38 failure exactly. This change made h.html depend
+on `serve-services.js` (already staged), which is what prompted it. Verified by
+adding a bogus tag and watching it go red. `portal.js`, `booking-photos.js`,
+`serve-services.js` and `vendor.js` also joined the parse check — portal.js is
+the largest browser file in the repo and had none.
+
+### What was actually checked
+
+- **44 test files pass**, including the new `service-requests.test.js`, which
+  drives the real Worker → real Apps Script → in-memory Sheets/R2 for the server
+  half and the real `portal.js` against the DOM shim for the customer half.
+- **Eleven deliberate breaks, each confirmed to turn the suite red** before the
+  assertions were trusted: a portal token opening any home, a photo on somebody
+  else's request, the raw status cell reaching the customer, a retry filing a
+  second row, request photos landing in the booking prefix, a closed request
+  still taking photos, the catalogue and the script disagreeing, the unknown
+  purpose being downgraded again, the page re-sending a write it heard no answer
+  to, the page inventing its own category list, and the homepage grid flipped to
+  "By request". Two of them were caught by a *different* assertion than
+  predicted, both stronger: the Worker independently refuses a prefix its own
+  purpose does not imply, and the in-flight guard turns a re-send into a stuck
+  "Sending…" the outcome assertions catch.
+- **Rendered locally in Chrome** at 390px and 760px through an iframe wrapper
+  (headless Chrome will not lay a top-level window out below ~512px), with the
+  real portal.js and a stubbed fetch. No horizontal overflow, no console output
+  at all. Two copy inconsistencies were found and fixed this way and only this
+  way: the form said "Add a photo" beside a grid saying "Upload photo", and the
+  grid's note promised a "service partner" that a request has not got.
+
+**NOT checked: anything in production.** The script is not pasted, the site is
+not pushed, no real request has been filed, and no photograph has been through
+real R2 under the new prefix. The `SERVICE_REQUESTS` and
+`SERVICE_REQUEST_PHOTOS` tabs do not exist in the live workbook yet — they are
+auto-created on first use, so there is no setup step, but that path has only
+been exercised against the in-memory sheet.
+
+### Still the founder's, and deliberately not decided here
+
+- **Whether to tell customers about it.** Nothing announces the new tab. The
+  booking confirmation email still describes the portal as their bookings and
+  access. A feature nobody is told about gets used by nobody.
+- **What happens when a request arrives and there is no partner for that trade.**
+  Answering "we'll follow up" commits a person to following up. That person is
+  currently the founder, by email, with no queue and nothing watching the age of
+  an open request.
+- **Whether `Something else` should stay** once real requests show what people
+  actually ask for.
 
 ## Current work — 2026-09-28, Claude Code: a printed QR code gets a destination
 

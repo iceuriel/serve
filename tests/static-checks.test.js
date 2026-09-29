@@ -433,7 +433,11 @@ addrPh ? ok('placeholder present: "' + addrPh + '"')
    many assertions it contains. This runs first for that reason. */
 head('Shipped JavaScript parses');
 const { execFileSync } = require('child_process');
-['script.js', 'pricing-engine.js', 'serve-geo-data.js', 'ticket.js', 'src/worker.js']
+/* r62 adds the portal's three: portal.js is the largest browser file in the
+   repo and the only one with no parse check at all, and the tab added on
+   2026-09-29 reads serve-services.js with no typeof guard. */
+['script.js', 'pricing-engine.js', 'serve-geo-data.js', 'ticket.js', 'src/worker.js',
+ 'portal.js', 'booking-photos.js', 'serve-services.js', 'vendor.js']
   .forEach(f => {
     try {
       execFileSync(process.execPath, ['--check', path.join(ROOT, f)], { stdio: 'pipe' });
@@ -509,6 +513,35 @@ staged.forEach(f => {
   /favicon-192\.png/.test(doc)
     ? ok(f + ' offers a 192x192 icon')
     : fail(f + ' declares no icon at a multiple of 48px — Google may skip it');
+});
+
+/* EVERY SCRIPT AND STYLESHEET A PAGE ASKS FOR MUST BE STAGED.  r62
+   ---------------------------------------------------------------
+   build-site.sh publishes an ALLOW-LIST, so a page that grows a new <script
+   src> works perfectly on a local file open and 404s in production — and a
+   missing classic script does not raise anything a visitor sees. It leaves an
+   undefined global, and whatever reads that global dies mid-render with the
+   throw swallowed by a .catch(), which is the r38 failure exactly: the page
+   renders up to that line and stops.
+
+   Asserted for every HTML file in the repo, not only the indexed ones: /h, /j
+   and /v are staged on their own lines and are the pages most likely to gain a
+   dependency, because they are the ones still being built. */
+head('Every referenced local asset is staged');
+const pages = fs.readdirSync(ROOT).filter(f => f.endsWith('.html'));
+const cpLines = buildSh.split('\n').filter(l => /^cp /.test(l)).join(' ');
+pages.forEach(f => {
+  const doc = fs.readFileSync(path.join(ROOT, f), 'utf8');
+  const refs = [
+    ...[...doc.matchAll(/<script[^>]+src="([^"]+)"/g)].map(m => m[1]),
+    ...[...doc.matchAll(/<link[^>]+rel="stylesheet"[^>]+href="([^"]+)"/g)].map(m => m[1]),
+  ].filter(u => !/^(https?:)?\/\//.test(u));            // CDNs are not ours to stage
+  const missing = refs.filter(u => !cpLines.includes(' ' + u.replace(/^\//, '')) &&
+                                   !cpLines.includes('/' + u.replace(/^\//, '')));
+  missing.length
+    ? fail(f + ' loads ' + missing.join(', ') + ' — not staged by build-site.sh, so ' +
+           'it 404s in production while working on a local file open')
+    : ok(f + ': ' + refs.length + ' local asset(s), all staged');
 });
 
 /* A www canonical would fight the Cloudflare www -> apex rule: the redirect

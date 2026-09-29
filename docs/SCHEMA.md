@@ -626,6 +626,103 @@ cancelled booking, shown as "Notes from your service partner"). Each reader
 matches the booking's current vendor_id. No author, vendor id or timestamp
 reaches the customer.
 
+### SERVICE_REQUESTS — a customer asking for something other than a clean (r62)
+
+Auto-created in Leads MASTER on the first request. Founder's request,
+2026-09-29: a portal customer picks a category from the homepage's "One
+relationship" grid, says what is wrong, attaches a photograph, sends.
+
+`request_id · client_ref · contact_id · lead_id · property_id · property_label ·
+service · service_label · message · photo_count · status · customer_name ·
+customer_email · customer_phone · created_at · updated_at · portal_link`
+
+One row per request, `REQ-nnnn` by sequence. Written only by
+`event_type: portal_write, kind: service_request` — the portal token proves the
+contact, and a `property_id` that is not on one of their bookings is refused
+`not_found` rather than dropped. **This is the first portal write that targets
+nothing the customer already has**, so unlike `instruction`, `reschedule`,
+`cancel` and `access` there is no existing row to prove ownership of: the token
+is the whole check.
+
+**IT IS A REQUEST, NOT A BOOKING.** No JOBS row, no availability consumed, no
+price computed, no card touched, no vendor assigned. Nothing in the system reads
+this tab to schedule anything. The only delivery mechanism is one email to
+`NOTIFY_EMAIL`, which says so in capitals.
+
+`service` is one of `cleaning · handyman · plumbing · hvac · electrical ·
+landscaping · other`. The first six **must** equal the ids in
+`serve-services.js`, which is the one file that decides what Serve says it does;
+`REQUEST_SERVICES` in webhook.gs restates them because a browser script cannot be
+read from Apps Script, and `service-requests.test.js` §1 reads BOTH and fails if
+they disagree. `other` is the portal's own and is deliberately absent from the
+catalogue — it is not a service, it is the guarantee that somebody is never stuck.
+
+`message` is trimmed to 2,000 characters. `client_ref` is the browser's own
+reference and authorises nothing; it makes the write **idempotent**, so a portal
+write that ran past the Worker's 12-second budget and was reported to the page
+as a failure cannot become a second copy of one leak. A repeat answers
+`ok:true, duplicate:true` with the original `request_id`, and sends no second
+email.
+
+`status` is **the operator's column** once the script has written `NEW`, and the
+customer never sees the raw cell. `requestStatusLabel` maps it through a
+whitelist — `Received · In progress · Quote sent · Scheduled · Closed`, with
+anything unrecognised reading as `Received` — so an internal note typed into it
+cannot turn up on the customer's own page. `DONE · CLOSED · DECLINED ·
+CANCELLED` also stop the request accepting new photographs, while leaving the
+ones it has readable.
+
+`portal_link` opens the customer's portal for staff reading the sheet; treat it
+as a credential, like `BOOKING_PHOTOS.booking_link`. It is never in a view model.
+Name, email and phone are denormalised off the newest booking so a request can
+be answered without joining to LEADS.
+
+Portal view model (`requests[]`, newest first, whitelisted field by field):
+`requestId · clientRef · service · serviceLabel · message · propertyLabel ·
+createdDate · statusLabel · open · photoLimit · photos[]`. No raw status, no
+lead_id, no phone, no portal link. `serviceLabel` comes from the whitelist, not
+the cell, so an operator retyping it cannot rename a category on a customer's
+page. `createdDate` is `YYYY-MM-DD` because `prettyDate()` in portal.js parses
+exactly that and silently returns "" for anything else.
+
+### SERVICE_REQUEST_PHOTOS — pictures on a request (r62)
+
+Auto-created on the first upload reservation. Image bytes live in the same
+private R2 bucket as the room photos, under `request-photos/<photo_id>.jpg`.
+
+`photo_id · request_id · contact_id · object_key · status · bytes · created_at ·
+updated_at`
+
+Same state machine as BOOKING_PHOTOS — PENDING reserves for ten minutes, READY
+means both the R2 write and the metadata commit succeeded, DELETED removes
+visibility — and the same 1,500,000-byte JPEG limit, browser-side resize to
+1600px and EXIF-discarding re-encode. Maximum three READY or unexpired PENDING
+photos per request. `photo_count` on SERVICE_REQUESTS is **recounted** from this
+tab on every commit and delete, never incremented, so a lost response cannot
+drift it.
+
+Authorised by `booking_photo` with `purpose: "request"`, which requires the
+`PHOTO_BRIDGE_SECRET` **and** `auth_kind: "portal"` with a portal token whose
+contact matches the request row. A client or partner ticket token is refused —
+a ticket opens one job and a request is not one. `room_key` must be blank, on
+both sides: a request has no room, and the blank is what lets the shipped photo
+grid render these without a second copy of it.
+
+**ITS OWN TAB AND ITS OWN PREFIX, on purpose.** `cleanupBookingPhotos` and the
+Worker's nightly `cleanupPhotoStorage` are both scoped to the BOOKING_PHOTOS tab
+and the literal `booking-photos/` prefix, so neither can reach a request photo —
+the same separation that keeps the indefinitely locked COMPLETION_PHOTOS out of
+that sweep. **Known gap:** nothing therefore sweeps an abandoned PENDING request
+photo, so an interrupted upload leaks one R2 object (≤1.5 MB, unreadable — the
+row never reaches READY). A deleted photo IS removed from R2 immediately by the
+Worker, which is the common path.
+
+`PHOTO_PURPOSES` in `src/worker.js` maps the three purposes to the three
+prefixes. **Until r62 the Worker read `data.purpose === "completion"` and
+silently treated everything else as an instruction photo** — so a typo would
+have filed a permanently locked completion image under the prefix the nightly
+sweep is allowed to delete from. An unknown purpose is now refused `bad_upload`.
+
 ### Shared portal updates (r21 site)
 
 Customer portal, client/partner tickets and vendor portal reread their existing
@@ -1493,6 +1590,7 @@ held `direct ×1` and blank ×12, with no channel values anywhere.
 
 | Date | Change |
 |---|---|
+| 2026-09-29 | **Home services — webhook r62, the Worker and the site.** Two new Leads MASTER tabs, **`SERVICE_REQUESTS`** and **`SERVICE_REQUEST_PHOTOS`**, both auto-created; a third portal tab; one new portal write `kind: service_request`; the portal model gains `requests[]`. No JOBS column, no change to any existing view model. A portal customer can report a problem or ask for a quote on any category in the homepage grid — pick the service, say what is wrong, attach a photograph, send. **It is a request, not a booking:** nothing is scheduled, priced, charged or assigned, and the only delivery is one email to `NOTIFY_EMAIL`. Three founder's calls are built in rather than defaulted, and `service-requests.test.js` §2 asserts each of them against the shipped files: the **homepage grid still reads "Coming to Serve"** for five of the six (a request channel for existing customers is not a public capability claim), **no timeframe is promised anywhere** (no partner has agreed to one), and **nothing is priced**. `status` is operator-owned after `NEW` and reaches the customer only through a label whitelist. The write is idempotent on a browser-minted `client_ref`, so the r58 timeout failure cannot file one leak twice. **`booking_photo` gains `purpose: "request"`, and the Worker's purpose handling became a whitelist** — it previously treated every unknown purpose, typos included, as an instruction photo, which would have filed a locked completion image under the sweepable prefix. New sections above; see `HANDOFF.md` §r62. |
 | 2026-09-15 | **Payment state is written down — webhook r50, the Worker and the site. THE FIRST ENTRY HERE THAT CHANGES AN OWNERSHIP PROMISE.** `payment_status` (#20) was documented as "never touched by the script" since this file was created; it is now written by Stripe through one exempt path, `handlePaymentEvent`, behind a new Script Property `PAYMENT_BRIDGE_SECRET`. It stays in `OPS_OWNED_COLUMNS`, so every other caller is still refused, and a hand-typed value still works. **New column `payment_ref` (37)** — the Stripe PaymentIntent; optional, and absent it the state still writes. **New recognised values** blank · `authorized` · `paid` · `released` · `refunded`, because authorize-at-booking has three states and the column could previously say only two — recording a hold as `paid` tells a customer they were charged when no money has moved. Both customer view models gain `authorized` beside `paid`; `paymentNote` replaces the hardcoded "Due at service". **New Worker route `/api/stripe-webhook`**, the only one authenticated by a signature rather than a ticket token, plus `can_record_payments` on `/api/health` — `can_charge: true` with `can_record_payments: false` is the dangerous combination and is now one request away from being visible. A customer cancelling a booking with an uncaptured hold releases it; a captured one is still a human's decision. `partner_payout` documented at last — it has existed since r13 and appeared nowhere in this file. See `HANDOFF.md` §r50. |
 | 2026-09-15 | **Load-time fixes — webhook r49, the Worker and the site.** No column, tab or response change; the paste and the push can go in either order. Webhook: a `booking_photo` read runs before the script lock, in a shared-snapshot scope (new row in "How the webhook reads the sheets"); the customer's partner card is cached five minutes per company, cleared by a vendor portal save or `forgetPartnerCards()` (see VENDORS). Site: `booking-photos.js` remembers photos it has read for the life of the page and sends at most three reads at once. Worker: an `/api/address` miss reads its two counters together and writes both before the provider is called (still fail-closed), then saves the answer via `waitUntil`. `read-budget.test.js` §8–9, `address-suggest.test.js` A4 and the new `photo-cache.test.js` enforce it. See `HANDOFF.md` §2026-09-15. |
 | 2026-09-14 | **The cleaner ticket's rooms, simplified — webhook r48, the Worker and the site.** Supersedes r47's UI. New tab **`PARTNER_NOTES`** (auto-created; partner-token writes via `partner_note`). **`COMPLETION_PHOTOS`** drops `room_label`, `service_label`, `scheduled_date` and no longer requires `finished: true`. View models: partner ticket `scope[].note`; vendor portal `bookings[].report` replaces `completionHistory`; customer portal `bookings[].partnerNotes`. Site: each Scope room is a closed box with one Add photos control and an optional note; `completion-photos.css` removed. See `HANDOFF.md` §r48. |

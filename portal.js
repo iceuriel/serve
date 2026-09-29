@@ -533,7 +533,8 @@
 
         forEl.textContent = model.firstName ? 'for ' + model.firstName : '';
 
-        [['bookings', 'Bookings'], ['access', 'Arrival & access']].forEach(function (pair) {
+        [['bookings', 'Bookings'], ['requests', 'Home services'],
+         ['access', 'Arrival & access']].forEach(function (pair) {
             var b = el('button', 'portal__tab', pair[1]);
             b.type = 'button';
             b.setAttribute('data-tab', pair[0]);
@@ -560,7 +561,9 @@
             b.setAttribute('aria-current', on ? 'true' : 'false');
         });
         bodyEl.textContent = '';
-        if (tab === 'bookings') renderBookings(); else renderAccess();
+        if (tab === 'bookings')      renderBookings();
+        else if (tab === 'requests') renderRequests();
+        else                         renderAccess();
     }
 
     /* ========================================================
@@ -1818,6 +1821,401 @@
         blk.appendChild(el('div', 'tk-lbl', 'Notes from your service partner'));
         notes.forEach(function (n) { blk.appendChild(el('div', 'tk-val', n.roomLabel + ': ' + n.note)); });
         return blk;
+    }
+
+    /* ========================================================
+       HOME SERVICES — asking for something other than a clean.   r62
+       ========================================================
+       Pick a service, say what is wrong, attach a photo, send. That is the
+       whole tab, and keeping it that small is the point: this is the first
+       thing a customer does in the portal that is not about a cleaning they
+       have already bought.
+
+       IT IS NOT A BOOKING AND THE COPY NEVER SUGGESTS IT IS. Nothing is
+       priced, scheduled or charged, and no timeframe is promised anywhere —
+       founder's call, 2026-09-29, because no partner has agreed to one. Both
+       sentences below are promises about what Serve will do; treat editing
+       them as editing a promise, not as copy.
+
+       THE CATEGORY LIST COMES FROM serve-services.js, the one file that
+       decides what Serve says it does, and is NOT sent by the server. A
+       second list would drift: the homepage would drop a category and the
+       portal would keep offering it.
+
+       THE DRAFT LIVES OUTSIDE THE RENDER. paint() empties the body, so a tab
+       switch mid-sentence would otherwise throw away a typed message and the
+       photos already chosen. ServeLive refuses to repaint while somebody is
+       typing; a tab switch is the customer's own doing and has to survive.
+       ======================================================== */
+    /* `note` is the last thing this form said, and it lives out here with the
+       rest of the draft for a reason worth keeping: the send ends in paint(),
+       which empties the body — so a "Sent" written onto the old status span
+       would be destroyed by the very repaint that puts the new request on the
+       page, and the customer would watch their confirmation vanish. */
+    var draft = { service: '', propertyId: '', message: '', files: [],
+                  sending: false, note: null };
+
+    /* Is the photo module actually on the page? h.html loads it, so this is
+       false only if that tag is gone — and then the controls must not appear at
+       all rather than appear and do nothing. `photoSupport` is the server's
+       separate answer about whether storage is configured; both must be true. */
+    function canAttach() {
+        return !!model.photoSupport && typeof ServePhotos !== 'undefined';
+    }
+
+    function say(status, text, cls) {
+        draft.note = text ? { text: text, cls: cls || '' } : null;
+        status.textContent = text || '';
+        status.className = 'tk-save' + (cls ? ' ' + cls : '');
+    }
+
+    /* Matches REQUEST_PHOTO_LIMIT in webhook.gs. The server is what enforces
+       it; this only stops somebody picking a fourth file and being refused
+       after they have already waited for the upload. */
+    var REQUEST_PHOTOS = 3;
+
+    /* One list, and it is the catalogue's. "Something else" is the portal's own
+       and deliberately not in serve-services.js: it is not a service, it is the
+       guarantee that somebody whose problem Serve has not thought of is never
+       stuck on a page with no option that fits. */
+    function requestServices() {
+        return ServeServices.all().map(function (s) {
+            return { id: s.id, name: s.name };
+        }).concat([{ id: 'other', name: 'Something else' }]);
+    }
+
+    /* A reference this page can recognise its own write by. NOT a credential —
+       it authorises nothing — and deliberately not crypto.randomUUID, which
+       needs a secure context this page should not depend on for a label. */
+    function newClientRef() {
+        return 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+    }
+
+    function requestByRef(d, ref) {
+        var list = (d && d.requests) || [];
+        for (var i = 0; i < list.length; i++) {
+            if (list[i] && list[i].clientRef === ref) return list[i];
+        }
+        return null;
+    }
+
+    function renderRequests() {
+        var intro = el('div', 'portal__intro');
+        intro.appendChild(el('h1', 'portal__greeting', 'Home services'));
+        intro.appendChild(el('p', 'portal__lede',
+            'Cleaning you can book yourself. For anything else your home needs, ' +
+            'tell us what is going on and we will take it from there.'));
+        bodyEl.appendChild(intro);
+
+        bodyEl.appendChild(requestForm());
+
+        var list = (model.requests || []);
+        if (!list.length) return;
+        bodyEl.appendChild(el('h2', 'portal__h', 'What you have asked us about'));
+        list.forEach(function (r) { bodyEl.appendChild(requestCard(r)); });
+    }
+
+    function requestForm() {
+        var card = el('section', 'svcreq');
+        card.appendChild(el('h2', 'svcreq__h', 'Ask us for something'));
+
+        /* Built first because the controls below report into it, and carrying
+           forward whatever the last send had to say. */
+        var status = el('span', 'tk-save');
+        status.setAttribute('role', 'status');
+        if (draft.note) {
+            status.textContent = draft.note.text;
+            status.className = 'tk-save' + (draft.note.cls ? ' ' + draft.note.cls : '');
+        }
+
+        /* --- the category --- */
+        var group = el('fieldset', 'svcreq__group');
+        group.appendChild(el('legend', 'svcreq__legend', 'What do you need?'));
+        var grid = el('div', 'svcreq__grid');
+        requestServices().forEach(function (s) {
+            var row = el('label', 'pq__opt');
+            var input = document.createElement('input');
+            input.type = 'radio';
+            input.name = 'svcreq-service';
+            input.value = s.id;
+            input.checked = draft.service === s.id;
+            row.appendChild(input);
+            row.appendChild(el('span', 'pq__opt-label', s.name));
+            input.addEventListener('change', function () {
+                /* Choosing again starts a new request, so last time's verdict
+                   stops being about what is on screen. */
+                if (input.checked) { draft.service = s.id; say(status, ''); }
+            });
+            grid.appendChild(row);
+        });
+        group.appendChild(grid);
+        card.appendChild(group);
+
+        /* --- which home. Only a QUESTION when there is more than one to pick
+               between; with exactly one it is a fact, so the draft is filled in
+               here and the address is simply stated. --- */
+        var homes = (model.homes || []).filter(function (h) { return !!h.propertyId; });
+        if (homes.length === 1) {
+            draft.propertyId = homes[0].propertyId;
+            add(card, line('For', homes[0].label || 'your home'));
+        } else if (homes.length > 1) {
+            var hg = el('fieldset', 'svcreq__group');
+            hg.appendChild(el('legend', 'svcreq__legend', 'Which home?'));
+            var hgrid = el('div', 'svcreq__grid');
+            homes.concat([{ propertyId: '', label: 'Somewhere else' }]).forEach(function (h) {
+                var row = el('label', 'pq__opt');
+                var input = document.createElement('input');
+                input.type = 'radio';
+                input.name = 'svcreq-home';
+                input.value = h.propertyId;
+                input.checked = draft.propertyId === h.propertyId;
+                row.appendChild(input);
+                row.appendChild(el('span', 'pq__opt-label', h.label || 'Your home'));
+                input.addEventListener('change', function () {
+                    if (input.checked) draft.propertyId = h.propertyId;
+                });
+                hgrid.appendChild(row);
+            });
+            hg.appendChild(hgrid);
+            card.appendChild(hg);
+        }
+
+        /* --- the message. The request itself: a category alone tells whoever
+               answers it nothing they can act on. --- */
+        var wrap = el('div', 'tk-edit');
+        wrap.appendChild(el('label', 'tk-edit__lbl', 'What is going on?'));
+        var ta = document.createElement('textarea');
+        ta.className = 'tk-edit__box';
+        ta.rows = 4;
+        ta.maxLength = 2000;
+        ta.value = draft.message;
+        ta.placeholder = 'What needs doing, where it is in the home, and anything ' +
+            'we should know before someone comes out.';
+        wrap.appendChild(ta);
+        card.appendChild(wrap);
+
+        /* --- the photo. Held here and uploaded once the request exists: a
+               photograph is attached TO a request, so there has to be one. --- */
+        var files = el('div', 'svcreq__files');
+        function drawFiles() {
+            files.textContent = '';
+            if (!canAttach()) return;
+            draft.files.forEach(function (f, i) {
+                var row = el('div', 'svcreq__file');
+                row.appendChild(el('span', 'svcreq__file-name', f.name || ('Photo ' + (i + 1))));
+                var drop = el('button', 'svcreq__file-drop', 'Remove');
+                drop.type = 'button';
+                drop.addEventListener('click', function () {
+                    draft.files.splice(i, 1);
+                    drawFiles();
+                });
+                row.appendChild(drop);
+                files.appendChild(row);
+            });
+            if (draft.files.length >= REQUEST_PHOTOS) return;
+            var actions = el('div', 'room-photos__actions');
+            /* The same two words the photo grid on a sent request uses. Two
+               spellings of one action, a few inches apart, read as two
+               different things. */
+            [['Take a photo', true], ['Upload photo', false]].forEach(function (pair) {
+                var input = document.createElement('input');
+                input.type = 'file';
+                input.accept = 'image/*';
+                input.hidden = true;
+                if (pair[1]) input.setAttribute('capture', 'environment');
+                var btn = el('button', 'tk-edit__save', pair[0]);
+                btn.type = 'button';
+                btn.addEventListener('click', function () { if (!draft.sending) input.click(); });
+                input.addEventListener('change', function () {
+                    var f = input.files && input.files[0];
+                    input.value = '';
+                    if (!f || draft.files.length >= REQUEST_PHOTOS) return;
+                    draft.files.push(f);
+                    drawFiles();
+                });
+                actions.appendChild(btn);
+                actions.appendChild(input);
+            });
+            files.appendChild(actions);
+            files.appendChild(el('p', 'room-photos__note',
+                'Optional · up to ' + REQUEST_PHOTOS + ' photos. A picture usually ' +
+                'saves a phone call.'));
+        }
+        drawFiles();
+        card.appendChild(files);
+
+        /* --- send --- */
+        var row = el('div', 'tk-edit__row');
+        var send = el('button', 'btn btn--primary svcreq__send', 'Send request');
+        send.type = 'button';
+        row.appendChild(send);
+        row.appendChild(status);
+        card.appendChild(row);
+
+        /* Marks the form dirty the way every other editor here does, which is
+           what stops the live refresh repainting over a half-typed message. */
+        ta.addEventListener('input', function () {
+            draft.message = ta.value;
+            say(status, 'Not sent yet', 'is-dirty');
+        });
+
+        send.addEventListener('click', function () {
+            draft.message = ta.value;
+            submitRequest(status, send);
+        });
+        return card;
+    }
+
+    function requestError(code) {
+        if (code === 'message_required') return 'Tell us what is going on first.';
+        if (code === 'unknown_service')  return 'Choose which service you need.';
+        if (code === 'not_found')        return 'We could not match that to your account. Please call us.';
+        return 'That did not send. Please try again.';
+    }
+
+    function submitRequest(status, btn) {
+        if (draft.sending) return;
+        if (!draft.service) {
+            say(status, 'Choose which service you need.', 'is-bad');
+            return;
+        }
+        if (!String(draft.message || '').trim()) {
+            say(status, 'Tell us what is going on first.', 'is-bad');
+            return;
+        }
+
+        var ref = newClientRef();
+        var files = draft.files.slice();
+        draft.sending = true;
+        btn.disabled = true;
+        say(status, 'Sending…');
+
+        /* THE SERVER IS IDEMPOTENT ON `ref`, WHICH IS WHAT MAKES ASKING SAFE.
+           A portal write can run past the Worker's 12-second budget and be
+           reported here as a failure while the row is already written — the
+           r58 lesson — so a reply this page could not read is answered by
+           looking for its OWN request rather than by sending a second copy of
+           the same problem. Counting requests would race a second tab; the
+           reference cannot.
+
+           settle() ON THE SUCCESS PATH TOO, not reload(). Both need the same
+           thing: the account as it now stands, WITHOUT repainting — a repaint
+           here would destroy the status line the photo uploads still have to
+           report into. settle's first attempt is immediate, so a write that
+           plainly succeeded costs one extra read and no delay. */
+        function landed(d) { return !!requestByRef(d, ref); }
+
+        function done() {
+            var request = requestByRef(model, ref);
+            draft.service = '';
+            draft.message = '';
+            draft.files = [];
+            draft.sending = false;
+            /* Painted only once the uploads are finished: the form is cleared,
+               the new request is on the page, and nothing is mid-upload. */
+            return attachPhotos(request, files, status).then(paint);
+        }
+
+        function lost() {
+            draft.sending = false;
+            btn.disabled = false;
+            say(status, 'We could not confirm that went through. ' +
+                'Check below before sending it again.', 'is-bad');
+        }
+
+        function ask(waiting) {
+            if (waiting) say(status, 'Still sending…');
+            return settle(landed).then(function (yes) { return yes ? done() : lost(); });
+        }
+
+        return postWrite({
+            kind: 'service_request', client_ref: ref, service: draft.service,
+            property_id: draft.propertyId || '', message: draft.message,
+        }).then(function (d) {
+            if (d && d.ok) return ask(false);
+            if (unheard(d)) return ask(true);
+            /* The script's own considered refusal, and it is the truth. */
+            draft.sending = false;
+            btn.disabled = false;
+            say(status, requestError(d && d.error), 'is-bad');
+        }).catch(function () {
+            /* The fetch itself failed, so nothing was read — which says nothing
+               about whether the write landed. Same question, same answer. */
+            return ask(true);
+        });
+    }
+
+    /* The photos the customer picked before there was anything to attach them
+       to. Uploaded one at a time through the SAME path the room-photo grids
+       use, so there is one uploader in the site and not two.
+
+       A FAILED PHOTO NEVER FAILS THE REQUEST. The request is already saved and
+       somebody is already going to read it; the honest thing is to say the
+       picture did not make it and leave the Add-a-photo button on the card. */
+    var REQUEST_SENT = 'Sent — we will follow up with you.';
+
+    function attachPhotos(request, files, status) {
+        if (!request || !files.length || !canAttach()) {
+            say(status, REQUEST_SENT, 'is-ok');
+            return Promise.resolve();
+        }
+        var opts = requestPhotoOpts(request);
+        var failed = 0;
+        return files.reduce(function (chain, file, i) {
+            return chain.then(function () {
+                say(status, 'Sent. Uploading photo ' + (i + 1) + ' of ' + files.length + '…');
+                return ServePhotos.store(opts, file).then(function (photo) {
+                    /* Onto the model we are holding, so the repaint that
+                       follows shows the picture. Its bytes are already cached
+                       by the uploader, so showing it costs no read. */
+                    request.photos = (request.photos || []).concat([photo]);
+                }, function () { failed++; });
+            });
+        }, Promise.resolve()).then(function () {
+            say(status, failed
+                ? 'Sent — but ' + (failed === files.length ? 'the photo did'
+                                                           : failed + ' photos did') +
+                  ' not upload. Add it to the request below.'
+                : REQUEST_SENT, failed ? 'is-bad' : 'is-ok');
+        });
+    }
+
+    /* Everything the photo module needs to talk about ONE request. roomKey is
+       blank on purpose and on both sides — that is what lets the shipped grid
+       render these without a second copy of it. */
+    function requestPhotoOpts(request) {
+        return {
+            auth: { auth_kind: 'portal', contact_id: id, t: token },
+            extra: { request_id: request.requestId },
+            purpose: 'request', jobId: '', roomKey: '',
+            roomLabel: 'this request', photos: request.photos || [],
+            editable: !!request.open,
+            note: 'Optional · up to ' + (request.photoLimit || REQUEST_PHOTOS) +
+                ' photos. A picture usually saves a phone call.',
+            messages: {
+                closed: 'This request is closed, so photos can no longer be changed.',
+                photo_limit: 'You can add up to ' + (request.photoLimit || REQUEST_PHOTOS) +
+                    ' photos to a request. Remove one to add another.',
+            },
+        };
+    }
+
+    function requestCard(r) {
+        var card = el('article', 'svcreq-card');
+        var head = el('div', 'svcreq-card__head');
+        head.appendChild(el('h3', 'svcreq-card__title', r.serviceLabel));
+        head.appendChild(el('span', 'svcreq-card__tag' +
+            (r.open ? '' : ' is-closed'), r.statusLabel));
+        card.appendChild(head);
+
+        var meta = [prettyDate(r.createdDate), r.propertyLabel].filter(Boolean).join(' · ');
+        if (meta) card.appendChild(el('p', 'svcreq-card__meta', meta));
+        card.appendChild(el('p', 'svcreq-card__msg', r.message));
+
+        if (canAttach() && (r.open || (r.photos || []).length)) {
+            card.appendChild(ServePhotos.mount(requestPhotoOpts(r)));
+        }
+        return card;
     }
 
     /* ========================================================
