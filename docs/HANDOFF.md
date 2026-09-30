@@ -25,12 +25,42 @@ plus small additive changes to `tests/portal-render.test.js` and
 > the portal model and writes `kind: "service_request"`; a script that knows
 > neither answers `unknown_kind` to every submission, so the site alone ships a
 > tab whose only button fails. This is the order that has already caused one
-> live outage — see r59/r60.
+> live outage — see r59/r60. **Done in that order on 2026-09-29**, with the
+> deployed revision read back from `/exec` before the push rather than taken on
+> trust; keep doing it that way for any later change that spans both.
 
-**NOTHING IS DEPLOYED OR PUSHED AS THIS IS WRITTEN.** r62 is in the repo and has
-not been pasted into Leads MASTER; the site is not pushed. No production
-verification of any kind has been done — every claim below is from the test
-suite and a local render, not from the live site.
+**DEPLOYED AND LIVE, 2026-09-29.** Superseded the "nothing is deployed or
+pushed" note that stood here while the work was being written.
+
+- **Apps Script r62 pasted and deployed by the founder.** Confirmed from
+  production, not assumed: `doGet` on the booking webhook `/exec` answers
+  `{"ok":true,"service":"serve-booking-webhook","version":"2026-09-29 r62"}`,
+  probed twice (cold, then warm). This was checked BEFORE the push, because it
+  is the precondition the deploy order exists to protect.
+- **Site pushed** as `efe91a0`, Workers Build `serve` completed / success.
+- **The deploy was verified against a predicate that was FALSE beforehand** —
+  production `portal.js` contained no `service_request` and `/h` did not load
+  `serve-services.js` when checked before the push, and both do now. Without
+  that first half the check would have proved nothing, which is the lesson from
+  the timed-out-write gotcha.
+- `/h`, `/portal.js`, `/booking-photos.js`, `/serve-services.js` and
+  `/style.css` all answer 200. `/api/health`: `can_price`, `can_sign` and
+  `can_store_photos` all true; `stripe_mode: LIVE` unchanged.
+- **The Worker's new purpose whitelist is live and was proved without a
+  credential**, because the whitelist runs before any authorisation: a mistyped
+  `purpose: "completon"` now answers `bad_upload` and never reaches the sheet,
+  `purpose: "request"` passes the whitelist and is correctly refused on the
+  token, and an absent purpose still behaves as an instruction photo.
+
+**STILL NOT VERIFIED IN PRODUCTION: a real request.** Every portal path is
+token-gated first and correctly so, so no unauthenticated probe can distinguish
+a working `service_request` write from a broken one — the two surfaces are
+consistent and the script is r62, but nobody has actually filed one. The
+`SERVICE_REQUESTS` and `SERVICE_REQUEST_PHOTOS` tabs do not exist in the live
+workbook yet; they auto-create on first use, and that path has only been
+exercised against the in-memory sheet. **The first real request is the test.**
+Open a portal, send one, and check the tab appears with the row on it and that
+the email arrives.
 
 ### What it is
 
