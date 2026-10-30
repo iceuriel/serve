@@ -1,4 +1,5 @@
-# My Serve Web 
-hi
-whats up im on terminal
+Hi
 
+Code for Serve
+
+A Boston home services platform for managing vendors and bookings
