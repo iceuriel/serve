@@ -598,15 +598,19 @@ ${p.areaShort ? `<p class="mk-card__area">${esc(p.areaShort)}</p>` : ""}
   const body = `${banner}<section class="mk-hero"><div class="mk-wrap">
 ${LOGO_SVG("#ffffff", 104)}
 <h1 class="mk-hl">Boston's Most Trusted Cleaners</h1>
-<p class="mk-hero__sub">Local, owner-run cleaning companies. Compare them, then get a free estimate by phone or walkthrough.</p>
+<form class="mk-find" action="/providers" method="get" role="search" data-find>
+<label class="sr-only" for="mk-near">Neighborhood or ZIP</label>
+<input id="mk-near" type="text" placeholder="Neighborhood or ZIP" maxlength="40" autocomplete="off" enterkeyhint="search">
+<button class="btn btn--primary" type="submit">Find Providers</button>
+</form>
 <p class="mk-hero__instant">No time to waste? <a href="/#quote">Instantly book in under 1 minute</a> and we'll handle your booking.</p>
 </div></section>
-<section class="mk-section"><div class="mk-wrap">
+<section class="mk-section" id="providers"><div class="mk-wrap">
 <div class="mk-filters" role="group" aria-label="Filter providers">
 <div class="mk-filters__row"><span class="mk-label">Area</span>${chips("region", [["all", "All areas"]].concat(REGIONS))}</div>
 <div class="mk-filters__row"><span class="mk-label">Service</span>${chips("tag", [["all", "All"]].concat(SERVICE_TAGS.map((t) => [t, t])))}</div>
 </div>
-<p class="mk-count" aria-live="polite">Showing <strong data-count>${list.length}</strong> of ${list.length} ${list.length === 1 ? "company" : "companies"}</p>
+<p class="mk-count" aria-live="polite">Showing <strong data-count>${list.length}</strong> of ${list.length} ${list.length === 1 ? "company" : "companies"}<span class="mk-near" data-near hidden></span></p>
 ${list.length ? `<div class="mk-grid">${cards}</div>` : `<p class="mk-empty">Companies are being added now. <a href="/#quote">Book instantly</a> in the meantime.</p>`}
 <p class="mk-empty" data-empty hidden>No companies match both filters yet. <a href="/#quote">Try Instant Booking</a> and Serve will find one.</p>
 </div></section>`;

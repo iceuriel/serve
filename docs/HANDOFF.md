@@ -14,7 +14,23 @@ accurate except where a later section supersedes them.
 
 ---
 
-## Current work — 2026-11-06, Claude Code: marketplace phase 1 (D1 + /providers)
+## Current work — 2026-11-07, Claude Code: /providers on phones + ZIP search
+
+Founder, testing the preview on an iPhone: one company filled the whole
+screen, and the "Neighborhood or ZIP" box from the agreed design was missing.
+- `marketplace.css` (≤600px): each card is a compact row (logo tile left;
+  name, area, rating line, price right; both buttons under). The tagline and
+  tags show only from 601px up and on the profile. The filter chips scroll
+  sideways on one line, and the hero is shorter. About four companies now fit
+  on one phone screen. Desktop is unchanged.
+- The hero has the **Neighborhood or ZIP → Find Providers** box (this replaced
+  the hero sub-line). `marketplace-client.js` maps a ZIP range or a town or
+  neighborhood name to the four area keys, filters the list, shows "near X",
+  and scrolls to the list. An unknown place shows every company. The input
+  has **no `name`**, so what someone types never reaches a URL, a log or the
+  cache key; a test pins this and was mutation-checked.
+- Checked: 45 test files pass. Headless Chrome screenshots at 390px (default
+  list, and "Quincy" → 3 South Shore companies) and at 1280px.
 
 **STATE AS OF THE PUSH (2026-11-06), checked rather than assumed:**
 - D1 `serve-marketplace` created (id in `wrangler.jsonc`, binding `MARKET_DB`

@@ -165,6 +165,9 @@ console.log('\n=== 3. rendering is escaped and leaks nothing ===');
     !page.includes('<script>alert(1)') && !page.includes('<img src=x') && !page.includes('<script>bad') && !page.includes('<b>insured'));
   const dir = M.renderDirectory([evil]);
   t('directory escapes card text', !dir.includes('<script>alert(1)') && !dir.includes('<img src=x'));
+  const find = (dir.match(/<form class="mk-find"[^]*?<\/form>/) || [''])[0];
+  t('directory has the "Neighborhood or ZIP" search', find.includes('placeholder="Neighborhood or ZIP"') && find.includes('Find Providers'));
+  t('…whose input has no name, so a ZIP never lands in a URL', /<input /.test(find) && !/<input[^>]*\sname=/.test(find));
   t('JSON-LD cannot close its script tag', !/<\/script>[^]*<\/script>[^]*application\/ld\+json/.test(page) &&
     !page.includes('"name":"<script>'));
   t('preview page is noindex', M.renderProfile(evil, { preview: true }).includes('<meta name="robots" content="noindex">'));

@@ -18,6 +18,12 @@
 .mk-hero__instant { margin: 14px auto 0; font: 400 17px/1.5 'Times New Roman', Times, serif; color: #f9fafb; }
 .mk-hero__instant a { color: #fff; text-decoration: underline; text-underline-offset: 3px; }
 .mk-hero--small { padding: 48px 0; }
+.mk-find { display: flex; gap: 6px; max-width: 520px; margin: 20px auto 0; padding: 6px; border-radius: var(--radius); background: #fff; box-shadow: 0 6px 20px rgba(0,0,0,.25); }
+/* 16px stops iPhone Safari zooming the page when the field is tapped */
+.mk-find input { flex: 1; min-width: 0; height: 46px; padding: 0 12px; border: 0; border-radius: 6px; background: transparent; color: var(--color-dark); font: 400 16px var(--font); }
+.mk-find input:focus { outline: 2px solid rgba(31,41,55,.25); }
+.mk-find .btn { flex: 0 0 auto; padding: 0 20px; white-space: nowrap; }
+.mk-near { color: var(--color-dark); font-weight: 600; }
 
 /* directory */
 .mk-section { padding: 40px 0 64px; }
@@ -145,4 +151,50 @@
     .mk-phead .mk-hl { font-size: 32px; }
     .mk-phead__logo { flex-basis: 100%; }
     .mk-form { position: static; }
+}
+
+/* Phones: a shorter hero, filters that swipe sideways instead of stacking,
+   and each company as a compact row (logo tile left, essentials right) so
+   several fit on one screen. The tagline and service tags live on the
+   profile; the card keeps name, area, rating, price and the two buttons. */
+@media (max-width: 600px) {
+    .mk-wrap { padding: 0 16px; }
+    .mk-hero { padding: 18px 0 26px; }
+    .mk-hero .mk-mark { width: 68px; height: 78px; margin-bottom: 6px; }
+    .mk-hero .mk-hl { font-size: 26px; }
+    .mk-find { margin-top: 14px; padding: 5px; }
+    .mk-find input { height: 44px; padding: 0 10px; }
+    .mk-find .btn { padding: 0 14px; font-size: 15px; }
+    .mk-hero__instant { margin-top: 12px; font-size: 15px; }
+
+    .mk-section { padding: 16px 0 40px; scroll-margin-top: 8px; }
+    .mk-filters { gap: 8px; padding: 0; border: 0; background: none; }
+    .mk-filters__row { flex-wrap: nowrap; overflow-x: auto; margin: 0 -16px; padding: 2px 16px; scrollbar-width: none; }
+    .mk-filters__row::-webkit-scrollbar { display: none; }
+    .mk-filters__row .mk-label { flex: 0 0 auto; min-width: 0; }
+    .mk-chip { flex: 0 0 auto; min-height: 36px; padding: 0 12px; font-size: 13.5px; white-space: nowrap; }
+    .mk-count { margin: 10px 0 12px; }
+    .mk-grid { gap: 12px; }
+
+    .mk-card {
+        display: grid;
+        grid-template-columns: 64px minmax(0, 1fr);
+        grid-template-areas: "draft draft" "logo name" "logo area" "logo meta" "logo foot" "act act";
+        column-gap: 12px;
+        align-content: start;
+        padding: 12px;
+    }
+    .mk-card__body { display: contents; }
+    .mk-draft { grid-area: draft; position: static; justify-self: start; margin-bottom: 8px; padding: 2px 6px; font-size: 10px; }
+    .mk-card__logo { grid-area: logo; align-self: start; width: 64px; height: 64px; padding: 6px; border: 1px solid var(--color-border); border-top-width: 4px; border-radius: 8px; }
+    .mk-card__mono { font-size: 28px; }
+    .mk-card__name { grid-area: name; font-size: 16px; }
+    .mk-card__area { grid-area: area; margin: 1px 0 0; font-size: 13px; }
+    .mk-card__meta { grid-area: meta; margin-top: 3px; font-size: 13px; gap: 2px 10px; }
+    .mk-card__tagline, .mk-card .mk-tags, .mk-card__note { display: none; }
+    .mk-card__foot { grid-area: foot; margin-top: 4px; padding-top: 0; border-top: 0; }
+    .mk-card__foot .mk-label { display: inline; margin-right: 6px; font-size: 11px; }
+    .mk-card__foot strong { display: inline; font-size: 14px; }
+    .mk-card__actions { grid-area: act; margin-top: 10px; gap: 8px; }
+    .mk-card__actions .btn { padding: 9px 10px; font-size: 14px; }
 }
