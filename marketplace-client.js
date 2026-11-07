@@ -14,135 +14,192 @@
         });
     }
 
-    /* ---------- directory filters ---------- */
-    var cards = Array.prototype.slice.call(document.querySelectorAll('.mk-card'));
-    var chips = Array.prototype.slice.call(document.querySelectorAll('.mk-chip'));
-    var countEl = document.querySelector('[data-count]');
-    var emptyEl = document.querySelector('[data-empty]');
-    var nearEl = document.querySelector('[data-near]');
-    /* region is 'all' or a list of region keys (a town on a border has two) */
-    var state = { region: 'all', tag: 'all' };
+    /* ---------- the marketplace home (design/serve/HOME_SPEC.md §2, §3) ----------
+       Area and Service filter everything together, live: the results heading,
+       the count, the cards and the drifting sky logos. Every company is already
+       on the page (rendered by the Worker); this only shows, hides and lights
+       things up. Matching data comes from the page's #mk-areas JSON, which the
+       Worker builds from the neighborhoods tables in D1: no list lives here.
+       Nothing typed is sent anywhere. */
+    var areaData = document.getElementById('mk-areas');
+    if (areaData) initHome();
 
-    function applyFilters() {
-        var shown = 0;
-        cards.forEach(function (card) {
-            var regions = (card.getAttribute('data-regions') || '').split(' ');
-            var tags = (card.getAttribute('data-tags') || '').split('|');
-            var inRegion = state.region === 'all' || state.region.some(function (r) {
-                return regions.indexOf(r) !== -1;
+    function initHome() {
+        var D;
+        try { D = JSON.parse(areaData.textContent); } catch (e) { D = { areas: [], zips: {} }; }
+        var areas = D.areas || [];
+        var zips = D.zips || {};
+        var bySlug = {};
+        areas.forEach(function (a) { bySlug[a.slug] = a; });
+        var byName = areas.slice().sort(function (a, b) { return b.name.length - a.name.length; });
+        var popular = areas.filter(function (a) { return a.rank > 0; })
+            .sort(function (a, b) { return a.rank - b.rank; });
+
+        var split = function (v, sep) { return (v || '').split(sep).filter(Boolean); };
+        var P = Array.prototype.map.call(document.querySelectorAll('.pc[data-slug]'), function (el) {
+            return { el: el, slug: el.getAttribute('data-slug'), areas: split(el.getAttribute('data-areas'), ' '),
+                regions: split(el.getAttribute('data-regions'), ' '), tags: split(el.getAttribute('data-tags'), '|') };
+        });
+        var sky = Array.prototype.map.call(document.querySelectorAll('.bn-lc[data-slug]'), function (el) {
+            return { el: el, slug: el.getAttribute('data-slug'),
+                op: parseFloat(el.getAttribute('data-op')) || 1, blur: parseFloat(el.getAttribute('data-blur')) || 0 };
+        });
+
+        var $ = function (sel) { return document.querySelector(sel); };
+        var input = $('#mk-area'), list = $('#mk-area-list'), chev = $('[data-chev]'), combo = $('[data-combo]');
+        var heading = $('[data-results-h]'), live = $('[data-live]'), clear = $('[data-clear]');
+        var empty = $('[data-empty]'), emptyTitle = $('[data-empty-title]'), results = $('#providers');
+        var pills = Array.prototype.slice.call(document.querySelectorAll('.mk-pill'));
+        var state = { q: '', svc: 'All', open: false };
+        var closeTimer;
+
+        var titleCase = function (s) { return s.replace(/\b\w/g, function (c) { return c.toUpperCase(); }); };
+        var plural = function (n) { return n === 1 ? 'company' : 'companies'; };
+
+        /* What was typed → a place: { slug, name, zip } or { name } for a place
+           we don't know, or null for nothing typed. */
+        function toPlace(q) {
+            var raw = (q || '').trim();
+            if (!raw) return null;
+            var zip = raw.match(/\b(\d{5})\b/);
+            if (zip) {
+                var slug = zips[zip[1]] || (zip[1].indexOf('021') === 0 ? 'boston' : '');
+                return slug && bySlug[slug] ? { slug: slug, name: bySlug[slug].name, zip: zip[1] } : { name: 'ZIP ' + zip[1], zip: zip[1] };
+            }
+            var words = ' ' + raw.toLowerCase().replace(/[^a-z ]+/g, ' ').replace(/\s+/g, ' ').trim() + ' ';
+            for (var i = 0; i < byName.length; i++) {
+                if (words.indexOf(' ' + byName[i].name.toLowerCase() + ' ') !== -1) return { slug: byName[i].slug, name: byName[i].name };
+            }
+            /* Mid-word, as someone types: "Qu" means Quincy, not "Not in Qu
+               yet". Popular areas first, then the shortest name. */
+            var stem = words.trim();
+            if (stem.length >= 2) {
+                var starts = areas.filter(function (a) { return a.name.toLowerCase().indexOf(stem) === 0; })
+                    .sort(function (a, b) { return (a.rank || 99) - (b.rank || 99) || a.name.length - b.name.length; });
+                if (starts.length) return { slug: starts[0].slug, name: starts[0].name };
+            }
+            return { name: titleCase(raw) };
+        }
+
+        /* HOME_SPEC.md §3: companies that name the place (or its parent town, or
+           the ZIP) first; if none do, the place's region; then nothing. */
+        function inPlace(place) {
+            if (!place) return P;
+            var area = place.slug ? bySlug[place.slug] : null;
+            var direct = P.filter(function (p) {
+                return (area && (p.areas.indexOf(area.slug) !== -1 || (area.parent && p.areas.indexOf(area.parent) !== -1))) ||
+                    (place.zip && p.areas.indexOf(place.zip) !== -1);
             });
-            var ok = inRegion && (state.tag === 'all' || tags.indexOf(state.tag) !== -1);
-            card.hidden = !ok;
-            if (ok) shown++;
-        });
-        if (countEl) countEl.textContent = String(shown);
-        if (emptyEl) emptyEl.hidden = shown !== 0 || cards.length === 0;
-    }
-
-    function pressChips(name, value) {
-        chips.forEach(function (c) {
-            if (c.getAttribute('data-filter') === name) {
-                c.setAttribute('aria-pressed', String(c.getAttribute('data-value') === value));
-            }
-        });
-    }
-
-    function showNear(text) {
-        if (!nearEl) return;
-        nearEl.textContent = text;
-        nearEl.hidden = !text;
-    }
-
-    chips.forEach(function (chip) {
-        chip.addEventListener('click', function () {
-            var name = chip.getAttribute('data-filter');
-            var value = chip.getAttribute('data-value');
-            state[name] = name === 'region' && value !== 'all' ? [value] : value;
-            pressChips(name, value);
-            if (name === 'region') showNear('');
-            applyFilters();
-        });
-    });
-
-    /* ---------- "Neighborhood or ZIP" search ----------
-       Turns what the visitor typed into one of the four area keys
-       (REGIONS in src/marketplace.js) and filters by it. Nothing is sent
-       anywhere: the input has no name, so even a no-script submit just
-       reloads /providers with nothing in the URL. */
-    var ZIP_RANGES = [
-        [2026, 2026, ['south', 'west']],   // Dedham
-        [2090, 2090, ['south', 'west']],   // Westwood
-        [2420, 2421, ['north', 'west']],   // Lexington
-        [2445, 2447, ['core']],            // Brookline
-        [2474, 2476, ['north']],           // Arlington
-        [2108, 2147, ['core']],            // Boston, Cambridge, Somerville
-        [2148, 2156, ['north']],           // Malden, Everett, Chelsea, Revere, Winthrop, Medford
-        [2163, 2163, ['core']],
-        [2169, 2171, ['south']],           // Quincy
-        [2176, 2180, ['north']],           // Melrose, Stoneham
-        [2184, 2191, ['south']],           // Braintree, Milton, Weymouth
-        [2196, 2299, ['core']],            // Boston
-        [2018, 2099, ['south']],           // Norfolk and Plymouth County towns
-        [2300, 2399, ['south']],           // Brockton and the South Shore
-        [2400, 2499, ['west']],            // Newton, Waltham, Watertown, Belmont, Needham, Wellesley
-        [1800, 1999, ['north']],           // Woburn, Reading, Lynn, Salem, Peabody
-        [1700, 1799, ['west']]             // Natick, Framingham, Sudbury, Concord
-    ];
-    var PLACES = {
-        core: 'boston,back bay,beacon hill,south end,north end,west end,downtown,financial district,seaport,' +
-              'south boston,southie,east boston,eastie,charlestown,fenway,kenmore,mission hill,jamaica plain,jp,' +
-              'roxbury,dorchester,mattapan,roslindale,west roxbury,hyde park,allston,brighton,chinatown,' +
-              'bay village,leather district,cambridge,harvard square,central square,kendall square,kendall,' +
-              'inman square,porter square,somerville,davis square,union square,brookline,coolidge corner',
-        north: 'medford,malden,everett,chelsea,revere,winthrop,melrose,arlington,lynn,saugus,woburn,stoneham,' +
-               'wakefield,reading,north reading,winchester,burlington,wilmington,peabody,salem,swampscott,' +
-               'marblehead,danvers,beverly,lynnfield,lexington',
-        west: 'newton,newton centre,newton center,chestnut hill,watertown,waltham,belmont,needham,wellesley,' +
-              'weston,natick,framingham,concord,sudbury,wayland,lincoln,lexington,dedham,westwood',
-        south: 'quincy,braintree,milton,weymouth,hingham,hull,cohasset,scituate,marshfield,norwell,hanover,' +
-               'rockland,abington,randolph,holbrook,canton,sharon,norwood,duxbury,kingston,plymouth,pembroke,' +
-               'brockton,stoughton,easton,dedham,westwood'
-    };
-    var placeIndex = {};
-    Object.keys(PLACES).forEach(function (region) {
-        PLACES[region].split(',').forEach(function (place) {
-            (placeIndex[place] = placeIndex[place] || []).push(region);
-        });
-    });
-    var placeNames = Object.keys(placeIndex).sort(function (a, b) { return b.length - a.length; });
-
-    function regionsFor(text) {
-        var zip = text.match(/\b0?(\d{4})\b|\b(\d{5})\b/);
-        if (zip) {
-            var n = parseInt(zip[1] || zip[2], 10);
-            for (var i = 0; i < ZIP_RANGES.length; i++) {
-                if (n >= ZIP_RANGES[i][0] && n <= ZIP_RANGES[i][1]) return ZIP_RANGES[i][2];
-            }
-            return null;
+            if (direct.length || !area) return direct;
+            return P.filter(function (p) { return p.regions.indexOf(area.region) !== -1; });
         }
-        var words = ' ' + text.toLowerCase().replace(/[^a-z ]+/g, ' ').replace(/\s+/g, ' ').trim() + ' ';
-        for (var j = 0; j < placeNames.length; j++) {
-            if (words.indexOf(' ' + placeNames[j] + ' ') !== -1) return placeIndex[placeNames[j]];
-        }
-        return null;
-    }
 
-    var findForm = document.querySelector('[data-find]');
-    var listTop = document.getElementById('providers');
-    if (findForm) {
-        findForm.addEventListener('submit', function (e) {
-            e.preventDefault();
-            var input = findForm.querySelector('input');
-            var typed = input.value.trim();
-            var found = typed ? regionsFor(typed) : null;
-            state.region = found || 'all';
-            pressChips('region', found && found.length === 1 ? found[0] : (found ? '' : 'all'));
-            showNear(!typed ? '' : found ? ' near ' + typed
-                : ' — we don’t have “' + typed + '” mapped yet, so here’s everyone');
-            applyFilters();
-            input.blur();   // drops the phone keyboard so the results are visible
-            if (listTop) listTop.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        function setOpen(open) { state.open = open; renderList(); }
+
+        function renderList() {
+            input.setAttribute('aria-expanded', String(state.open));
+            chev.setAttribute('aria-expanded', String(state.open));
+            list.hidden = !state.open;
+            if (!state.open) return;
+            var raw = state.q.trim().toLowerCase();
+            var typed = /^\d/.test(raw) ? '' : raw;
+            var place = toPlace(state.q);
+            var items = [{ label: 'All of Greater Boston', val: '' }].concat(popular.map(function (a) { return { label: a.name, val: a.name, slug: a.slug }; }))
+                .filter(function (a) { return !typed || a.val === '' || a.label.toLowerCase().indexOf(typed) !== -1; });
+            list.innerHTML = '<div class="mk-combo__head">Popular areas</div>';
+            items.forEach(function (a) {
+                var n = inPlace(a.val ? { slug: a.slug, name: a.label } : null).length;
+                var b = document.createElement('button');
+                b.type = 'button';
+                b.className = 'mk-opt';
+                b.setAttribute('role', 'option');
+                b.setAttribute('aria-selected', String(a.val ? !!(place && place.slug === a.slug) : !place));
+                var label = document.createElement('span');
+                label.textContent = a.label;
+                var count = document.createElement('small');
+                count.textContent = n + ' ' + plural(n);
+                b.appendChild(label);
+                b.appendChild(count);
+                b.addEventListener('click', function () {
+                    state.q = a.val;
+                    input.value = a.val;
+                    state.open = false;
+                    render();
+                    input.focus();
+                });
+                list.appendChild(b);
+            });
+            if (items.length <= 1 && typed) {
+                var none = document.createElement('div');
+                none.className = 'mk-combo__none';
+                none.textContent = 'No popular area matches. Press Find Providers to search it.';
+                list.appendChild(none);
+            }
+        }
+
+        function render() {
+            var place = toPlace(state.q);
+            var shown = inPlace(place).filter(function (p) { return state.svc === 'All' || p.tags.indexOf(state.svc) !== -1; });
+            var hit = {};
+            shown.forEach(function (p) { hit[p.slug] = true; });
+            var active = !!place || state.svc !== 'All';
+            var n = shown.length;
+
+            pills.forEach(function (c) { c.setAttribute('aria-pressed', String(c.getAttribute('data-service') === state.svc)); });
+            if (P.length) {
+                heading.textContent = n + ' trusted ' + plural(n) + (place ? ' near ' + place.name : ' across Greater Boston') +
+                    (state.svc === 'All' ? '' : ' for ' + state.svc.toLowerCase());
+                if (live) live.textContent = active ? n + ' of ' + P.length + ' ' + plural(P.length) + ' match' : P.length + ' trusted ' + plural(P.length) + ', live now';
+            }
+            clear.hidden = !place;
+            P.forEach(function (p) { p.el.hidden = !hit[p.slug]; });
+            empty.hidden = n > 0;
+            emptyTitle.textContent = place ? 'Not in ' + place.name + ' yet.'
+                : P.length ? 'No companies offer that yet.' : 'Book instantly in the meantime.';
+
+            /* Styles only, so the drift animations keep running. */
+            sky.forEach(function (s) {
+                var on = active && hit[s.slug];
+                s.el.style.opacity = String(!active ? s.op : on ? Math.max(0.95, s.op) : s.op * 0.15);
+                s.el.style.filter = 'blur(' + (on ? 0 : s.blur) + 'px)';
+                s.el.classList.toggle('is-hit', !!on);
+            });
+            renderList();
+        }
+
+        var options = function () { return Array.prototype.slice.call(list.querySelectorAll('.mk-opt')); };
+        var toResults = function () {
+            if (results) results.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        };
+
+        input.addEventListener('input', function () { state.q = input.value; state.open = true; render(); });
+        input.addEventListener('focus', function () { clearTimeout(closeTimer); setOpen(true); });
+        input.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') { setOpen(false); }
+            else if (e.key === 'ArrowDown') { e.preventDefault(); if (!state.open) setOpen(true); var o = options(); if (o[0]) o[0].focus(); }
+            else if (e.key === 'Enter') { e.preventDefault(); setOpen(false); input.blur(); toResults(); }
         });
+        list.addEventListener('keydown', function (e) {
+            var o = options(), i = o.indexOf(document.activeElement);
+            if (e.key === 'ArrowDown') { e.preventDefault(); if (o[i + 1]) o[i + 1].focus(); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); if (i > 0) o[i - 1].focus(); else input.focus(); }
+            else if (e.key === 'Escape') { e.preventDefault(); setOpen(false); input.focus(); }
+        });
+        /* Close when focus leaves the whole combobox, not when it moves from
+           the input into the list, so keyboard users can reach the options. */
+        combo.addEventListener('focusin', function () { clearTimeout(closeTimer); });
+        combo.addEventListener('focusout', function (e) {
+            if (!combo.contains(e.relatedTarget)) closeTimer = setTimeout(function () { setOpen(false); }, 160);
+        });
+        chev.addEventListener('click', function () { clearTimeout(closeTimer); setOpen(!state.open); });
+        pills.forEach(function (c) {
+            c.addEventListener('click', function () { state.svc = c.getAttribute('data-service'); render(); });
+        });
+        var find = $('[data-find]');
+        find.addEventListener('click', function (e) { e.preventDefault(); setOpen(false); toResults(); });
+        clear.addEventListener('click', function () { state.q = ''; input.value = ''; render(); });
+
+        render();
     }
 
     /* ---------- estimate form ---------- */

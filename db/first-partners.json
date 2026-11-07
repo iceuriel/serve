@@ -17,6 +17,10 @@
       "core",
       "south"
     ],
+    "service_areas": [
+      "boston",
+      "quincy"
+    ],
     "services": [
       "Home cleaning",
       "Move-in / move-out",
@@ -101,6 +105,15 @@
     "area_short": "Newton · Brookline · Wellesley",
     "regions": [
       "west"
+    ],
+    "service_areas": [
+      "brookline",
+      "newton",
+      "chestnut-hill",
+      "belmont",
+      "wellesley",
+      "needham",
+      "dedham"
     ],
     "services": [
       "Recurring house cleaning",
@@ -192,6 +205,19 @@
       "core",
       "north"
     ],
+    "service_areas": [
+      "boston",
+      "cambridge",
+      "somerville",
+      "arlington",
+      "lexington",
+      "medford",
+      "everett",
+      "melrose",
+      "malden",
+      "revere",
+      "woburn"
+    ],
     "services": [
       "Recurring (weekly, biweekly, monthly)",
       "Deep cleaning",
@@ -254,6 +280,12 @@
     "regions": [
       "core",
       "north"
+    ],
+    "service_areas": [
+      "boston",
+      "cambridge",
+      "medford",
+      "melrose"
     ],
     "services": [
       "Standard cleaning",
@@ -326,6 +358,10 @@
     "area_short": "Boston · Arlington",
     "regions": [
       "core"
+    ],
+    "service_areas": [
+      "boston",
+      "arlington"
     ],
     "services": [
       "Regular cleaning (weekly, biweekly, monthly)",
@@ -409,6 +445,14 @@
     "regions": [
       "core"
     ],
+    "service_areas": [
+      "boston",
+      "cambridge",
+      "somerville",
+      "arlington",
+      "brookline",
+      "belmont"
+    ],
     "services": [
       "Recurring cleaning",
       "Deep cleaning",
@@ -477,6 +521,10 @@
     "regions": [
       "core"
     ],
+    "service_areas": [
+      "boston",
+      "somerville"
+    ],
     "services": [
       "Recurring cleaning",
       "One-time cleaning",
@@ -544,6 +592,18 @@
       "core",
       "west",
       "north"
+    ],
+    "service_areas": [
+      "boston",
+      "cambridge",
+      "somerville",
+      "brookline",
+      "newton",
+      "waltham",
+      "watertown",
+      "needham",
+      "medford",
+      "milton"
     ],
     "services": [
       "Recurring (weekly, biweekly, monthly)",
@@ -621,6 +681,16 @@
       "core",
       "west"
     ],
+    "service_areas": [
+      "boston",
+      "cambridge",
+      "somerville",
+      "arlington",
+      "brookline",
+      "newton",
+      "waltham",
+      "watertown"
+    ],
     "services": [
       "Regular cleaning",
       "Deep cleaning",
@@ -696,6 +766,13 @@
       "north",
       "west"
     ],
+    "service_areas": [
+      "boston",
+      "brookline",
+      "wellesley",
+      "needham",
+      "medford"
+    ],
     "services": [
       "House cleaning",
       "Maid service",
@@ -744,6 +821,10 @@
     "regions": [
       "core",
       "north"
+    ],
+    "service_areas": [
+      "boston",
+      "chelsea"
     ],
     "services": [
       "Regular cleaning",
@@ -808,6 +889,10 @@
     "regions": [
       "core",
       "south"
+    ],
+    "service_areas": [
+      "boston",
+      "quincy"
     ],
     "services": [
       "Recurring cleaning",
@@ -877,6 +962,19 @@
     "regions": [
       "south"
     ],
+    "service_areas": [
+      "quincy",
+      "braintree",
+      "weymouth",
+      "hingham",
+      "hull",
+      "cohasset",
+      "scituate",
+      "marshfield",
+      "norwell",
+      "hanover",
+      "randolph"
+    ],
     "services": [
       "House & apartment cleaning",
       "Deep cleaning",
@@ -932,6 +1030,9 @@
     "regions": [
       "south",
       "core"
+    ],
+    "service_areas": [
+      "quincy"
     ],
     "services": [
       "House & apartment cleaning",

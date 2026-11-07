@@ -1378,6 +1378,32 @@ else — bookings, payments, the brokered lane, vendors, availability.
   in `src/marketplace.js`. Unknown values are dropped, not shown.
 - `sort_rank` orders the directory ascending. **It is a placeholder** — how
   ranking stays neutral is an open founder decision.
+- `service_areas` (migration 0002): JSON array of `neighborhoods.slug` values,
+  and optionally 5-digit ZIPs, the company serves. It drives the Area search.
+  `publicProvider()` keeps only slug- or ZIP-shaped values. The seed fills it
+  only where it is still `'[]'`, so an edit made in D1 survives a re-seed.
+
+### `neighborhoods` and `neighborhood_zips` (migration 0002, 2026-11-07)
+
+What the marketplace home's Area search matches against
+(`design/serve/HOME_SPEC.md` §3). The page receives both tables as JSON
+(`#mk-areas`); no area list lives in the page script.
+
+| Column | Meaning |
+|---|---|
+| `neighborhoods.slug` | `[a-z-]` id, e.g. `back-bay`. Primary key. |
+| `name` | What people type and see: "Back Bay". |
+| `region` | `core · north · west · south`. The fallback when no company names the place. |
+| `parent` | Optional town it sits in (`back-bay → boston`, `davis-square → somerville`). A company serving the parent serves the child. |
+| `popular_rank` | 1–12 orders the "Popular areas" dropdown; NULL = not listed there. |
+| `neighborhood_zips.zip` | 5 digits, primary key; `neighborhood` must exist (FK). |
+
+Matching, in order: a ZIP → its neighborhood (any other `021xx` → Boston);
+then companies whose `service_areas` contain the place, its parent or the ZIP;
+if none, companies in the place's region; if still none, the empty state with
+Instant Booking. Rows are seeded in the migration itself; later changes are
+UPDATEs in D1. Without 0002 applied the page still renders, and an Area search
+finds nothing.
 
 ### `estimate_requests`
 

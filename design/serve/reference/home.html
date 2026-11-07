@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Serve — Boston's most trusted home cleaners</title>
+<!-- Reference implementation of the marketplace home ("search flows into providers").
+     Framework-free on purpose: port it into components; don't paste raw HTML. Spec: ../HOME_SPEC.md -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --night-950:#0b1220;--night-900:#111827;--night-850:#141d2e;--night-800:#1f2937;--night-700:#24304a;--night-600:#2a3550;--river:#111a2c;
+  --paper:#fcfcfc;--card-line:#e5e7eb;--tag:#f3f4f6;--divider:#f0f0f0;
+  --text:#1f2937;--body:#4b5563;--muted:#6b7280;--on-dark:#f9fafb;--on-dark-2:#e5e7eb;--on-dark-3:#d1d5db;
+  --ok:#166534;--live:#16a34a;
+  --serif:"Times New Roman",Times,serif;--sans:"Inter",system-ui,sans-serif;
+}
+body{margin:0;background:var(--river);font-family:var(--sans);color:#374151;line-height:1.6}
+*{box-sizing:border-box}
+a{color:var(--text)}a:hover{color:var(--body)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:52px;padding:0 24px;border-radius:10px;font:700 16px var(--sans);cursor:pointer;border:none;text-decoration:none;white-space:nowrap}
+.btn-w{background:#fff;color:var(--night-900);box-shadow:0 8px 20px rgba(0,0,0,.25)}
+.btn-w:hover{background:#f3f4f6;color:var(--night-900)}
+.btn-ghost{background:transparent;color:var(--on-dark);border:1px solid rgba(255,255,255,.28);min-height:42px;padding:0 18px;font-size:15px;font-weight:600}
+.btn-ghost:hover{border-color:#fff;color:#fff}
+.btn-o{min-height:44px;background:#fff;color:var(--text);border:1px solid #d1d5db;font-weight:600;font-size:15px}
+.btn-o:hover{border-color:var(--muted)}
+.btn-s{min-height:44px;background:var(--night-800);color:#fff;font-weight:600;font-size:15px}
+.btn-s:hover{background:var(--night-900);color:#fff}
+
+/* Hero */
+.hero{position:relative;z-index:8;min-height:500px;background:linear-gradient(180deg,#0b1220 0%,#141d2e 50%,#24304a 82%,#2e3448 100%);color:#fff}
+.layer{position:absolute;left:0;right:0}
+.skyline{position:absolute;left:0;right:0;width:100%}
+.nav{position:relative;z-index:6;max-width:1200px;margin:0 auto;padding:14px 24px;display:flex;align-items:center;gap:28px;flex-wrap:wrap}
+.nav .txt{color:var(--on-dark-3);font-size:15px;font-weight:500;text-decoration:none}
+.nav .txt:hover{color:#fff}
+.hero-body{position:relative;z-index:7;padding:0 20px 128px;text-align:center}
+.eyebrow{display:inline-flex;align-items:center;gap:14px;font:700 12px var(--sans);letter-spacing:.32em;text-transform:uppercase;color:var(--on-dark-2)}
+.eyebrow::before,.eyebrow::after{content:"";width:32px;height:1px;background:#fff;opacity:.6}
+.h1{margin:6px 0 0;font:800 54px/1.12 var(--serif);color:var(--on-dark);letter-spacing:-.5px;white-space:nowrap}
+
+/* Search panel */
+.panel{width:fit-content;max-width:100%;margin:20px auto 0;padding:12px 14px;border-radius:16px;background:rgba(11,18,32,.9);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.2);box-shadow:0 24px 50px -10px rgba(0,0,0,.6);text-align:left}
+.row{display:flex;gap:10px 12px;align-items:center}
+.row+.row{margin-top:10px}
+.flt{flex:0 0 76px;font:700 12px var(--sans);letter-spacing:.14em;text-transform:uppercase;color:var(--on-dark-3)}
+.combo{position:relative;flex:1 1 auto;min-width:0}
+.combo .pin{position:absolute;left:14px;top:16px}
+.inp{width:100%;min-width:0;height:52px;border:0;border-radius:10px;padding:0 48px 0 44px;font:500 16px var(--sans);color:var(--night-900);background:#fff}
+.inp::placeholder{color:var(--muted)}
+.inp:focus{outline:3px solid rgba(255,255,255,.55);outline-offset:1px}
+.chev{position:absolute;right:4px;top:4px;width:44px;height:44px;border:0;border-radius:8px;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.chev svg{transition:transform .2s}
+.chev[aria-expanded="true"] svg{transform:rotate(180deg)}
+.list{position:absolute;left:0;right:0;top:58px;z-index:20;max-height:320px;overflow-y:auto;background:#fff;border:1px solid var(--card-line);border-radius:12px;box-shadow:0 24px 48px rgba(0,0,0,.35);padding:6px 0}
+.list-h{padding:6px 16px 4px;font:700 11px var(--sans);letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.opt{display:flex;width:100%;align-items:center;justify-content:space-between;gap:12px;min-height:44px;padding:0 16px;border:0;background:#fff;font:500 15px var(--sans);color:var(--text);cursor:pointer;text-align:left}
+.opt:hover,.opt:focus,.opt[aria-selected="true"]{background:#f3f4f6;outline:none}
+.opt[aria-selected="true"]{font-weight:700}
+.opt small{font-size:13px;color:var(--muted);font-weight:500}
+.chips{display:flex;gap:8px;flex-wrap:wrap;flex:1 1 auto;min-width:0}
+.chip{display:inline-flex;align-items:center;min-height:38px;padding:0 15px;border-radius:999px;font:500 14px var(--sans);cursor:pointer;border:1px solid rgba(255,255,255,.24);background:transparent;color:var(--on-dark-2)}
+.chip[aria-pressed="true"]{border-color:#fff;background:#fff;color:var(--night-900);font-weight:600}
+
+/* Results */
+.results{position:relative;z-index:1;background:var(--paper);border-radius:24px 24px 0 0;border-top:1px solid rgba(255,255,255,.6);padding:24px 20px 72px}
+.wrap{max-width:1200px;margin:0 auto}
+.rhead{display:flex;gap:8px 24px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.rhead h2{margin:0;font:800 28px/1.2 var(--serif);color:var(--text)}
+.linkbtn{min-height:36px;padding:0;background:none;border:0;font:600 14px var(--sans);color:var(--body);text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.live{display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:500;color:var(--body)}
+.live::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--live);box-shadow:0 0 0 4px rgba(22,163,74,.15)}
+.grid{margin-top:18px;display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:20px}
+.pc{background:#fff;border:1px solid var(--card-line);border-radius:14px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 1px 3px rgba(0,0,0,.06);transition:transform .2s ease-out,box-shadow .2s ease-out}
+.pc:hover{transform:translateY(-3px);box-shadow:0 18px 36px -12px rgba(17,24,39,.25)}
+.plate{text-decoration:none;display:flex;align-items:center;justify-content:center;height:108px;padding:16px 24px;border-bottom:1px solid var(--divider);border-top:4px solid}
+.plate img{max-width:100%;max-height:100%;object-fit:contain;display:block}
+.plate .nm{font:800 20px var(--serif);color:var(--text)}
+.pc-b{padding:16px 20px 20px;display:flex;flex-direction:column;gap:8px;flex:1}
+.pc h3{margin:0;font:800 22px/1.2 var(--serif);color:var(--text)}
+.area{margin-top:2px;font-size:13.5px;color:var(--muted)}
+.meta{display:flex;gap:12px;flex-wrap:wrap;font-size:14px;color:var(--muted)}
+.meta b{color:var(--text)}
+.tag{font-size:12px;font-weight:500;padding:3px 10px;border-radius:999px;background:var(--tag);border:1px solid var(--card-line);color:#374151}
+.pc-f{margin-top:auto;padding-top:10px;border-top:1px solid var(--divider);display:flex;align-items:flex-end;justify-content:space-between;gap:12px}
+.pl{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.pv{font-size:16px;font-weight:800;color:var(--text)}
+.note{font-size:12.5px;color:var(--ok);font-weight:600;text-align:right}
+.empty{margin-top:18px;padding:36px 24px;text-align:center;border:1.5px dashed #d1d5db;border-radius:14px;background:#fff}
+
+/* Motion */
+@keyframes drift{from{left:-240px}to{left:100%}}
+@keyframes sail{from{left:-120px}to{left:100%}}
+@keyframes sailBack{from{left:100%}to{left:-120px}}
+@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+@keyframes rock{0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-3px) rotate(2deg)}}
+@keyframes twinkle{0%,100%{opacity:.15}50%{opacity:.9}}
+@keyframes shimmer{0%,100%{opacity:.08;transform:translateX(0)}50%{opacity:.35;transform:translateX(14px)}}
+.drift{position:absolute;left:-240px;animation:drift linear infinite;will-change:left}
+.bob{animation:bob ease-in-out infinite}
+.boat{position:absolute;animation-timing-function:linear;animation-iteration-count:infinite}
+.rock{animation:rock 4.5s ease-in-out infinite;transform-origin:50% 90%}
+.star{position:absolute;border-radius:50%;background:#fff;animation:twinkle ease-in-out infinite}
+.wave{position:absolute;height:2px;border-radius:2px;background:#e5e7eb;animation:shimmer ease-in-out infinite}
+.lc{display:flex;align-items:center;justify-content:center;border-radius:10px;padding:6px 12px;border:1px solid rgba(255,255,255,.14);box-shadow:0 12px 28px rgba(0,0,0,.45);transition:opacity .4s,box-shadow .4s,border-color .4s,filter .4s}
+.lc.hit{border-color:#fff;box-shadow:0 0 0 3px rgba(255,255,255,.45),0 12px 28px rgba(0,0,0,.45)}
+.lc .nm{font:800 13px var(--serif);color:var(--text);white-space:nowrap;padding:0 4px}
+.lc .nm.on-dark{color:#fff}
+[hidden]{display:none !important}
+
+@media (prefers-reduced-motion: reduce){.drift,.bob,.boat,.rock,.star,.wave{animation:none !important}}
+@media (max-width:760px){
+  .h1{font-size:34px;white-space:normal}
+  .hide-sm{display:none !important}
+  .row{flex-wrap:wrap}
+  .flt{flex-basis:100%}
+  .lc{transform:scale(.68);transform-origin:left center}
+}
+</style>
+</head>
+<body>
+
+<section class="hero" aria-labelledby="hero-h">
+  <div aria-hidden="true" class="layer" style="inset:0;overflow:hidden;z-index:0">
+    <div id="stars" style="position:absolute;inset:0"></div>
+    <div class="layer" style="bottom:90px;height:200px;background:radial-gradient(60% 100% at 50% 100%,rgba(255,255,255,.08),rgba(255,255,255,0) 70%)"></div>
+  </div>
+  <!-- Partner logos drifting left→right; masked so they fade out behind the centre column -->
+  <div aria-hidden="true" id="sky" class="layer" style="top:70px;height:240px;z-index:1;overflow:hidden;-webkit-mask-image:linear-gradient(90deg,#000 0%,#000 12%,transparent 22%,transparent 78%,#000 88%,#000 100%);mask-image:linear-gradient(90deg,#000 0%,#000 12%,transparent 22%,transparent 78%,#000 88%,#000 100%)"></div>
+
+  <svg aria-hidden="true" class="skyline" viewBox="0 0 1200 300" preserveAspectRatio="none" style="bottom:88px;height:150px;z-index:2;transform:scaleX(-1);color:var(--night-600);opacity:.85" fill="currentColor"><use href="#skyline"/></svg>
+  <svg aria-hidden="true" class="skyline" viewBox="0 0 1200 300" preserveAspectRatio="none" style="bottom:88px;height:180px;z-index:2;color:var(--night-950)" fill="currentColor"><use href="#skyline"/></svg>
+  <div aria-hidden="true" id="river" class="layer" style="bottom:0;height:90px;z-index:3;background:linear-gradient(180deg,#0b1220 0%,#111a2c 100%);overflow:hidden">
+    <svg viewBox="0 0 1200 300" preserveAspectRatio="none" style="position:absolute;left:0;top:0;width:100%;height:60px;transform:scaleY(-1);color:#fff;opacity:.05" fill="currentColor"><use href="#skyline"/></svg>
+  </div>
+
+  <nav aria-label="Main" class="nav">
+    <a href="/" aria-label="Serve home" style="display:inline-flex;align-items:center;gap:10px;text-decoration:none">
+      <svg aria-hidden="true" width="32" height="28" viewBox="80 22 130 104"><path d="M 88 120 L 88 78 L 145 30 L 202 78 L 202 118" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span style="font:800 28px var(--serif);color:#fff;letter-spacing:-.5px">Serve</span>
+    </a>
+    <div style="margin-left:auto;display:flex;gap:26px;align-items:center;flex-wrap:wrap">
+      <a class="txt hide-sm" href="#grid">Find a Provider</a>
+      <a class="btn btn-ghost" href="/instant">Instant Booking</a>
+    </div>
+  </nav>
+
+  <div class="hero-body">
+    <div class="eyebrow">Greater Boston</div>
+    <h1 id="hero-h" class="h1">Boston's most trusted home cleaners.</h1>
+
+    <div class="panel">
+      <div class="row">
+        <label class="flt" for="where">Area</label>
+        <div class="combo">
+          <svg class="pin" aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>
+          <input class="inp" id="where" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="area-list" autocomplete="off" placeholder="Neighborhood or ZIP">
+          <button class="chev" id="chev" type="button" aria-label="Show popular areas" aria-expanded="false"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#374151" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button>
+          <div class="list" id="area-list" role="listbox" aria-label="Popular areas" hidden></div>
+        </div>
+        <a class="btn btn-w" href="#grid" id="find">Find Providers <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+      </div>
+      <div class="row" role="group" aria-label="Service">
+        <span class="flt" aria-hidden="true">Service</span>
+        <div class="chips" id="chips"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="grid" class="results" aria-labelledby="results-h">
+  <div class="wrap">
+    <div class="rhead">
+      <div style="display:flex;gap:6px 16px;align-items:baseline;flex-wrap:wrap;min-width:0">
+        <h2 id="results-h"></h2>
+        <button class="linkbtn" id="clear" type="button" hidden>Show all of Greater Boston</button>
+      </div>
+      <span class="live" id="live" aria-live="polite"></span>
+    </div>
+    <div class="grid" id="cards"></div>
+    <div class="empty" id="empty" hidden>
+      <div id="empty-t" style="font:800 24px var(--serif);color:var(--text)"></div>
+      <p style="margin:6px auto 16px;max-width:480px;color:var(--muted)">Serve opens neighborhood by neighborhood. Book instantly and we'll find a trusted company for you, or join the list for your area.</p>
+      <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap"><a class="btn btn-s" href="/instant">Instant Booking</a><a class="btn btn-o" href="waitlist.html">Join the waitlist</a></div>
+    </div>
+  </div>
+</section>
+
+<section id="instant" aria-labelledby="instant-h" style="background:var(--night-900);color:#fff;padding:56px 20px;text-align:center">
+  <div class="eyebrow" style="letter-spacing:.32em">Instant Booking</div>
+  <h2 id="instant-h" style="margin:10px 0 0;font:800 36px/1.15 var(--serif);color:var(--on-dark)">No time to compare?</h2>
+  <p style="margin:8px auto 24px;max-width:560px;color:#9ca3af;font-size:17px">Book in under a minute and Serve picks the right company for your home.</p>
+  <a class="btn btn-w" href="/instant">Get an Instant Price</a>
+</section>
+
+<footer style="background:var(--night-950);color:#9ca3af;padding:32px 20px 24px">
+  <div style="max-width:1200px;margin:0 auto;display:flex;flex-wrap:wrap;gap:24px;justify-content:space-between;align-items:center">
+    <div><span style="display:block;font:800 26px var(--serif);color:#fff">Serve</span><span style="font-size:14px">Greater Boston's home cleaning concierge</span></div>
+    <div style="display:flex;gap:24px;font-size:14px;flex-wrap:wrap"><a href="/for-companies" style="color:#9ca3af">Run a cleaning company? Apply to join</a><a href="/terms" style="color:#9ca3af">Terms</a><a href="/privacy" style="color:#9ca3af">Privacy</a></div>
+  </div>
+</footer>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><path id="skyline" d="M0,300 V240 H36 V222 H78 V255 H108 V196 H126 V150 H162 V196 H186 V244 H214 V120 H236 V96 H262 V88 H300 V132 H322 V174 H344 V150 H372 V210 H396 V250 H430 V168 H448 V120 L458,92 L468,120 H486 V168 H500 V236 H540 V206 H612 A28,28 0 0 1 668,206 H690 V240 H720 V214 H744 V150 L754,110 L764,150 H784 V214 H800 V246 H840 V190 H878 V210 H906 V160 H944 V128 H980 V186 H1010 V232 H1046 V204 H1080 V226 H1120 V246 H1160 V236 H1200 V300 Z"/></defs></svg>
+
+<script>
+(() => {
+  // ===== Data (in production: SELECT from partners; ratings/reviews must be real) =====
+  const W = '#ffffff';
+  const P = [
+    { slug:'roses', name:"Rose's Cleaning Inc", bg:W, brand:'#f3722b', area:'Boston · Quincy · South Shore', rating:'4.7', reviews:57, years:'18 yrs in business', tagline:'Woman-owned cleaning and organizing, with free walkthrough or video-call estimates.', tags:['Move in / out','Post-construction','Organizing'], svc:['Move in / out','Post-construction'], regions:['core','south'], priceLabel:'Pricing', price:'Free estimate', note:'Owner-run since 2008' },
+    { slug:'sonia', name:"Sonia's Cleaning Services", bg:W, brand:'#461f5c', area:'Newton · Brookline · Wellesley', rating:'5.0', reviews:47, years:'Cleaning since 2002', tagline:"Same cleaner every visit, no contracts, and a free re-clean if anything's missed.", tags:['Recurring','Deep clean','Airbnb'], svc:['Recurring','Deep clean','Move in / out','Post-construction','Airbnb'], regions:['west'], priceLabel:'Pricing', price:'Flat rate per visit', note:'Bonded & insured' },
+    { slug:'taskforce', name:'Taskforce Cleaning Services', bg:W, brand:'#1f3c88', area:'Everett · Somerville · Cambridge', rating:'5.0', reviews:67, years:'14+ yrs experience', tagline:'Recurring house cleaning from a vetted crew, with more than 16,000 cleanings done.', tags:['Recurring','Deep clean','Move in / out'], svc:['Recurring','Deep clean','Move in / out','Post-construction'], regions:['core','north'], priceLabel:'Current offer', price:'25% off first deep clean', note:'IICRC certified' },
+    { slug:'moro', name:'Moro Pro Cleaning', bg:W, brand:'#3a7dbf', area:'Melrose · Medford · Cambridge', rating:'4.8', reviews:41, years:'', tagline:'See your price instantly, book online, and pay after the clean is done.', tags:['Deep clean','Move in / out','Airbnb'], svc:['Recurring','Deep clean','Move in / out','Post-construction','Airbnb'], regions:['core','north'], priceLabel:'Pricing', price:'Instant price online', note:'Satisfaction guaranteed' },
+    { slug:'c247', name:'247 Cleaning Boston', bg:W, brand:'#0082fb', area:'Boston · Arlington', rating:'5.0', reviews:40, years:'', tagline:'The same trusted team every visit, with a text to confirm each appointment.', tags:['Recurring','Deep clean','Move in / out'], svc:['Recurring','Deep clean','Move in / out','Post-construction'], regions:['core'], priceLabel:'Pricing', price:'Free quote', note:'Fully insured' },
+    { slug:'cambridge', name:'Cambridge Clean Co', bg:'#0ca9bb', brand:'#0ca9bb', area:'Cambridge · Somerville · Arlington', rating:'5.0', reviews:82, years:'', tagline:'Family-owned, with background-checked cleaners and a free re-clean guarantee.', tags:['Recurring','Deep clean','Move in / out'], svc:['Recurring','Deep clean','Move in / out'], regions:['core'], priceLabel:'Pricing', price:'Book online', note:'Re-clean guarantee' },
+    { slug:'jma', name:'JMA Cleaning Services', bg:'#000000', brand:'#1fb5c1', area:'Somerville · Boston', rating:'5.0', reviews:43, years:'', tagline:'Insured, background-checked teams with clear written estimates.', tags:['Recurring','One-time','Post-construction'], svc:['Recurring','Post-construction'], regions:['core'], priceLabel:'Pricing', price:'Free estimate', note:'Background-checked' },
+    { slug:'pam', name:'Pam Cleaning Services', bg:W, brand:'#d9577a', area:'Waltham · Newton · Medford', rating:'5.0', reviews:76, years:'6 yrs in business', tagline:'No contracts and no deposit. Pay after each clean, with discounts for recurring plans.', tags:['Recurring','Move in / out','Post-construction'], svc:['Recurring','Deep clean','Move in / out','Post-construction'], regions:['core','west','north'], priceLabel:'Recurring plans', price:'Up to 20% off', note:'Fully insured' },
+    { slug:'flawless', name:'Boston Flawless Homes', bg:W, brand:'#b8901a', area:'Boston · Brookline · Newton', rating:'5.0', reviews:202, years:'', tagline:'Cleaning plus professional organizing, including Airbnb turnovers.', tags:['Deep clean','Airbnb','Organizing'], svc:['Recurring','Deep clean','Move in / out','Post-construction','Airbnb'], regions:['core','west'], priceLabel:'Pricing', price:'Free quote', note:'Licensed & insured' },
+    { slug:'enis', name:'Enis Cleaning', bg:W, brand:'#3f9a3a', area:'Medford · Brookline · Needham', rating:'4.9', reviews:523, years:'', tagline:'House cleaning and maid service across Metro Boston, with free quotes.', tags:['House cleaning','Maid service','Commercial'], svc:[], regions:['core','north','west'], priceLabel:'New clients', price:'10% off first clean', note:'Free quotes' },
+    { slug:'maria', name:'Maria By House Cleaning', bg:W, brand:'#8b1a1a', area:'Chelsea · Boston', rating:'4.9', reviews:48, years:'8 yrs experience', tagline:'Home and office cleaning from Chelsea, with steam cleaning and pet-safe products.', tags:['Deep clean','Move in / out','Post-construction'], svc:['Recurring','Deep clean','Move in / out','Post-construction'], regions:['core','north'], priceLabel:'Pricing', price:'Free estimate', note:'Pet-safe products' },
+    { slug:'taty', name:'Taty Cleaning Services', bg:W, brand:'#1f6fc5', area:'Quincy · Boston', rating:'5.0', reviews:45, years:'', tagline:'Same-day or next-day cleaning for homes and rentals, with online booking.', tags:['Recurring','Airbnb','Move in / out'], svc:['Recurring','Deep clean','Move in / out','Post-construction','Airbnb'], regions:['core','south'], priceLabel:'Pricing', price:'Free quote', note:'Book online' },
+    { slug:'luminos', name:'Luminos Cleaning Services', bg:W, brand:'#1e5ba8', area:'Quincy · Braintree · Hingham', rating:'5.0', reviews:88, years:'8+ yrs experience', tagline:'A family cleaning company using natural, pet-friendly products.', tags:['Deep clean','Move in / out','Post-construction'], svc:['Deep clean','Move in / out','Post-construction'], regions:['south'], priceLabel:'Pricing', price:'Free quote', note:'Keeps the quoted price' },
+    { slug:'bluehouse', name:'Blue House Cleaning', bg:W, brand:'#1d4ed8', area:'Quincy · Greater Boston', rating:'5.0', reviews:65, src:'Thumbtack', years:'21 yrs in business', tagline:'A small, owner-run Quincy team that quotes after a free walkthrough.', tags:['Recurring','Deep clean','Move in / out'], svc:['Recurring','Deep clean','Move in / out','Airbnb'], regions:['south','core'], priceLabel:'Pricing', price:'Free walkthrough', note:'Quotes after seeing your home' },
+  ].map((p) => ({ ...p, logo: `../logos/${p.slug}.png`, href: `/providers/${p.slug}` }));
+
+  const SERVICES = ['All','Recurring','Deep clean','Move in / out','Post-construction','Airbnb'];
+  const POPULAR = ['Somerville','Cambridge','Boston','Brookline','Newton','Medford','Arlington','Quincy','Chelsea','Everett','Waltham','Melrose'];
+  const ZIP = {'02143':'somerville','02144':'somerville','02145':'somerville','02138':'cambridge','02139':'cambridge','02140':'cambridge','02141':'cambridge','02142':'cambridge','02155':'medford','02148':'malden','02149':'everett','02150':'chelsea','02176':'melrose','02474':'arlington','02476':'arlington','02169':'quincy','02170':'quincy','02171':'quincy','02184':'braintree','02043':'hingham','02445':'brookline','02446':'brookline','02458':'newton','02459':'newton','02460':'newton','02461':'newton','02453':'waltham','02451':'waltham','02482':'wellesley','02492':'needham'};
+  const REG = {somerville:'core',cambridge:'core',boston:'core',arlington:'core','jamaica plain':'core','back bay':'core','south end':'core',dorchester:'core',medford:'north',malden:'north',everett:'north',melrose:'north',chelsea:'north',newton:'west',brookline:'west',wellesley:'west',waltham:'west',needham:'west',quincy:'south',braintree:'south',hingham:'south'};
+  const SPEED = 1;
+
+  // ===== Matching =====
+  const title = (s) => s.replace(/\b\w/g, (c) => c.toUpperCase());
+  const toPlace = (q) => { const r = q.trim().toLowerCase(); if (/^\d{5}$/.test(r)) return ZIP[r] || (r.startsWith('021') ? 'boston' : ''); return r; };
+  const inPlace = (place) => {
+    if (!place) return P;
+    const direct = P.filter((p) => p.area.toLowerCase().includes(place));
+    return direct.length ? direct : (REG[place] ? P.filter((p) => p.regions.includes(REG[place])) : []);
+  };
+
+  const state = { q: '', svc: 'All', open: false };
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, cls, style) => { const n = document.createElement(tag); if (cls) n.className = cls; if (style) n.style.cssText = style; return n; };
+  const nameFallback = (img, name, dark) => { img.onerror = () => { const t = el('span', 'nm' + (dark ? ' on-dark' : '')); t.textContent = name; img.replaceWith(t); }; };
+
+  // ===== Ambient scene (built once) =====
+  for (let i = 0; i < 40; i++) {
+    const s = i % 6 === 0 ? 2.5 : i % 3 === 0 ? 2 : 1.4;
+    $('stars').appendChild(el('span', 'star', `left:${((i*37.3+(i%5)*11)%100).toFixed(1)}%;top:${((i*19.7+(i%7)*5)%70).toFixed(1)}%;width:${s}px;height:${s}px;animation-duration:${3+(i%5)}s;animation-delay:${-(i*.7)}s`));
+  }
+  const LANES = [
+    {top:4,h:40,op:.42,dur:120,blur:1,z:1},{top:70,h:52,op:.66,dur:90,blur:.3,z:3},{top:36,h:44,op:.5,dur:106,blur:.8,z:2},
+    {top:128,h:60,op:.86,dur:78,blur:0,z:4},{top:186,h:42,op:.44,dur:112,blur:.9,z:2},{top:104,h:46,op:.6,dur:96,blur:.4,z:3},{top:168,h:38,op:.36,dur:128,blur:1.2,z:1},
+  ];
+  const skyCards = P.map((p, i) => {
+    const L = LANES[i % LANES.length], dur = L.dur / SPEED, frac = ((i*.618) + (i%2 ? .5 : 0)) % 1;
+    const d = el('div', 'drift', `top:${L.top}px;z-index:${L.z};animation-duration:${dur}s;animation-delay:${-(frac*dur)}s`);
+    const b = el('div', 'bob', `animation-duration:${5+(i%4)*1.3}s;animation-delay:${-(i*.9)}s`);
+    const c = el('div', 'lc', `height:${L.h}px;background:${p.bg}`);
+    const img = el('img', '', `display:block;height:${L.h-14}px;width:auto;max-width:${Math.round(L.h*2.6)}px;object-fit:contain`);
+    img.alt = ''; nameFallback(img, p.name, p.bg !== W); img.src = p.logo;
+    c.appendChild(img); b.appendChild(c); d.appendChild(b); $('sky').appendChild(d);
+    return { p, c, L };
+  });
+  for (let i = 0; i < 10; i++) {
+    $('river').appendChild(el('span', 'wave', `left:${((i*23.7)%96).toFixed(1)}%;top:${8+((i*13)%56)}px;width:${30+(i%4)*22}px;animation-duration:${4+(i%3)*1.5}s;animation-delay:${-(i*.8)}s`));
+  }
+  [
+    {bottom:52,w:24,dur:160,at:.25,back:true,main:'#cbd5e1',jib:'#94a3b8',op:.55},
+    {bottom:38,w:34,dur:118,at:.7,back:false,main:'#e5e7eb',jib:'#cbd5e1',op:.75},
+    {bottom:22,w:46,dur:96,at:.1,back:false,main:'#ffffff',jib:'#e5e7eb',op:.95},
+    {bottom:8,w:56,dur:140,at:.55,back:true,main:'#f3f4f6',jib:'#cbd5e1',op:.95},
+  ].forEach((b) => {
+    const dur = b.dur / SPEED;
+    const boat = el('div', 'boat', `bottom:${b.bottom}px;opacity:${b.op};animation-name:${b.back?'sailBack':'sail'};animation-duration:${dur}s;animation-delay:${-(b.at*dur)}s`);
+    boat.innerHTML = `<div class="rock" style="animation-duration:${(3.5+b.w/30).toFixed(1)}s"><svg viewBox="0 0 60 60" width="${b.w}" height="${b.w}" style="display:block;${b.back?'transform:scaleX(-1)':''}"><line x1="30" y1="5" x2="30" y2="45" stroke="#cbd5e1" stroke-width="1.4"/><path d="M31.5 7 L31.5 43 L53 43 Z" fill="${b.main}"/><path d="M28.5 13 L28.5 43 L11 43 Z" fill="${b.jib}"/><path d="M5 45 H55 L49 53 H11 Z" fill="#cbd5e1"/></svg></div>`;
+    $('river').appendChild(boat);
+  });
+
+  // ===== Service chips =====
+  SERVICES.forEach((s) => {
+    const b = el('button', 'chip'); b.type = 'button'; b.textContent = s;
+    b.addEventListener('click', () => { state.svc = s; render(); });
+    $('chips').appendChild(b);
+  });
+
+  // ===== Area combobox =====
+  const input = $('where'), list = $('area-list'), chev = $('chev');
+  let closeT;
+  const setOpen = (v) => { state.open = v; renderList(); };
+  input.addEventListener('input', () => { state.q = input.value; state.open = true; render(); });
+  input.addEventListener('focus', () => { clearTimeout(closeT); setOpen(true); });
+  input.addEventListener('blur', () => { closeT = setTimeout(() => setOpen(false), 160); });
+  input.addEventListener('keydown', (e) => { if (e.key === 'Escape') setOpen(false); if (e.key === 'Enter') { e.preventDefault(); setOpen(false); $('grid').scrollIntoView({ behavior: 'smooth' }); } });
+  chev.addEventListener('click', () => { clearTimeout(closeT); setOpen(!state.open); });
+  $('find').addEventListener('click', () => setOpen(false));
+  $('clear').addEventListener('click', () => { state.q = ''; input.value = ''; render(); });
+
+  function renderList() {
+    input.setAttribute('aria-expanded', state.open); chev.setAttribute('aria-expanded', state.open);
+    list.hidden = !state.open;
+    if (!state.open) return;
+    const raw = state.q.trim().toLowerCase(), typed = /^\d/.test(raw) ? '' : raw, place = toPlace(state.q);
+    const items = [{ label: 'All of Greater Boston', val: '' }, ...POPULAR.map((a) => ({ label: a, val: a }))]
+      .filter((a) => !typed || a.val === '' || a.label.toLowerCase().includes(typed));
+    list.innerHTML = '<div class="list-h">Popular areas</div>';
+    items.forEach((a) => {
+      const n = inPlace(a.val.toLowerCase()).length;
+      const b = el('button', 'opt'); b.type = 'button'; b.setAttribute('role', 'option');
+      b.setAttribute('aria-selected', a.val ? place === a.val.toLowerCase() : !place);
+      b.innerHTML = `<span></span><small>${n} ${n === 1 ? 'company' : 'companies'}</small>`;
+      b.firstChild.textContent = a.label;
+      b.addEventListener('click', () => { clearTimeout(closeT); state.q = a.val; input.value = a.val; state.open = false; render(); });
+      list.appendChild(b);
+    });
+    if (items.length <= 1 && typed) { const d = el('div', '', 'padding:10px 16px;font-size:14px;color:var(--muted)'); d.textContent = 'No popular area matches. Press Find Providers to search it.'; list.appendChild(d); }
+  }
+
+  // ===== Results + sky sync =====
+  function card(p) {
+    const a = el('article', 'pc');
+    a.innerHTML = `
+      <a class="plate" style="background:${p.bg};border-top-color:${p.brand}"><img alt=""></a>
+      <div class="pc-b">
+        <div><h3></h3><div class="area"></div></div>
+        <div class="meta"><b>★ ${p.rating}</b><span>${p.reviews} ${p.src || 'Google'} reviews</span>${p.years ? `<span>· ${p.years}</span>` : ''}</div>
+        <p style="margin:0;font-size:15px;line-height:1.5;color:var(--body)"></p>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${p.tags.map(() => '<span class="tag"></span>').join('')}</div>
+        <div class="pc-f"><div><div class="pl"></div><div class="pv"></div></div><div class="note"></div></div>
+        <div style="display:flex;gap:10px"><a class="btn btn-o" style="flex:1;padding:0 14px">View Profile</a><a class="btn btn-s" style="flex:1;padding:0 14px" href="/estimate?provider=${p.slug}">Get Estimate</a></div>
+      </div>`;
+    const plate = a.querySelector('.plate'); plate.href = p.href; plate.setAttribute('aria-label', `${p.name} profile`);
+    const img = plate.querySelector('img'); nameFallback(img, p.name, p.bg !== W); img.src = p.logo;
+    a.querySelector('h3').textContent = p.name;
+    a.querySelector('.area').textContent = p.area;
+    a.querySelector('p').textContent = p.tagline;
+    a.querySelectorAll('.tag').forEach((t, i) => { t.textContent = p.tags[i]; });
+    a.querySelector('.pl').textContent = p.priceLabel; a.querySelector('.pv').textContent = p.price;
+    a.querySelector('.note').textContent = `✓ ${p.note}`;
+    a.querySelector('.btn-o').href = p.href;
+    return a;
+  }
+
+  function render() {
+    const place = toPlace(state.q), label = place ? title(place) : 'Greater Boston';
+    const shown = inPlace(place).filter((p) => state.svc === 'All' || p.svc.includes(state.svc));
+    const hitSet = new Set(shown.map((p) => p.slug)), active = !!place || state.svc !== 'All', n = shown.length;
+
+    document.querySelectorAll('#chips .chip').forEach((c) => c.setAttribute('aria-pressed', c.textContent === state.svc));
+    $('results-h').textContent = `${n} trusted ${n === 1 ? 'company' : 'companies'}${place ? ` near ${label}` : ' across Greater Boston'}${state.svc === 'All' ? '' : ` for ${state.svc.toLowerCase()}`}`;
+    $('live').textContent = active ? `${n} of ${P.length} companies match` : `${P.length} trusted companies, live now`;
+    $('clear').hidden = !place;
+    $('cards').replaceChildren(...shown.map(card));
+    $('empty').hidden = n > 0;
+    $('empty-t').textContent = place ? `Not in ${label} yet.` : 'No companies offer that yet.';
+
+    // Sky: matches light up with a white ring, the rest fade (styles only, so animations keep running)
+    skyCards.forEach(({ p, c, L }) => {
+      const hit = hitSet.has(p.slug);
+      c.style.opacity = !active ? L.op : hit ? Math.max(.95, L.op) : L.op * .15;
+      c.style.filter = `blur(${active && hit ? 0 : L.blur}px)`;
+      c.classList.toggle('hit', active && hit);
+    });
+    renderList();
+  }
+  render();
+})();
+</script>
+</body>
+</html>

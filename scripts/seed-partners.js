@@ -8,6 +8,8 @@
  *   node scripts/seed-partners.js
  *   npx wrangler d1 execute serve-marketplace --remote --file db/seed-first-partners.sql
  *
+ * Needs migrations 0001 AND 0002 applied first (0002 adds service_areas).
+ *
  * EVERY PROVIDER IS SEEDED UNLISTED. `listed` is forced to 0 here whatever the
  * JSON says: these profiles were drafted by Serve from public websites, and a
  * company becomes public only after its owner has approved the profile and the
@@ -45,7 +47,7 @@ function providerSql(p, now) {
     brand_color: q(p.brand_color || '#1f2937'), logo_path: q(p.logo_path || ''), logo_bg: q(p.logo_bg || '#ffffff'),
     years_label: q(p.years_label || ''), owner_public_name: q(p.owner_public_name || ''), team_label: q(p.team_label || ''),
     service_area: q(p.service_area || ''), area_short: q(p.area_short || ''),
-    regions: arr(p.regions), services: arr(p.services), service_tags: arr(p.service_tags),
+    regions: arr(p.regions), service_areas: arr(p.service_areas), services: arr(p.services), service_tags: arr(p.service_tags),
     claims: arr(p.claims), policies: arr(p.policies),
     pricing_text: q(p.pricing_text || ''), deals: arr(p.deals),
     price_label: q(p.price_label || 'Pricing'), price_value: q(p.price_value || 'Free estimate'), card_note: q(p.card_note || ''),
@@ -70,7 +72,14 @@ function main() {
     if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(p.slug)) throw new Error('bad slug: ' + p.slug);
     if (seen.has(p.slug)) throw new Error('duplicate slug: ' + p.slug);
     seen.add(p.slug);
+    for (const a of p.service_areas || []) {
+      if (!/^[a-z]+(-[a-z]+)*$/.test(a) && !/^\d{5}$/.test(a)) throw new Error('bad service area for ' + p.slug + ': ' + a);
+    }
     out.push(providerSql(p, now));
+    /* Rows seeded before migration 0002 have service_areas = '[]'. Fill those
+       once; a list already edited in D1 is never overwritten. */
+    out.push('UPDATE providers SET service_areas = ' + arr(p.service_areas) +
+      ' WHERE id = ' + q(p.id) + " AND service_areas = '[]';");
     /* Photos and quotes are keyed to a provider that may already have been
        edited; they are only inserted when that provider has none yet, so a
        re-run cannot duplicate them. */

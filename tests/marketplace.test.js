@@ -32,7 +32,9 @@ const t = (label, cond, extra) => {
 /* ---------- a D1 binding over real SQLite ---------- */
 function makeD1() {
   const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');   // as D1 enforces them
   db.exec(read('migrations/0001_marketplace.sql'));
+  db.exec(read('migrations/0002_neighborhoods.sql'));
   db.exec(read('db/seed-first-partners.sql'));
   const plain = (r) => (r ? Object.assign({}, r) : null);
   const stmt = (sql, args) => ({
@@ -109,6 +111,31 @@ console.log('=== 1. schema and seed ===');
   t('estimate_requests keeps the quoted price', ['quoted_price_cents', 'quoted_frequency', 'quoted_at'].every((c) => cols.includes(c)), cols);
   t('estimate_requests has client_ref for retries', cols.includes('client_ref'));
 
+  /* migration 0002: where companies work */
+  const popular = raw.prepare('SELECT name FROM neighborhoods WHERE popular_rank IS NOT NULL ORDER BY popular_rank').all().map((r) => r.name);
+  t('the popular areas are the spec\'s twelve, in its order', popular.join() ===
+    'Somerville,Cambridge,Boston,Brookline,Newton,Medford,Arlington,Quincy,Chelsea,Everett,Waltham,Melrose', popular);
+  t('every neighborhood has a valid region',
+    raw.prepare("SELECT count(*) n FROM neighborhoods WHERE region NOT IN ('core','north','west','south')").get().n === 0);
+  t('a parent must exist (Back Bay → Boston)', raw.prepare("SELECT parent FROM neighborhoods WHERE slug = 'back-bay'").get().parent === 'boston');
+  let badZip = false;
+  try { raw.exec("INSERT INTO neighborhood_zips (zip, neighborhood) VALUES ('2139', 'cambridge')"); } catch (_) { badZip = true; }
+  let badArea = false;
+  try { raw.exec("INSERT INTO neighborhood_zips (zip, neighborhood) VALUES ('02999', 'atlantis')"); } catch (_) { badArea = true; }
+  t('a ZIP must be 5 digits and point at a real neighborhood', badZip && badArea);
+  const slugs = new Set(raw.prepare('SELECT slug FROM neighborhoods').all().map((r) => r.slug));
+  const unknown = [];
+  for (const r of raw.prepare('SELECT slug, service_areas FROM providers').all()) {
+    for (const a of JSON.parse(r.service_areas)) if (!slugs.has(a) && !/^\d{5}$/.test(a)) unknown.push(r.slug + ':' + a);
+  }
+  t('every seeded service area is a known neighborhood', unknown.length === 0, unknown);
+  t('the seed filled service_areas for every company',
+    raw.prepare("SELECT count(*) n FROM providers WHERE service_areas = '[]'").get().n === 0);
+  raw.exec("UPDATE providers SET service_areas = '[\"somerville\"]' WHERE slug = 'roses-cleaning'");
+  raw.exec(read('db/seed-first-partners.sql'));
+  t('re-running the seed never overwrites an edited service area',
+    raw.prepare("SELECT service_areas FROM providers WHERE slug = 'roses-cleaning'").get().service_areas === '["somerville"]');
+
   const seed = JSON.parse(read('db/first-partners.json'));
   const files = [];
   seed.forEach((p) => { files.push(p.logo_path); (p.photos || []).forEach((ph) => files.push(ph.path)); });
@@ -146,6 +173,8 @@ console.log('\n=== 2. the public whitelist ===');
   t('non-hex colours fall back', hostile.brandColor === '#1f2937' && hostile.logoBg === '#ffffff');
   const tagged = M.publicProvider(Object.assign({}, row, { service_tags: '["Recurring","<b>x</b>"]', regions: '["core","mars"]' }), [], []);
   t('unknown filter tags and regions are dropped', tagged.serviceTags.join() === 'Recurring' && tagged.regions.join() === 'core');
+  const areaed = M.publicProvider(Object.assign({}, row, { service_areas: '["somerville","02139","\\"><b>","Back Bay"]' }), [], []);
+  t('service areas keep only neighborhood slugs and ZIPs', areaed.serviceAreas.join() === 'somerville,02139', areaed.serviceAreas);
 }
 
 console.log('\n=== 3. rendering is escaped and leaks nothing ===');
@@ -169,9 +198,12 @@ console.log('\n=== 3. rendering is escaped and leaks nothing ===');
     !page.includes('<script>alert(1)') && !page.includes('<img src=x') && !page.includes('<script>bad') && !page.includes('<b>insured'));
   const dir = M.renderDirectory([evil]);
   t('directory escapes card text', !dir.includes('<script>alert(1)') && !dir.includes('<img src=x'));
-  const find = (dir.match(/<form class="mk-find"[^]*?<\/form>/) || [''])[0];
-  t('directory has the "Neighborhood or ZIP" search', find.includes('placeholder="Neighborhood or ZIP"') && find.includes('Find Providers'));
-  t('…whose input has no name, so a ZIP never lands in a URL', /<input /.test(find) && !/<input[^>]*\sname=/.test(find));
+  const area = (dir.match(/<input[^>]*id="mk-area"[^>]*>/) || [''])[0];
+  t('the home has the Area combobox', area.includes('role="combobox"') && area.includes('placeholder="Neighborhood or ZIP"') &&
+    dir.includes('Find Providers'));
+  t('…whose input has no name, so a ZIP never lands in a URL', area !== '' && !/\sname=/.test(area));
+  const areasDir = M.renderDirectory([evil], { areas: [{ slug: 'x', name: '</script><script>alert(2)</script>', region: 'core', parent: '', rank: 1 }], zips: {} });
+  t('the #mk-areas JSON cannot close its script tag', !areasDir.includes('</script><script>alert(2)'));
   t('JSON-LD cannot close its script tag', !/<\/script>[^]*<\/script>[^]*application\/ld\+json/.test(page) &&
     !page.includes('"name":"<script>'));
   t('preview page is noindex', M.renderProfile(evil, { preview: true }).includes('<meta name="robots" content="noindex">'));
@@ -231,9 +263,10 @@ console.log('\n=== 4. routes: listed, unlisted, preview ===');
   /* The preview directory: every draft, each linking to its own preview. */
   res = await M.handleMarketplace(get('/providers?preview=' + PREVIEW), env, null, u('/providers?preview=' + PREVIEW));
   html = await res.text();
-  const cardCount = (html.match(/<article class="mk-card"/g) || []).length;
+  const cardCount = (html.match(/<article class="pc"/g) || []).length;
   t('the preview directory shows all ' + N_PARTNERS + ' companies', res.status === 200 && cardCount === N_PARTNERS, cardCount);
-  t('…badges the ' + (N_PARTNERS - 1) + ' drafts and not the listed one', (html.match(/Draft · not public/g) || []).length === N_PARTNERS - 1);
+  t('…says in its banner how many are drafts (cards carry no badge: HOME_SPEC.md §5)',
+    html.includes('including ' + (N_PARTNERS - 1) + ' drafts the public cannot see') && !html.includes('Draft · not public'));
   t('…links each card to its own preview', html.includes('href="/providers/taskforce-cleaning-services?preview=' + PREVIEW + '"') &&
     html.includes('href="/providers/taskforce-cleaning-services?preview=' + PREVIEW + '#estimate"'));
   t('…is noindex in the markup AND the header, and uncached',
@@ -243,7 +276,7 @@ console.log('\n=== 4. routes: listed, unlisted, preview ===');
   t('…still carries no internal field', !html.includes('555-0177') && !html.includes('SECRET-NOTE') && !html.includes('owner@example.com'));
   res = await M.handleMarketplace(get('/providers?preview=nope'), env, null, u('/providers?preview=nope'));
   html = await res.text();
-  t('a wrong key gets the public directory, drafts hidden', !html.includes('Draft · not public') && !html.includes('Taskforce'));
+  t('a wrong key gets the public directory, drafts hidden', !html.includes('Preview.') && !html.includes('Taskforce'));
   res = await M.handleMarketplace(get('/providers/taskforce-cleaning-services?preview=' + PREVIEW), env, null,
     u('/providers/taskforce-cleaning-services?preview=' + PREVIEW));
   html = await res.text();
@@ -272,11 +305,11 @@ console.log('\n=== 4b. a preview can never reach the public cache ===');
   t('opening the preview stores nothing', store.size === 0, [...store.keys()]);
   let res = await M.handleMarketplace(get('/providers'), env, null, u('/providers'));
   let html = await res.text();
-  t('the public page afterwards shows no draft', !html.includes('Draft · not public') && !html.includes('Taskforce'));
+  t('the public page afterwards shows no draft', !html.includes('Preview.') && !html.includes('Taskforce'));
   t('…and it is the public page that got cached', store.size === 1 && store.has('https://servecleaning.com/providers'));
   res = await M.handleMarketplace(get('/providers?preview=' + PREVIEW), env, null, u('/providers?preview=' + PREVIEW));
   html = await res.text();
-  t('a preview after that is not served from the public cache', html.includes('Draft · not public'));
+  t('a preview after that is not served from the public cache', html.includes('Taskforce'));
   await M.handleMarketplace(get('/providers/taskforce-cleaning-services?preview=' + PREVIEW), env, null,
     u('/providers/taskforce-cleaning-services?preview=' + PREVIEW));
   res = await M.handleMarketplace(get('/providers/taskforce-cleaning-services'), env, null, u('/providers/taskforce-cleaning-services'));
@@ -322,14 +355,7 @@ console.log('\n=== 4c. the Boston Night hero (design/serve/DESIGN.md §5) ===');
   t('speed 2 halves them', durs(hero({ title: 'T', partners: many, speed: 2 }))[0] === 60);
   t('a silly speed is clamped, not trusted', durs(hero({ title: 'T', partners: many, speed: 1000 }))[0] === 30 &&
     durs(hero({ title: 'T', partners: many, speed: -5 }))[0] === 120);
-  const small = hero({ title: 'T', partners: many, compact: true });
-  const smallTops = [...small.matchAll(/class="serve-drift" style="top:(\d+)px/g)].map((m) => +m[1]);
-  t('compact: the class is set and every lane fits the 350px band',
-    small.includes('bn-hero--compact') && smallTops.every((top, i) => top + Math.round([46, 62, 52, 76, 50, 66, 44][i % 7] * 0.82) <= 350), smallTops);
-  t('…and every boat sits inside the 72px river',
-    [...small.matchAll(/class="serve-boat" style="bottom:(\d+)px/g)].every((m) => +m[1] < 72));
-  t('the default scene is untouched by compact', !h.includes('bn-hero--compact'));
-  t('the scene has its 46 stars, 14 ripples and 4 boats',
+  t('the waitlist scene has its 46 stars, 14 ripples and 4 boats',
     (h.match(/class="serve-star"/g) || []).length === 46 && (h.match(/class="serve-wave"/g) || []).length === 14 &&
     (h.match(/class="serve-boat"/g) || []).length === 4);
   const tokens = read('design/serve/tokens.css');
@@ -338,22 +364,55 @@ console.log('\n=== 4c. the Boston Night hero (design/serve/DESIGN.md §5) ===');
   t('the build serves the tokens at /serve-tokens.css',
     read('scripts/build-site.sh').includes('cp design/serve/tokens.css "$OUT"/serve-tokens.css'));
 
-  /* In the directory: founder preview only, partners straight from D1. */
+  /* The "home" scene (HOME_SPEC.md §4): the marketplace's, with no gold. */
+  h = hero({ variant: 'home', title: 'T', eyebrow: 'E', partners: many });
+  const homeTops = [...h.matchAll(/class="serve-drift" style="top:(\d+)px/g)].map((m) => +m[1]);
+  t('home: the reference home lanes, in order', JSON.stringify(homeTops) === JSON.stringify([4, 70, 36, 128, 186, 104, 168, 4]), homeTops);
+  t('home: every lane fits the 240px band', [...h.matchAll(/top:(\d+)px;z-index[^"]*"><div class="serve-bob"[^>]*><div class="bn-lc"[^>]*style="height:(\d+)px/g)]
+    .every((m) => +m[1] + +m[2] <= 240));
+  t('home: 40 stars, 10 ripples, 4 boats', (h.match(/class="serve-star"/g) || []).length === 40 &&
+    (h.match(/class="serve-wave"/g) || []).length === 10 && (h.match(/class="serve-boat"/g) || []).length === 4);
+  t('home: no gold anywhere in the scene', !/gold|c9a96e/i.test(h));
+  t('home: each sky logo carries its slug and lane for the page script',
+    (h.match(/class="bn-lc" data-slug="[^"]*" data-op="[\d.]+" data-blur="[\d.]+"/g) || []).length === 8);
+  t('home: one-line H1 with no italic accent, eyebrow above it',
+    /<div class="bn-home__eyebrow">E<\/div>\s*<h1 id="bn-h" class="bn-home__title">T<\/h1>/.test(h) && !h.includes('class="accent"'));
+  t('home: no glass card and no subheading', !h.includes('serve-glass') && !h.includes('bn-intro'));
+
+  /* The marketplace home, from D1. */
   const d1 = makeD1();
   const env = { MARKET_DB: d1.binding, MARKET_PREVIEW_KEY: PREVIEW };
   const u = (p) => new URL('https://servecleaning.com' + p);
-  let res = await M.handleMarketplace(get('/providers?preview=' + PREVIEW + '&hero=night'), env, null,
-    u('/providers?preview=' + PREVIEW + '&hero=night'));
+  let res = await M.handleMarketplace(get('/providers?preview=' + PREVIEW), env, null, u('/providers?preview=' + PREVIEW));
   let html = await res.text();
-  t('the preview can show the night hero, compact', html.includes('class="serve-sky bn-hero bn-hero--compact"') && html.includes('href="/serve-tokens.css"'));
-  t('…with one logo per company in D1', (html.match(/class="serve-logo-card"/g) || []).length === N_PARTNERS);
+  t('/providers is the home: night "home" hero with the tokens loaded',
+    html.includes('class="serve-sky bn-hero bn-hero--home"') && html.includes('href="/serve-tokens.css"'));
+  t('…H1 is "Boston\'s most trusted home cleaners."', html.includes('>Boston&#39;s most trusted home cleaners.</h1>'));
+  t('…one sky logo per company in D1', (html.match(/class="bn-lc"/g) || []).length === N_PARTNERS);
   t('…each logo the company\'s own file from its row', html.includes('src="/images/providers/blue-house-cleaning/logo.png"'));
-  t('…the search still works (hook kept, input still nameless)',
-    /<form class="bn-find"[^>]*data-find/.test(html) && !/<input[^>]*id="mk-near"[^>]*\sname=/.test(html));
-  t('…and it is still an uncached preview', res.headers.get('Cache-Control') === 'no-store');
-  res = await M.handleMarketplace(get('/providers?hero=night'), env, null, u('/providers?hero=night'));
+  const pills = [...html.matchAll(/class="mk-pill" data-service="([^"]+)" aria-pressed="(true|false)"/g)];
+  t('…Service pills in the spec order, All pressed', pills.map((m) => m[1]).join('|') ===
+    'All|Recurring|Deep clean|Move in / out|Post-construction|Airbnb' && pills[0][2] === 'true' && pills.slice(1).every((m) => m[2] === 'false'));
+  t('…the live count comes from the rows', html.includes(N_PARTNERS + ' trusted companies, live now') &&
+    html.includes('>' + N_PARTNERS + ' trusted companies across Greater Boston</h2>'));
+  t('…cards carry their service areas from D1', html.includes('data-slug="luminos-cleaning-services" data-areas="quincy braintree'));
+  const blob = JSON.parse((html.match(/<script type="application\/json" id="mk-areas">([^<]*)<\/script>/) || [])[1] || '{}');
+  t('…the page gets the neighborhoods and ZIPs from D1', blob.areas && blob.areas.length === 80 && blob.zips['02139'] === 'cambridge' &&
+    blob.areas.filter((a) => a.rank).length === 12, blob.areas && blob.areas.length);
+  t('…no gold anywhere on the page', !/c9a96e|serve-gold|serve-btn-gold/i.test(html));
+  t('…no Join-the-waitlist link while /waitlist does not exist', !html.includes('Join the waitlist'));
+  t('…the empty state always offers Instant Booking', /data-empty[^]*?href="\/#quote">Instant Booking/.test(html));
+
+  /* Before migration 0002 is applied the page must still render. */
+  const old = new DatabaseSync(':memory:');
+  old.exec(read('migrations/0001_marketplace.sql'));
+  const plain = (r) => (r ? Object.assign({}, r) : null);
+  const oldBinding = { prepare: (sql) => ({ bind: () => null, first: async () => null,
+    all: async () => ({ results: old.prepare(sql).all().map(plain) }) }) };
+  res = await M.handleMarketplace(get('/providers?preview=' + PREVIEW), { MARKET_DB: oldBinding, MARKET_PREVIEW_KEY: PREVIEW }, null,
+    u('/providers?preview=' + PREVIEW));
   html = await res.text();
-  t('the public directory ignores ?hero=night', !html.includes('bn-hero') && !html.includes('serve-tokens.css'));
+  t('without migration 0002 the home still renders, with no areas', res.status === 200 && html.includes('"areas":[]'));
 }
 
 console.log('\n=== 5. POST /api/estimate ===');

@@ -29,7 +29,7 @@ Three feelings, in priority order:
 | Low sky | `--serve-night-700` | #24304a | Sky gradient |
 | Back skyline | `--serve-night-600` | #2a3550 | Rear skyline layer |
 | Horizon | `--serve-dusk` | #3a3a4a | Bottom of sky gradient |
-| **Gold** | `--serve-gold` | #c9a96e | Eyebrows, primary CTA fill, hairlines on dark. **Accent only, never a background block.** |
+| **Gold** | `--serve-gold` | #c9a96e | Waitlist and print only. **Not used on the marketplace** (home, search, profiles, booking, portals), where the accent is white on dark and slate on light; see HOME_SPEC.md. |
 | Gold ink | `--serve-gold-ink` | #8a6d3b | Gold text on cream/white |
 | Cream | `--serve-cream` | #f7f4ee | Light feature sections |
 | Cream line | `--serve-cream-line` | #e7e1d4 | Card borders on cream |

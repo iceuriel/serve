@@ -54,23 +54,30 @@ Before building or changing any UI:
    `/serve-tokens.css`; a Worker page loads it with `shell({ night: true })`.
    Never hard-code a hex value that exists as a token. This site has no
    Tailwind: `tailwind.preset.js` is kept as the kit shipped it, for reference.
-3. Match `design/serve/reference/waitlist.html` for look, motion and voice. It
-   is framework-free on purpose: port it, don't paste it.
+3. Match the reference pages for look, motion and voice: `reference/home.html`
+   (the marketplace home, built to `design/serve/HOME_SPEC.md`, which wins
+   wherever it disagrees with DESIGN.md) and `reference/waitlist.html`. They
+   are framework-free on purpose: port them, don't paste them.
 
-The hero is already ported: `renderBostonNightHero()` in `src/marketplace.js`
-(this repo's `<BostonNightHero>`, with slots for the form, the partners and a
-motion speed). Use it; don't build a second one.
+The components are already ported, in `src/marketplace.js`:
+`renderBostonNightHero()` (variants "home" and "waitlist"), `renderAreaCombobox()`,
+`renderServiceChips()`, `renderProviderCard()` and `renderProviderGrid()`, with the
+live filtering in `marketplace-client.js`. Use them; don't build second ones.
 
 Rules that matter most:
 - Hero/landing screens use the Boston Night hero. App screens (portals,
   booking, settings) use the slate nav + white workspace, with no ambient motion.
-- Gold (#c9a96e) is an accent only: one gold CTA per viewport, never a background.
+- No gold (#c9a96e) on any marketplace screen (home, search, profiles,
+  booking, portals): accents are white on dark and slate on light. Gold is for
+  the waitlist and print only.
 - Headlines in Times New Roman; everything functional in Inter.
 - Honor prefers-reduced-motion. Every page works from 360px to 1440px.
 - Never invent counts, ratings or reviews: data comes from D1 or is omitted.
 - Partner logos and counts come from the D1 `providers` table (`logo_path`,
   `logo_bg`) through `publicProvider()`, never a hard-coded list. Publicly,
-  only listed companies (listed = 1 AND status = 'approved').
+  only listed companies (listed = 1 AND status = 'approved'). Area matching
+  uses `providers.service_areas` and the `neighborhoods` / `neighborhood_zips`
+  tables (migration 0002), never a list in the page script.
 
 When asked to build a new screen, first state which DESIGN.md §8 treatment applies.
 

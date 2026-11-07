@@ -19,10 +19,14 @@ Before building or changing any UI:
 3. Match the reference implementation `design/serve/reference/waitlist.html` for look, motion and voice.
    It is framework-free on purpose: port it into our components; don't paste raw HTML.
 
+The marketplace home follows `design/serve/HOME_SPEC.md` exactly (reference: `design/serve/reference/home.html`).
+HOME_SPEC.md wins wherever it disagrees with DESIGN.md: the marketplace uses white accents and no gold.
+
 Rules that matter most:
-- Hero/landing screens use the Boston Night hero (skyline, the Charles with sailboats, partner logos drifting left to right behind a glass card).
+- Hero/landing screens use the Boston Night hero (skyline, the Charles with sailboats, partner logos drifting left to right).
+- On the marketplace home the search panel (Area combobox + Service chips) sits directly under the one-line H1, and results start right below the hero; Area and Service filter the heading, grid and sky logos together.
 - App screens (portals, booking, settings) use the slate nav + white workspace; no ambient motion there.
-- Gold (#c9a96e) is an accent only: one gold CTA per viewport, never a background.
+- Gold (#c9a96e) appears only on the waitlist and print pieces, never on marketplace screens.
 - Headlines in Times New Roman (serif); everything functional in Inter.
 - Honor prefers-reduced-motion. Every page works from 360px to 1440px.
 - Never invent counts, ratings or reviews: data comes from the database or is omitted.
@@ -44,7 +48,9 @@ When asked to build a new screen, first state which DESIGN.md §8 treatment appl
 | `DESIGN.md` | The system: color, type, layout, hero layers, components, motion, voice, don'ts |
 | `tokens.css` | CSS variables, keyframes, component classes (`.serve-glass`, `.serve-btn-gold`, ...) |
 | `tailwind.preset.js` | The same tokens for Tailwind |
-| `reference/waitlist.html` | Working reference page (vanilla HTML/JS) |
+| `HOME_SPEC.md` | Exact build spec + acceptance checklist for the marketplace home |
+| `reference/home.html` | Working marketplace home (search flows into providers) |
+| `reference/waitlist.html` | Working waitlist page (vanilla HTML/JS) |
 | `logos/` | Partner logo files go here |
 
 The live design canvas (all marketplace screens, partner profiles and print) stays the place to explore new ideas; this folder is what ships.

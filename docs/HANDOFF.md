@@ -14,6 +14,46 @@ accurate except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-11-07, Claude Code: marketplace home rebuilt to HOME_SPEC.md
+
+Founder supplied `HOME_SPEC.md` and `reference/home.html` (now in `design/serve/`,
+with the updated DESIGN.md and README). HOME_SPEC wins over DESIGN.md: **no gold
+on any marketplace screen**. CLAUDE.md and AGENTS.md were updated to match.
+
+- **`/providers` is now the HOME_SPEC home, public and preview.** Headline,
+  then search, then results. Old slate hero, old filter chips, the
+  `?hero=night` preview toggle, the compact-hero option and the hard-coded
+  ZIP table in `marketplace-client.js` are all removed.
+- **Components** in `src/marketplace.js`:
+  - `renderBostonNightHero()`, with variants "home" (marketplace, no gold) and
+    "waitlist" (kept for the waitlist page).
+  - `renderAreaCombobox()`, `renderServiceChips()`, `renderProviderCard()` and
+    `renderProviderGrid()`.
+  - The live filtering is in `marketplace-client.js`.
+- **Migration `0002_neighborhoods.sql`**:
+  - `providers.service_areas`, plus `neighborhoods` (80 rows: region, parent,
+    popular_rank) and `neighborhood_zips` (108 rows).
+  - Seeded companies' `service_areas` come from their own service-area text,
+    filled only where still `[]`.
+  - Blue House is set to `quincy` only, because its coverage is unconfirmed.
+  - Contract in SCHEMA.md.
+- **Deliberate deviations:**
+  - Phones keep the compact row cards the founder asked for, and the Service
+    pills swipe on one row. The spec does not define phone cards.
+  - The "Join the waitlist" button is hidden (`WAITLIST_HREF = ""`) until a
+    /waitlist page exists, rather than linking to a 404.
+  - Ratings stay hidden until `rating_checked_on` is set, which none is yet.
+- **Checked:**
+  - 45 test files pass. `tests/marketplace.test.js` adds the 0002 schema and
+    seed checks, the home-variant hero, the components and the page from D1.
+  - Headless Chrome against the real module, migrations and seed measured each
+    HOME_SPEC §7 item; results are in the founder report.
+- **NOT YET IN LIVE D1. The founder runs, in this order:**
+  1. `npx.cmd wrangler d1 migrations apply serve-marketplace --remote`, which
+     applies only 0002.
+  2. `npx.cmd wrangler d1 execute serve-marketplace --remote --file db/seed-first-partners.sql`.
+  Until then the live page renders, but Area search finds nothing.
+
 ## Current work — 2026-11-07, Claude Code: "Boston Night" design system + hero
 
 The founder supplied a design kit (`serve-design-kit/`, outside the repo).

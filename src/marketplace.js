@@ -45,6 +45,7 @@ const ESTIMATE_IP_PER_HOUR = 6;    // a person asks a few companies, not dozens
 const ESTIMATE_MAX_BODY = 4096;
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+const AREA_RE = /^[a-z]+(?:-[a-z]+)*$/;   // a neighborhoods.slug
 
 /* ---------- small, pure helpers (exported for the tests) ---------- */
 
@@ -114,6 +115,9 @@ export function publicProvider(row, photos, quotes) {
     serviceArea: String(row.service_area || ""),
     areaShort: String(row.area_short || ""),
     regions: jsonList(row.regions).filter((r) => REGION_KEYS.includes(r)),
+    /* Neighborhood slugs (and ZIPs) from migration 0002. Anything else is
+       dropped, so the value is safe in an HTML attribute and a JSON blob. */
+    serviceAreas: jsonList(row.service_areas).filter((a) => AREA_RE.test(a) || /^\d{5}$/.test(a)),
     services: jsonList(row.services),
     serviceTags: jsonList(row.service_tags).filter((t) => SERVICE_TAGS.includes(t)),
     claims: jsonList(row.claims),
@@ -199,9 +203,7 @@ export async function handleMarketplace(request, env, ctx, url) {
      one founder click. The preview branches are therefore checked first and
      return without touching the cache in either direction. */
   if (p === "/providers") {
-    if (previewAllowed(url, env)) {
-      return directoryPage(env, previewKeyOf(env), url.searchParams.get("hero") === "night");
-    }
+    if (previewAllowed(url, env)) return directoryPage(env, previewKeyOf(env));
     return cached(request, ctx, () => directoryPage(env, ""));
   }
   const m = p.match(/^\/providers\/([^\/]+)$/);
@@ -275,6 +277,31 @@ async function allProvidersForPreview(db) {
     "SELECT * FROM providers WHERE status <> 'removed' ORDER BY sort_rank, name").all();
   return (results || []).map((r) => Object.assign(publicProvider(r, [], []),
     { isDraft: !(Number(r.listed) === 1 && r.status === "approved") }));
+}
+
+/* The neighborhoods and ZIPs the Area search matches against (migration 0002).
+   Every field is checked before it reaches the page's JSON. Before 0002 is
+   applied the tables don't exist: the page still renders, and an area search
+   simply finds nothing and offers Instant Booking. */
+async function areaTables(db) {
+  try {
+    const [a, z] = await Promise.all([
+      db.prepare("SELECT slug, name, region, parent, popular_rank FROM neighborhoods ORDER BY name").all(),
+      db.prepare("SELECT zip, neighborhood FROM neighborhood_zips").all(),
+    ]);
+    const areas = (a.results || [])
+      .filter((r) => AREA_RE.test(String(r.slug)) && REGION_KEYS.includes(r.region) && (!r.parent || AREA_RE.test(String(r.parent))))
+      .map((r) => ({ slug: String(r.slug), name: String(r.name || ""), region: r.region,
+        parent: r.parent ? String(r.parent) : "", rank: Number(r.popular_rank) > 0 ? Number(r.popular_rank) : 0 }));
+    const zips = {};
+    for (const r of z.results || []) {
+      if (/^\d{5}$/.test(String(r.zip)) && AREA_RE.test(String(r.neighborhood))) zips[r.zip] = String(r.neighborhood);
+    }
+    return { areas, zips };
+  } catch (err) {
+    console.error("neighborhoods read failed: " + err);
+    return { areas: [], zips: {} };
+  }
 }
 
 async function providerBySlug(db, slug, includeUnlisted) {
@@ -461,7 +488,7 @@ function estimateAnswer(wantsHtml, payload, status, slug) {
 
 /* ---------- pages ---------- */
 
-async function directoryPage(env, previewKey, night) {
+async function directoryPage(env, previewKey) {
   if (!env || !env.MARKET_DB) return htmlRes(comingSoon(), 200);
   let providers;
   try {
@@ -470,8 +497,9 @@ async function directoryPage(env, previewKey, night) {
     console.error("directory read failed: " + err);
     return htmlRes(comingSoon(), 503, "no-store");
   }
-  if (previewKey) return previewRes(renderDirectory(providers, { previewKey, night }));
-  return htmlRes(renderDirectory(providers), 200, "public, max-age=" + PAGE_TTL_S);
+  const { areas, zips } = await areaTables(env.MARKET_DB);
+  if (previewKey) return previewRes(renderDirectory(providers, { previewKey, areas, zips }));
+  return htmlRes(renderDirectory(providers, { areas, zips }), 200, "public, max-age=" + PAGE_TTL_S);
 }
 
 async function profilePage(env, slug, previewKey) {
@@ -499,88 +527,115 @@ function previewRes(html) {
 const LOGO_SVG = (color, width) =>
   `<svg role="img" aria-label="Serve, Greater Boston" width="${width}" height="${Math.round(width * 1.14)}" viewBox="45 10 200 228" class="mk-mark"><path d="M 88 150 L 88 78 L 145 30 L 202 78 L 202 118" fill="none" stroke="${color}" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"></path><text x="145.5" y="196" text-anchor="middle" font-family="'Times New Roman', Times, serif" font-size="64" letter-spacing="1" fill="${color}">Serve</text><text x="147.2" y="228" text-anchor="middle" font-family="'Times New Roman', Times, serif" font-size="16" letter-spacing="4.3" fill="${color}">GREATER BOSTON</text></svg>`;
 
-/* ---------- the Boston Night hero (design/serve/DESIGN.md §5) ----------
-   This repo's <BostonNightHero>: a port of design/serve/reference/waitlist.html.
-   It is drawn entirely here, with the reference's own numbers (stars, seven
-   logo lanes, the Charles and four boats), so a page ships no extra script
-   and looks finished on first paint. The motion is CSS from serve-tokens.css
-   and stops under prefers-reduced-motion.
+/* ---------- the Boston Night hero (DESIGN.md §5, HOME_SPEC.md §4) ----------
+   This repo's <BostonNightHero>, one component with the two scenes the design
+   kit ships:
+     variant "home"      design/serve/reference/home.html, the marketplace.
+                         About 500px, white accents and NO GOLD (HOME_SPEC.md
+                         §6). Logos drift in a masked band either side of the
+                         headline; each card carries data-slug, data-op and
+                         data-blur so marketplace-client.js can light up the
+                         companies that match a search by changing styles only,
+                         never restarting the drift.
+     variant "waitlist"  design/serve/reference/waitlist.html. 960px, glass
+                         card, gold. Waitlist and print only: never on a
+                         marketplace screen.
+   Both are drawn here with the references' own numbers, so no script builds
+   the scene and it looks finished on first paint. Motion is CSS and stops
+   under prefers-reduced-motion.
 
    Options:
+     variant    "home" | "waitlist" (default).
      partners   publicProvider() objects, i.e. D1 rows through the whitelist.
                 Never a hard-coded list: the sky grows as the network grows.
      form       markup the CALLER writes; the one slot that is not escaped.
      speed      motion multiplier, 0.25 to 4 (DESIGN.md §7). Default 1.
-     eyebrow, title, accent, intro, opening   text, always escaped.
+     eyebrow, title, accent, intro, opening   text, always escaped (accent,
+                intro and opening are waitlist-only).
      navLinks   [{ href, label, ghost }], same-site hrefs only.
-     compact    a shorter scene for pages whose content starts right below
-                (founder, 2026-11-07: the directory took too much scrolling).
-                Lanes, boats and ripples are scaled to the smaller sky and river.
-   The partner count is printed only when there are partners: DESIGN.md §9,
-   never invent a number. */
+   The waitlist's partner count is printed only when there are partners:
+   DESIGN.md §9, never invent a number. */
 const BN_SKYLINE = "M0,300 V240 H36 V222 H78 V255 H108 V196 H126 V150 H162 V196 H186 V244 H214 V120 H236 V96 H262 V88 H300 V132 H322 V174 H344 V150 H372 V210 H396 V250 H430 V168 H448 V120 L458,92 L468,120 H486 V168 H500 V236 H540 V206 H612 A28,28 0 0 1 668,206 H690 V240 H720 V214 H744 V150 L754,110 L764,150 H784 V214 H800 V246 H840 V190 H878 V210 H906 V160 H944 V128 H980 V186 H1010 V232 H1046 V204 H1080 V226 H1120 V246 H1160 V236 H1200 V300 Z";
-/* Lane order is the reference's, which interleaves near and far lanes so
+/* Lane order is each reference's own, which interleaves near and far lanes so
    neighbouring logos never share a depth. */
-const BN_LANES = [
-  { top: 6, h: 46, op: 0.38, dur: 120, blur: 1.2, z: 1 },
-  { top: 128, h: 62, op: 0.62, dur: 92, blur: 0.4, z: 3 },
-  { top: 62, h: 52, op: 0.46, dur: 108, blur: 0.9, z: 2 },
-  { top: 236, h: 76, op: 0.85, dur: 74, blur: 0, z: 4 },
-  { top: 330, h: 50, op: 0.44, dur: 112, blur: 1, z: 2 },
-  { top: 412, h: 66, op: 0.70, dur: 84, blur: 0.2, z: 3 },
-  { top: 182, h: 44, op: 0.34, dur: 130, blur: 1.3, z: 1 },
-];
-const BN_BOATS = [
-  { bottom: 70, w: 30, dur: 160, at: 0.25, back: true, main: "#cbd5e1", jib: "#94a3b8", op: 0.55 },
-  { bottom: 52, w: 44, dur: 118, at: 0.70, back: false, main: "#e5e7eb", jib: "#cbd5e1", op: 0.75 },
-  { bottom: 34, w: 58, dur: 96, at: 0.10, back: false, main: "var(--serve-gold)", jib: "#e5e7eb", op: 0.90 },
-  { bottom: 16, w: 74, dur: 140, at: 0.55, back: true, main: "#f3f4f6", jib: "#cbd5e1", op: 0.95 },
-];
+const BN_SCENES = {
+  waitlist: {
+    stars: 46, starSpan: 92, waves: 14, waveTop: (i) => 18 + ((i * 29) % 92), logoInset: 18, wake: true,
+    lanes: [
+      { top: 6, h: 46, op: 0.38, dur: 120, blur: 1.2, z: 1 }, { top: 128, h: 62, op: 0.62, dur: 92, blur: 0.4, z: 3 },
+      { top: 62, h: 52, op: 0.46, dur: 108, blur: 0.9, z: 2 }, { top: 236, h: 76, op: 0.85, dur: 74, blur: 0, z: 4 },
+      { top: 330, h: 50, op: 0.44, dur: 112, blur: 1, z: 2 }, { top: 412, h: 66, op: 0.70, dur: 84, blur: 0.2, z: 3 },
+      { top: 182, h: 44, op: 0.34, dur: 130, blur: 1.3, z: 1 },
+    ],
+    boats: [
+      { bottom: 70, w: 30, dur: 160, at: 0.25, back: true, main: "#cbd5e1", jib: "#94a3b8", op: 0.55 },
+      { bottom: 52, w: 44, dur: 118, at: 0.70, back: false, main: "#e5e7eb", jib: "#cbd5e1", op: 0.75 },
+      { bottom: 34, w: 58, dur: 96, at: 0.10, back: false, main: "var(--serve-gold)", jib: "#e5e7eb", op: 0.90 },
+      { bottom: 16, w: 74, dur: 140, at: 0.55, back: true, main: "#f3f4f6", jib: "#cbd5e1", op: 0.95 },
+    ],
+  },
+  home: {
+    stars: 40, starSpan: 70, waves: 10, waveTop: (i) => 8 + ((i * 13) % 56), logoInset: 14, wake: false,
+    lanes: [
+      { top: 4, h: 40, op: 0.42, dur: 120, blur: 1, z: 1 }, { top: 70, h: 52, op: 0.66, dur: 90, blur: 0.3, z: 3 },
+      { top: 36, h: 44, op: 0.5, dur: 106, blur: 0.8, z: 2 }, { top: 128, h: 60, op: 0.86, dur: 78, blur: 0, z: 4 },
+      { top: 186, h: 42, op: 0.44, dur: 112, blur: 0.9, z: 2 }, { top: 104, h: 46, op: 0.6, dur: 96, blur: 0.4, z: 3 },
+      { top: 168, h: 38, op: 0.36, dur: 128, blur: 1.2, z: 1 },
+    ],
+    boats: [   // all white and grey: HOME_SPEC.md §4, none gold
+      { bottom: 52, w: 24, dur: 160, at: 0.25, back: true, main: "#cbd5e1", jib: "#94a3b8", op: 0.55 },
+      { bottom: 38, w: 34, dur: 118, at: 0.70, back: false, main: "#e5e7eb", jib: "#cbd5e1", op: 0.75 },
+      { bottom: 22, w: 46, dur: 96, at: 0.10, back: false, main: "#ffffff", jib: "#e5e7eb", op: 0.95 },
+      { bottom: 8, w: 56, dur: 140, at: 0.55, back: true, main: "#f3f4f6", jib: "#cbd5e1", op: 0.95 },
+    ],
+  },
+};
 const ARROW_SVG = `<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>`;
 
 export function renderBostonNightHero(opts) {
   const o = opts || {};
+  const home = o.variant === "home";
+  const S = home ? BN_SCENES.home : BN_SCENES.waitlist;
   const raw = Number(o.speed);
   const speed = raw > 0 ? Math.min(Math.max(raw, 0.25), 4) : 1;
-  const s = (n) => (Math.round(n * 100) / 100) + "s";
+  const sec = (n) => (Math.round(n * 100) / 100) + "s";
   const partners = (o.partners || []).filter((p) => p && p.name);
   const sameSite = (h) => /^(\/|#)[^\s"'<>]*$/.test(String(h || "")) ? String(h) : "";
-  const compact = !!o.compact;
-  const sky = compact ? 0.62 : 1;     // lane tops: the logo band is 350px, not 560
-  const card = compact ? 0.82 : 1;    // logo card heights
-  const water = compact ? 0.6 : 1;    // the river is 72px, not 120: boats and ripples
 
   let stars = "";
-  for (let i = 0; i < 46; i++) {
+  for (let i = 0; i < S.stars; i++) {
     const size = i % 6 === 0 ? 2.5 : i % 3 === 0 ? 2 : 1.4;
-    stars += `<span class="serve-star" style="left:${((i * 37.3 + (i % 5) * 11) % 100).toFixed(1)}%;top:${((i * 19.7 + (i % 7) * 5) % 92).toFixed(1)}%;width:${size}px;height:${size}px;animation-duration:${3 + (i % 5)}s;animation-delay:${s(-(i * 0.7))}"></span>`;
+    stars += `<span class="serve-star" style="left:${((i * 37.3 + (i % 5) * 11) % 100).toFixed(1)}%;top:${((i * 19.7 + (i % 7) * 5) % S.starSpan).toFixed(1)}%;width:${size}px;height:${size}px;animation-duration:${3 + (i % 5)}s;animation-delay:${sec(-(i * 0.7))}"></span>`;
   }
 
   const logos = partners.map((p, i) => {
-    const lane = BN_LANES[i % BN_LANES.length];
-    const L = Object.assign({}, lane, { top: Math.round(lane.top * sky), h: Math.round(lane.h * card) });
+    const L = S.lanes[i % S.lanes.length];
     const dur = L.dur / speed;
     const frac = ((i * 0.618) + (i % 2 ? 0.5 : 0)) % 1;
     const bg = safeHex(p.logoBg, "#ffffff");
     const src = safeImagePath(p.logo);
     const inner = src
-      ? `<img src="${esc(src)}" alt="" loading="lazy" style="height:${L.h - 18}px;max-width:${Math.round(L.h * 2.6)}px">`
+      ? `<img src="${esc(src)}" alt="" loading="lazy" style="height:${L.h - S.logoInset}px;max-width:${Math.round(L.h * 2.6)}px">`
       : `<span class="bn-logo-name${bg.toLowerCase() === "#ffffff" ? "" : " bn-logo-name--on-dark"}">${esc(p.name)}</span>`;
-    return `<div class="serve-drift" style="top:${L.top}px;z-index:${L.z};animation-duration:${s(dur)};animation-delay:${s(-(frac * dur))}">` +
-      `<div class="serve-bob" style="animation-duration:${s(5 + (i % 4) * 1.3)};animation-delay:${s(-(i * 0.9))}">` +
-      `<div class="serve-logo-card" style="height:${L.h}px;background:${bg};opacity:${L.op};filter:blur(${L.blur}px)">${inner}</div></div></div>`;
+    const cardAttrs = home
+      ? `class="bn-lc" data-slug="${esc(p.slug)}" data-op="${L.op}" data-blur="${L.blur}"`
+      : `class="serve-logo-card"`;
+    return `<div class="serve-drift" style="top:${L.top}px;z-index:${L.z};animation-duration:${sec(dur)};animation-delay:${sec(-(frac * dur))}">` +
+      `<div class="serve-bob" style="animation-duration:${sec(5 + (i % 4) * 1.3)};animation-delay:${sec(-(i * 0.9))}">` +
+      `<div ${cardAttrs} style="height:${L.h}px;background:${bg};opacity:${L.op};filter:blur(${L.blur}px)">${inner}</div></div></div>`;
   }).join("");
 
   let river = "";
-  for (let i = 0; i < 14; i++) {
-    river += `<span class="serve-wave" style="left:${((i * 23.7) % 96).toFixed(1)}%;top:${Math.round((18 + ((i * 29) % 92)) * water)}px;width:${30 + (i % 4) * 22}px;animation-duration:${s(4 + (i % 3) * 1.5)};animation-delay:${s(-(i * 0.8))}"></span>`;
+  for (let i = 0; i < S.waves; i++) {
+    river += `<span class="serve-wave" style="left:${((i * 23.7) % 96).toFixed(1)}%;top:${S.waveTop(i)}px;width:${30 + (i % 4) * 22}px;animation-duration:${sec(4 + (i % 3) * 1.5)};animation-delay:${sec(-(i * 0.8))}"></span>`;
   }
-  river += BN_BOATS.map((b) => {
+  river += S.boats.map((b) => {
     const dur = b.dur / speed;
-    const w = Math.round(b.w * (compact ? 0.8 : 1));
-    return `<div class="serve-boat" style="bottom:${Math.round(b.bottom * water)}px;opacity:${b.op};animation-name:${b.back ? "serve-sail-back" : "serve-sail"};animation-duration:${s(dur)};animation-delay:${s(-(b.at * dur))}">` +
-      `<div class="serve-rock" style="animation-duration:${s(3.5 + b.w / 30)}"><svg viewBox="0 0 60 60" width="${w}" height="${w}"${b.back ? ` style="transform:scaleX(-1)"` : ""}>` +
-      `<line x1="30" y1="5" x2="30" y2="45" stroke="#cbd5e1" stroke-width="1.4"/><path d="M31.5 7 L31.5 43 L53 43 Z" fill="${b.main}"/><path d="M28.5 13 L28.5 43 L11 43 Z" fill="${b.jib}"/><path d="M5 45 H55 L49 53 H11 Z" fill="#cbd5e1"/><path d="M14 56 H46" stroke="#e5e7eb" stroke-width="1.2" stroke-linecap="round" opacity=".35"/></svg></div></div>`;
+    return `<div class="serve-boat" style="bottom:${b.bottom}px;opacity:${b.op};animation-name:${b.back ? "serve-sail-back" : "serve-sail"};animation-duration:${sec(dur)};animation-delay:${sec(-(b.at * dur))}">` +
+      `<div class="serve-rock" style="animation-duration:${sec(3.5 + b.w / 30)}"><svg viewBox="0 0 60 60" width="${b.w}" height="${b.w}"${b.back ? ` style="transform:scaleX(-1)"` : ""}>` +
+      `<line x1="30" y1="5" x2="30" y2="45" stroke="#cbd5e1" stroke-width="1.4"/><path d="M31.5 7 L31.5 43 L53 43 Z" fill="${b.main}"/><path d="M28.5 13 L28.5 43 L11 43 Z" fill="${b.jib}"/><path d="M5 45 H55 L49 53 H11 Z" fill="#cbd5e1"/>` +
+      (S.wake ? `<path d="M14 56 H46" stroke="#e5e7eb" stroke-width="1.2" stroke-linecap="round" opacity=".35"/>` : "") +
+      `</svg></div></div>`;
   }).join("");
 
   const links = (o.navLinks || []).map((l) => {
@@ -590,13 +645,7 @@ export function renderBostonNightHero(opts) {
       : `<a class="bn-nav__link" href="${esc(href)}">${esc(l.label)}</a>`;
   }).join("");
 
-  const status = [
-    o.opening ? `<span class="bn-status__item"><span class="bn-live"></span>Now opening in ${esc(o.opening)}</span>` : "",
-    partners.length ? `<span class="bn-status__item"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--serve-gold)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg>${partners.length} trusted local ${partners.length === 1 ? "company" : "companies"} in the network</span>` : "",
-  ].join("");
-
-  return `<section class="serve-sky bn-hero${compact ? " bn-hero--compact" : ""}" aria-labelledby="bn-h">
-<svg width="0" height="0" class="bn-defs" aria-hidden="true"><defs><path id="bn-skyline" d="${BN_SKYLINE}"/></defs></svg>
+  const scene = `<svg width="0" height="0" class="bn-defs" aria-hidden="true"><defs><path id="bn-skyline" d="${BN_SKYLINE}"/></defs></svg>
 <div aria-hidden="true" class="bn-stars">${stars}</div>
 <div aria-hidden="true" class="bn-glow"></div>
 <div aria-hidden="true" class="bn-logos">${logos}</div>
@@ -606,7 +655,25 @@ export function renderBostonNightHero(opts) {
 <nav aria-label="Main" class="bn-nav"><div class="bn-nav__inner">
 <a href="/" class="bn-wordmark" aria-label="Serve home"><svg aria-hidden="true" width="34" height="30" viewBox="80 22 130 104"><path d="M 88 120 L 88 78 L 145 30 L 202 78 L 202 118" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Serve</span></a>
 ${links ? `<div class="bn-nav__links">${links}</div>` : ""}
-</div></nav>
+</div></nav>`;
+
+  if (home) {
+    return `<section class="serve-sky bn-hero bn-hero--home" aria-labelledby="bn-h">
+${scene}
+<div class="bn-home">
+${o.eyebrow ? `<div class="bn-home__eyebrow">${esc(o.eyebrow)}</div>` : ""}
+<h1 id="bn-h" class="bn-home__title">${esc(o.title || "")}</h1>
+${o.form || ""}
+</div>
+</section>`;
+  }
+
+  const status = [
+    o.opening ? `<span class="bn-status__item"><span class="bn-live"></span>Now opening in ${esc(o.opening)}</span>` : "",
+    partners.length ? `<span class="bn-status__item"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--serve-gold)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg>${partners.length} trusted local ${partners.length === 1 ? "company" : "companies"} in the network</span>` : "",
+  ].join("");
+  return `<section class="serve-sky bn-hero" aria-labelledby="bn-h">
+${scene}
 <div class="bn-body"><div class="serve-glass bn-glass">
 ${o.eyebrow ? `<div class="serve-eyebrow ruled">${esc(o.eyebrow)}</div>` : ""}
 <h1 id="bn-h" class="serve-display bn-title">${esc(o.title || "")}${o.accent ? `<br><span class="accent">${esc(o.accent)}</span>` : ""}</h1>
@@ -615,6 +682,74 @@ ${o.form || ""}
 ${status ? `<div class="bn-status">${status}</div>` : ""}
 </div></div>
 </section>`;
+}
+
+/* ---------- the marketplace home's other components (HOME_SPEC.md §2, §5) ---------- */
+
+/* Not built yet: the /waitlist page (design kit README, prompt 2). Until it
+   exists the empty state offers Instant Booking only, rather than a link that
+   404s. Set this to "/waitlist" when the page ships. */
+const WAITLIST_HREF = "";
+
+/** Area: type a neighborhood or ZIP, or pick a popular area. The page script
+    fills the list (with live company counts) from the #mk-areas data. The
+    input has NO name: what someone types never reaches a URL, a log or a
+    cache key, even when scripts are off. */
+export function renderAreaCombobox() {
+  return `<div class="mk-row">
+<label class="mk-flt" for="mk-area">Area</label>
+<div class="mk-combo" data-combo>
+<svg class="mk-combo__pin" aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>
+<input class="mk-combo__input" id="mk-area" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="mk-area-list" autocomplete="off" maxlength="40" enterkeyhint="search" placeholder="Neighborhood or ZIP">
+<button class="mk-combo__chev" type="button" aria-label="Show popular areas" aria-expanded="false" aria-controls="mk-area-list" data-chev><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#374151" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button>
+<div class="mk-combo__list" id="mk-area-list" role="listbox" aria-label="Popular areas" hidden></div>
+</div>
+<a class="mk-btn mk-btn--white" href="#providers" data-find>Find Providers ${ARROW_SVG}</a>
+</div>`;
+}
+
+/** Service: All (default) then the five SERVICE_TAGS, as aria-pressed pills. */
+export function renderServiceChips() {
+  return `<div class="mk-row" role="group" aria-label="Service">
+<span class="mk-flt" aria-hidden="true">Service</span>
+<div class="mk-pills">${["All"].concat(SERVICE_TAGS).map((s) =>
+    `<button type="button" class="mk-pill" data-service="${esc(s)}" aria-pressed="${s === "All" ? "true" : "false"}">${esc(s)}</button>`).join("")}</div>
+</div>`;
+}
+
+/** One company. data-* carry what the page script filters on: neighborhood
+    slugs, regions and service tags, all already whitelisted by publicProvider. */
+export function renderProviderCard(p, opts) {
+  const key = (opts && opts.previewKey) || "";
+  const href = esc(withPreview("/providers/" + p.slug, key));
+  const estimate = esc(withPreview("/providers/" + p.slug + "#estimate", key));
+  const tags = p.serviceTags.length ? p.serviceTags.slice(0, 3) : p.services.slice(0, 3);
+  const meta = (p.rating ? `<b>&#9733; ${esc(p.rating.toFixed(1))}</b><span>${esc(p.reviewCount)} ${esc(p.ratingSource)} reviews</span>` : "") +
+    (p.yearsLabel ? `<span>${p.rating ? "&middot; " : ""}${esc(p.yearsLabel)}</span>` : "");
+  const dark = p.logoBg.toLowerCase() !== "#ffffff";
+  return `<article class="pc" data-slug="${esc(p.slug)}" data-areas="${esc(p.serviceAreas.join(" "))}" data-regions="${esc(p.regions.join(" "))}" data-tags="${esc(p.serviceTags.join("|"))}">
+<a class="pc__plate" href="${href}" style="background:${p.logoBg};border-top-color:${p.brandColor}" aria-label="${esc(p.name)} profile">${p.logo ? `<img src="${esc(p.logo)}" alt="" loading="lazy">` : `<span class="pc__mono${dark ? " pc__mono--on-dark" : ""}">${esc(p.name)}</span>`}</a>
+<div class="pc__body">
+<div class="pc__head"><h3 class="pc__name">${esc(p.name)}</h3>${p.areaShort ? `<div class="pc__area">${esc(p.areaShort)}</div>` : ""}</div>
+${meta ? `<div class="pc__meta">${meta}</div>` : ""}
+${p.tagline ? `<p class="pc__tagline">${esc(p.tagline)}</p>` : ""}
+${tags.length ? `<div class="pc__tags">${tags.map((t) => `<span class="pc__tag">${esc(t)}</span>`).join("")}</div>` : ""}
+<div class="pc__foot"><div><div class="pc__pl">${esc(p.priceLabel)}</div><div class="pc__pv">${esc(p.priceValue)}</div></div>${p.cardNote ? `<div class="pc__note">&#10003; ${esc(p.cardNote)}</div>` : ""}</div>
+<div class="pc__actions"><a class="mk-btn mk-btn--outline" href="${href}">View Profile</a><a class="mk-btn mk-btn--slate" href="${estimate}">Get Estimate</a></div>
+</div>
+</article>`;
+}
+
+/** The grid, plus the empty state the page script shows when nothing matches.
+    Never a dead end: Instant Booking is always offered. */
+export function renderProviderGrid(list, opts) {
+  const none = !list.length;
+  return `<div class="pc-grid" data-cards>${list.map((p) => renderProviderCard(p, opts)).join("\n")}</div>
+<div class="mk-empty" data-empty${none ? "" : " hidden"}>
+<div class="mk-empty__title" data-empty-title>${none ? "Book instantly in the meantime." : ""}</div>
+<p>Serve opens neighborhood by neighborhood. Book instantly and we'll find a trusted company for you${WAITLIST_HREF ? ", or join the list for your area" : ""}.</p>
+<div class="mk-empty__actions"><a class="mk-btn mk-btn--slate" href="/#quote">Instant Booking</a>${WAITLIST_HREF ? `<a class="mk-btn mk-btn--outline" href="${WAITLIST_HREF}">Join the waitlist</a>` : ""}</div>
+</div>`;
 }
 
 function shell({ title, description, canonical, noindex, body, jsonLd, night }) {
@@ -638,7 +773,7 @@ ${night ? `<link rel="stylesheet" href="/serve-tokens.css">` : ""}
 <link rel="stylesheet" href="/marketplace.css">
 ${jsonLd ? `<script type="application/ld+json">${JSON.stringify(jsonLd).replace(/</g, "\\u003c")}</script>` : ""}
 </head>
-<body class="mk">
+<body class="mk${night ? " mk--home" : ""}">
 ${night ? "" : `<nav class="nav">
 <div class="nav__inner">
 <a href="/" class="nav__logo">Serve</a>
@@ -691,77 +826,58 @@ function notFound() {
   });
 }
 
+/** The marketplace home (/providers): design/serve/HOME_SPEC.md, reference
+    design/serve/reference/home.html. Headline → search → results in one flow.
+    Everything shown is rendered here, so the page is complete without
+    scripts; marketplace-client.js adds the live filtering on top.
+
+    opts.areas / opts.zips come from the neighborhoods tables (migration 0002)
+    and are handed to the page script as JSON for matching and the dropdown. */
 export function renderDirectory(providers, opts) {
+  const o = opts || {};
   const list = providers || [];
-  const key = (opts && opts.previewKey) || "";
-  const href = (slug, hash) => esc(withPreview("/providers/" + slug + (hash || ""), key));
+  const key = o.previewKey || "";
+  const n = list.length;
   const drafts = list.filter((p) => p.isDraft).length;
-  const chips = (name, items) => items.map(([k, label], i) =>
-    `<button type="button" class="mk-chip" data-filter="${name}" data-value="${esc(k)}" aria-pressed="${i === 0 ? "true" : "false"}">${esc(label)}</button>`).join("");
-  const cards = list.map((p) => {
-    const tags = p.serviceTags.slice(0, 3).length ? p.serviceTags.slice(0, 3) : p.services.slice(0, 3);
-    return `<article class="mk-card" data-regions="${esc(p.regions.join(" "))}" data-tags="${esc(p.serviceTags.join("|"))}">
-${p.isDraft ? `<span class="mk-draft">Draft · not public</span>` : ""}
-<a class="mk-card__logo" href="${href(p.slug)}" style="background:${p.logoBg};border-top-color:${p.brandColor}" aria-label="${esc(p.name)}">${p.logo ? `<img src="${esc(p.logo)}" alt="" loading="lazy">` : `<span class="mk-card__mono">${esc(p.name.charAt(0))}</span>`}</a>
-<div class="mk-card__body">
-<h2 class="mk-card__name"><a href="${href(p.slug)}">${esc(p.name)}</a></h2>
-${p.areaShort ? `<p class="mk-card__area">${esc(p.areaShort)}</p>` : ""}
-<p class="mk-card__meta">${p.rating ? `<strong>&#9733; ${esc(p.rating.toFixed(1))}</strong> <span>${esc(p.reviewCount)} ${esc(p.ratingSource)} reviews</span>` : ""}${p.yearsLabel ? `<span>${esc(p.yearsLabel)}</span>` : ""}</p>
-<p class="mk-card__tagline">${esc(p.tagline)}</p>
-<ul class="mk-tags">${tags.map((t) => `<li>${esc(t)}</li>`).join("")}</ul>
-<div class="mk-card__foot"><div><span class="mk-label">${esc(p.priceLabel)}</span><strong>${esc(p.priceValue)}</strong></div>${p.cardNote ? `<span class="mk-card__note">&#10003; ${esc(p.cardNote)}</span>` : ""}</div>
-<div class="mk-card__actions"><a class="btn btn--ghost" href="${href(p.slug)}">View Profile</a><a class="btn btn--primary" href="${href(p.slug, "#estimate")}">Get Estimate</a></div>
-</div>
-</article>`;
-  }).join("\n");
+  const companies = (k) => k + " trusted " + (k === 1 ? "company" : "companies");
 
   const banner = key ? `<div class="mk-preview" role="note"><strong>Preview.</strong> Showing every company, including ${drafts} ${drafts === 1 ? "draft" : "drafts"} the public cannot see. This page is not indexed and not cached. Don't share this link.</div>` : "";
-  /* DESIGN.md §8, marketplace home: the Boston Night hero, with the search
-     form in place of the waitlist form. Founder preview only for now
-     (?preview=…&hero=night); the public directory keeps the slate hero. The
-     form keeps the data-find hook and the nameless input of the slate one. */
-  const night = !!(key && opts && opts.night);
-  const hero = night ? renderBostonNightHero({
+  const hero = renderBostonNightHero({
+    variant: "home",
     partners: list,
-    compact: true,
     eyebrow: "Greater Boston",
-    title: "Boston's most trusted",
-    accent: "cleaners.",
-    navLinks: [{ href: withPreview("/providers", key), label: "Find a Provider" },
-      { href: "/#quote", label: "Instant Booking", ghost: true }],
-    form: `<form class="bn-find" action="/providers" method="get" role="search" data-find>
-<label class="sr-only" for="mk-near">Neighborhood or ZIP</label>
-<input class="serve-input" id="mk-near" type="text" placeholder="Neighborhood or ZIP" maxlength="40" autocomplete="off" enterkeyhint="search">
-<button class="serve-btn serve-btn-gold" type="submit">Find Providers ${ARROW_SVG}</button>
-</form>
-<p class="bn-instant">No time to waste? <a href="/#quote">Instantly book in under 1 minute</a> and we'll handle your booking.</p>`,
-  }) : `<section class="mk-hero"><div class="mk-wrap">
-${LOGO_SVG("#ffffff", 104)}
-<h1 class="mk-hl">Boston's Most Trusted Cleaners</h1>
-<form class="mk-find" action="/providers" method="get" role="search" data-find>
-<label class="sr-only" for="mk-near">Neighborhood or ZIP</label>
-<input id="mk-near" type="text" placeholder="Neighborhood or ZIP" maxlength="40" autocomplete="off" enterkeyhint="search">
-<button class="btn btn--primary" type="submit">Find Providers</button>
-</form>
-<p class="mk-hero__instant">No time to waste? <a href="/#quote">Instantly book in under 1 minute</a> and we'll handle your booking.</p>
-</div></section>`;
+    title: "Boston's most trusted home cleaners.",
+    navLinks: [{ href: "#providers", label: "Find a Provider" }, { href: "/#quote", label: "Instant Booking", ghost: true }],
+    form: `<div class="mk-panel">${renderAreaCombobox()}${renderServiceChips()}</div>`,
+  });
+  const areaData = {
+    areas: (o.areas || []).map((a) => ({ slug: a.slug, name: a.name, region: a.region, parent: a.parent || "", rank: a.rank || 0 })),
+    zips: o.zips || {},
+  };
+
   const body = `${banner}${hero}
-<section class="mk-section" id="providers"><div class="mk-wrap">
-<div class="mk-filters" role="group" aria-label="Filter providers">
-<div class="mk-filters__row"><span class="mk-label">Area</span>${chips("region", [["all", "All areas"]].concat(REGIONS))}</div>
-<div class="mk-filters__row"><span class="mk-label">Service</span>${chips("tag", [["all", "All"]].concat(SERVICE_TAGS.map((t) => [t, t])))}</div>
+<section class="mk-results" id="providers" aria-labelledby="mk-results-h"><div class="mk-results__wrap">
+<div class="mk-rhead">
+<div class="mk-rhead__title"><h2 id="mk-results-h" data-results-h>${n ? companies(n) + " across Greater Boston" : "Companies are joining Serve now."}</h2>
+<button class="mk-linkbtn" type="button" data-clear hidden>Show all of Greater Boston</button></div>
+${n ? `<span class="mk-live" data-live aria-live="polite">${companies(n)}, live now</span>` : ""}
 </div>
-<p class="mk-count" aria-live="polite">Showing <strong data-count>${list.length}</strong> of ${list.length} ${list.length === 1 ? "company" : "companies"}<span class="mk-near" data-near hidden></span></p>
-${list.length ? `<div class="mk-grid">${cards}</div>` : `<p class="mk-empty">Companies are being added now. <a href="/#quote">Book instantly</a> in the meantime.</p>`}
-<p class="mk-empty" data-empty hidden>No companies match both filters yet. <a href="/#quote">Try Instant Booking</a> and Serve will find one.</p>
-</div></section>`;
+${renderProviderGrid(list, { previewKey: key })}
+</div></section>
+<section class="mk-instant" aria-labelledby="mk-instant-h">
+<div class="mk-instant__eyebrow">Instant Booking</div>
+<h2 id="mk-instant-h">No time to compare?</h2>
+<p>Book in under a minute and Serve picks the right company for your home.</p>
+<a class="mk-btn mk-btn--white" href="/#quote">Get an Instant Price</a>
+</section>
+<script type="application/json" id="mk-areas">${JSON.stringify(areaData).replace(/</g, "\\u003c")}</script>`;
 
   return shell({
-    title: "Find a Home Cleaning Provider in Greater Boston — Serve",
-    description: "Compare local, owner-run cleaning companies across Greater Boston and request a free estimate by phone or walkthrough through Serve.",
+    title: "Boston's Most Trusted Home Cleaners — Serve",
+    description: "Compare local, owner-run cleaning companies across Greater Boston by neighborhood or ZIP, and request a free estimate by phone or walkthrough through Serve.",
     canonical: key ? "" : "https://servecleaning.com/providers",
     noindex: !!key,
-    night,
+    night: true,
     body,
     jsonLd: key ? null : {
       "@context": "https://schema.org", "@type": "ItemList",
