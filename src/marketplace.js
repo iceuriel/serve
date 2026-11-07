@@ -513,6 +513,9 @@ const LOGO_SVG = (color, width) =>
      speed      motion multiplier, 0.25 to 4 (DESIGN.md §7). Default 1.
      eyebrow, title, accent, intro, opening   text, always escaped.
      navLinks   [{ href, label, ghost }], same-site hrefs only.
+     compact    a shorter scene for pages whose content starts right below
+                (founder, 2026-11-07: the directory took too much scrolling).
+                Lanes, boats and ripples are scaled to the smaller sky and river.
    The partner count is printed only when there are partners: DESIGN.md §9,
    never invent a number. */
 const BN_SKYLINE = "M0,300 V240 H36 V222 H78 V255 H108 V196 H126 V150 H162 V196 H186 V244 H214 V120 H236 V96 H262 V88 H300 V132 H322 V174 H344 V150 H372 V210 H396 V250 H430 V168 H448 V120 L458,92 L468,120 H486 V168 H500 V236 H540 V206 H612 A28,28 0 0 1 668,206 H690 V240 H720 V214 H744 V150 L754,110 L764,150 H784 V214 H800 V246 H840 V190 H878 V210 H906 V160 H944 V128 H980 V186 H1010 V232 H1046 V204 H1080 V226 H1120 V246 H1160 V236 H1200 V300 Z";
@@ -542,6 +545,10 @@ export function renderBostonNightHero(opts) {
   const s = (n) => (Math.round(n * 100) / 100) + "s";
   const partners = (o.partners || []).filter((p) => p && p.name);
   const sameSite = (h) => /^(\/|#)[^\s"'<>]*$/.test(String(h || "")) ? String(h) : "";
+  const compact = !!o.compact;
+  const sky = compact ? 0.62 : 1;     // lane tops: the logo band is 350px, not 560
+  const card = compact ? 0.82 : 1;    // logo card heights
+  const water = compact ? 0.6 : 1;    // the river is 72px, not 120: boats and ripples
 
   let stars = "";
   for (let i = 0; i < 46; i++) {
@@ -550,7 +557,8 @@ export function renderBostonNightHero(opts) {
   }
 
   const logos = partners.map((p, i) => {
-    const L = BN_LANES[i % BN_LANES.length];
+    const lane = BN_LANES[i % BN_LANES.length];
+    const L = Object.assign({}, lane, { top: Math.round(lane.top * sky), h: Math.round(lane.h * card) });
     const dur = L.dur / speed;
     const frac = ((i * 0.618) + (i % 2 ? 0.5 : 0)) % 1;
     const bg = safeHex(p.logoBg, "#ffffff");
@@ -565,12 +573,13 @@ export function renderBostonNightHero(opts) {
 
   let river = "";
   for (let i = 0; i < 14; i++) {
-    river += `<span class="serve-wave" style="left:${((i * 23.7) % 96).toFixed(1)}%;top:${18 + ((i * 29) % 92)}px;width:${30 + (i % 4) * 22}px;animation-duration:${s(4 + (i % 3) * 1.5)};animation-delay:${s(-(i * 0.8))}"></span>`;
+    river += `<span class="serve-wave" style="left:${((i * 23.7) % 96).toFixed(1)}%;top:${Math.round((18 + ((i * 29) % 92)) * water)}px;width:${30 + (i % 4) * 22}px;animation-duration:${s(4 + (i % 3) * 1.5)};animation-delay:${s(-(i * 0.8))}"></span>`;
   }
   river += BN_BOATS.map((b) => {
     const dur = b.dur / speed;
-    return `<div class="serve-boat" style="bottom:${b.bottom}px;opacity:${b.op};animation-name:${b.back ? "serve-sail-back" : "serve-sail"};animation-duration:${s(dur)};animation-delay:${s(-(b.at * dur))}">` +
-      `<div class="serve-rock" style="animation-duration:${s(3.5 + b.w / 30)}"><svg viewBox="0 0 60 60" width="${b.w}" height="${b.w}"${b.back ? ` style="transform:scaleX(-1)"` : ""}>` +
+    const w = Math.round(b.w * (compact ? 0.8 : 1));
+    return `<div class="serve-boat" style="bottom:${Math.round(b.bottom * water)}px;opacity:${b.op};animation-name:${b.back ? "serve-sail-back" : "serve-sail"};animation-duration:${s(dur)};animation-delay:${s(-(b.at * dur))}">` +
+      `<div class="serve-rock" style="animation-duration:${s(3.5 + b.w / 30)}"><svg viewBox="0 0 60 60" width="${w}" height="${w}"${b.back ? ` style="transform:scaleX(-1)"` : ""}>` +
       `<line x1="30" y1="5" x2="30" y2="45" stroke="#cbd5e1" stroke-width="1.4"/><path d="M31.5 7 L31.5 43 L53 43 Z" fill="${b.main}"/><path d="M28.5 13 L28.5 43 L11 43 Z" fill="${b.jib}"/><path d="M5 45 H55 L49 53 H11 Z" fill="#cbd5e1"/><path d="M14 56 H46" stroke="#e5e7eb" stroke-width="1.2" stroke-linecap="round" opacity=".35"/></svg></div></div>`;
   }).join("");
 
@@ -586,7 +595,7 @@ export function renderBostonNightHero(opts) {
     partners.length ? `<span class="bn-status__item"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--serve-gold)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg>${partners.length} trusted local ${partners.length === 1 ? "company" : "companies"} in the network</span>` : "",
   ].join("");
 
-  return `<section class="serve-sky bn-hero" aria-labelledby="bn-h">
+  return `<section class="serve-sky bn-hero${compact ? " bn-hero--compact" : ""}" aria-labelledby="bn-h">
 <svg width="0" height="0" class="bn-defs" aria-hidden="true"><defs><path id="bn-skyline" d="${BN_SKYLINE}"/></defs></svg>
 <div aria-hidden="true" class="bn-stars">${stars}</div>
 <div aria-hidden="true" class="bn-glow"></div>
@@ -714,6 +723,7 @@ ${p.areaShort ? `<p class="mk-card__area">${esc(p.areaShort)}</p>` : ""}
   const night = !!(key && opts && opts.night);
   const hero = night ? renderBostonNightHero({
     partners: list,
+    compact: true,
     eyebrow: "Greater Boston",
     title: "Boston's most trusted",
     accent: "cleaners.",

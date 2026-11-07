@@ -322,6 +322,13 @@ console.log('\n=== 4c. the Boston Night hero (design/serve/DESIGN.md §5) ===');
   t('speed 2 halves them', durs(hero({ title: 'T', partners: many, speed: 2 }))[0] === 60);
   t('a silly speed is clamped, not trusted', durs(hero({ title: 'T', partners: many, speed: 1000 }))[0] === 30 &&
     durs(hero({ title: 'T', partners: many, speed: -5 }))[0] === 120);
+  const small = hero({ title: 'T', partners: many, compact: true });
+  const smallTops = [...small.matchAll(/class="serve-drift" style="top:(\d+)px/g)].map((m) => +m[1]);
+  t('compact: the class is set and every lane fits the 350px band',
+    small.includes('bn-hero--compact') && smallTops.every((top, i) => top + Math.round([46, 62, 52, 76, 50, 66, 44][i % 7] * 0.82) <= 350), smallTops);
+  t('…and every boat sits inside the 72px river',
+    [...small.matchAll(/class="serve-boat" style="bottom:(\d+)px/g)].every((m) => +m[1] < 72));
+  t('the default scene is untouched by compact', !h.includes('bn-hero--compact'));
   t('the scene has its 46 stars, 14 ripples and 4 boats',
     (h.match(/class="serve-star"/g) || []).length === 46 && (h.match(/class="serve-wave"/g) || []).length === 14 &&
     (h.match(/class="serve-boat"/g) || []).length === 4);
@@ -338,7 +345,7 @@ console.log('\n=== 4c. the Boston Night hero (design/serve/DESIGN.md §5) ===');
   let res = await M.handleMarketplace(get('/providers?preview=' + PREVIEW + '&hero=night'), env, null,
     u('/providers?preview=' + PREVIEW + '&hero=night'));
   let html = await res.text();
-  t('the preview can show the night hero', html.includes('class="serve-sky bn-hero"') && html.includes('href="/serve-tokens.css"'));
+  t('the preview can show the night hero, compact', html.includes('class="serve-sky bn-hero bn-hero--compact"') && html.includes('href="/serve-tokens.css"'));
   t('…with one logo per company in D1', (html.match(/class="serve-logo-card"/g) || []).length === N_PARTNERS);
   t('…each logo the company\'s own file from its row', html.includes('src="/images/providers/blue-house-cleaning/logo.png"'));
   t('…the search still works (hook kept, input still nameless)',
