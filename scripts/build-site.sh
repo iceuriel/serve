@@ -96,6 +96,10 @@ cp v.html vendor.js "$OUT"/
 # profile would render unstyled and the estimate form would fall back to a
 # plain POST: working, and looking broken, in production only.
 cp marketplace.css marketplace-client.js "$OUT"/
+# The "Boston Night" design tokens (design/serve/DESIGN.md), served at one
+# stable path for any page that renders the Boston Night hero. design/serve/
+# is the source; nothing else in design/ ships.
+cp design/serve/tokens.css "$OUT"/serve-tokens.css
 # sitemap.xml lists the pages worth indexing; robots.txt points crawlers and
 # AI shopping agents at it and allows the whole public site. robots.txt is
 # fetched from the ROOT by convention — staged but not listed here, it 404s and

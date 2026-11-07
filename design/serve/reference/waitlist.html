@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Serve — your home cleaning concierge</title>
+<!-- Reference implementation of the Serve "Boston Night" system. Framework-free on purpose: port it, don't copy-paste it. -->
+<link rel="stylesheet" href="../tokens.css">
+<style>
+  body { margin: 0; background: var(--serve-night-950); font-family: var(--serve-font-body); color: var(--serve-gray-700); line-height: 1.6; }
+  * { box-sizing: border-box; }
+  a { color: #e5e7eb; } a:hover { color: #fff; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .wrap { max-width: var(--serve-max); margin: 0 auto; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; }
+  .fields { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) auto; gap: 10px; text-align: left; }
+  .lc-name { font: 800 15px var(--serve-font-display); color: #1f2937; padding: 0 6px; white-space: nowrap; }
+  .lc-name.on-dark { color: #fff; }
+  [hidden] { display: none !important; }
+  @media (max-width: 760px) {
+    .fields, .grid3 { grid-template-columns: 1fr; }
+    .glass-pad { padding: 32px 20px !important; }
+    .hero-h { font-size: 42px !important; }
+    .hide-sm { display: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<section id="join" class="serve-sky" aria-labelledby="wl-h" style="min-height:960px">
+  <div aria-hidden="true" id="stars" style="position:absolute;inset:0 0 340px 0;z-index:0"></div>
+  <div aria-hidden="true" style="position:absolute;left:0;right:0;bottom:120px;height:260px;z-index:0;background:radial-gradient(60% 100% at 50% 100%,var(--serve-gold-glow),rgba(201,169,110,0) 70%)"></div>
+  <div aria-hidden="true" id="sky-logos" style="position:absolute;left:0;right:0;top:96px;height:560px;z-index:1;overflow:hidden"></div>
+
+  <svg aria-hidden="true" viewBox="0 0 1200 300" preserveAspectRatio="none" style="position:absolute;left:0;right:0;bottom:118px;width:100%;height:200px;z-index:2;transform:scaleX(-1);color:var(--serve-night-600);opacity:.85" fill="currentColor"><use href="#skyline"/></svg>
+  <svg aria-hidden="true" viewBox="0 0 1200 300" preserveAspectRatio="none" style="position:absolute;left:0;right:0;bottom:118px;width:100%;height:250px;z-index:2;color:var(--serve-night-950)" fill="currentColor"><use href="#skyline"/></svg>
+
+  <div aria-hidden="true" id="river" style="position:absolute;left:0;right:0;bottom:0;height:120px;z-index:3;background:linear-gradient(180deg,#0b1220 0%,#111a2c 100%);overflow:hidden">
+    <svg viewBox="0 0 1200 300" preserveAspectRatio="none" style="position:absolute;left:0;top:0;width:100%;height:120px;transform:scaleY(-1);color:var(--serve-gold);opacity:.07" fill="currentColor"><use href="#skyline"/></svg>
+  </div>
+
+  <nav aria-label="Main" style="position:relative;z-index:6">
+    <div style="max-width:1200px;margin:0 auto;padding:18px 24px;display:flex;align-items:center;gap:28px;flex-wrap:wrap">
+      <a href="/" aria-label="Serve home" style="display:inline-flex;align-items:center;gap:10px;text-decoration:none">
+        <svg aria-hidden="true" width="34" height="30" viewBox="80 22 130 104"><path d="M 88 120 L 88 78 L 145 30 L 202 78 L 202 118" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span style="font:800 29px var(--serve-font-display);color:#fff;letter-spacing:-.5px">Serve</span>
+      </a>
+      <div style="margin-left:auto;display:flex;gap:26px;align-items:center;flex-wrap:wrap">
+        <a class="hide-sm" href="/for-companies" style="color:#d1d5db;font-size:15px;font-weight:500;text-decoration:none">For cleaning companies</a>
+        <a class="serve-btn serve-btn-ghost" href="/sign-in">Member sign in</a>
+      </div>
+    </div>
+  </nav>
+
+  <div style="position:relative;z-index:5;padding:56px 20px 300px">
+    <div class="serve-glass glass-pad" style="max-width:740px;margin:0 auto;padding:46px 52px 40px;text-align:center">
+      <div class="serve-eyebrow ruled">Members by invitation</div>
+
+      <div id="state-form">
+        <h1 id="wl-h" class="serve-display hero-h" style="margin:20px 0 0;font-size:62px;color:var(--serve-text-on-dark)">Your home cleaning<br><span class="accent">concierge.</span></h1>
+        <p style="margin:20px auto 0;max-width:560px;font-size:18px;color:var(--serve-body-on-dark)">Private access to the cleaning companies your neighbors trust most. Recurring cleans, deep cleans, move-outs and everything in between, booked and handled for you.</p>
+        <form id="wl-form" novalidate aria-describedby="wl-note" style="margin:30px 0 0">
+          <div class="fields">
+            <div><label class="sr" for="wl-hood">Neighborhood or ZIP</label><input class="serve-input" id="wl-hood" name="hood" autocomplete="postal-code" placeholder="Neighborhood or ZIP"></div>
+            <div><label class="sr" for="wl-phone">Mobile number</label><input class="serve-input" id="wl-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="Mobile number"></div>
+            <button class="serve-btn serve-btn-gold" type="submit">Request access
+              <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            </button>
+          </div>
+          <p id="wl-err" role="alert" hidden style="margin:10px 0 0;font-size:14px;font-weight:600;color:var(--serve-error);text-align:left">Add your neighborhood or ZIP and a 10-digit mobile number.</p>
+        </form>
+        <p id="wl-note" style="margin:14px 0 0;font-size:13px;color:var(--serve-gray-400)">We'll text you when your invitation is ready. No spam, ever. [SMS consent wording goes here]</p>
+        <div style="margin:26px 0 0;padding-top:22px;border-top:1px solid rgba(255,255,255,.1);display:flex;gap:10px 28px;justify-content:center;flex-wrap:wrap;font-size:14px;font-weight:500;color:#e5e7eb">
+          <span style="display:inline-flex;align-items:center;gap:8px"><span style="width:8px;height:8px;border-radius:50%;background:var(--serve-live);box-shadow:0 0 0 4px rgba(74,222,128,.18)"></span>Now opening in Somerville</span>
+          <span style="display:inline-flex;align-items:center;gap:8px"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--serve-gold)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg><span><span id="partner-count">14</span> trusted local companies in the network</span></span>
+        </div>
+      </div>
+
+      <div id="state-done" class="serve-rise" hidden>
+        <div style="width:68px;height:68px;margin:24px auto 0;border-radius:50%;border:1.5px solid var(--serve-gold);display:flex;align-items:center;justify-content:center"><svg aria-hidden="true" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="var(--serve-gold)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
+        <h2 class="serve-display hero-h" style="margin:18px 0 0;font-size:52px;color:var(--serve-text-on-dark)">You're on the list.</h2>
+        <p style="margin:14px auto 0;max-width:520px;font-size:18px;color:var(--serve-body-on-dark)">We'll text <strong id="done-phone" style="color:#fff"></strong> the moment your invitation for <strong id="done-hood" style="color:#fff"></strong> is ready.</p>
+        <div style="margin:28px auto 0;max-width:560px;padding:22px 24px;border-radius:14px;background:rgba(255,255,255,.05);border:1px dashed rgba(201,169,110,.5);text-align:left">
+          <div class="serve-eyebrow" style="letter-spacing:.2em;font-size:12px">Skip the line</div>
+          <p style="margin:6px 0 14px;font-size:16px;color:#f3f4f6">Invite two neighbors and your invitation moves to the front.</p>
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <label class="sr" for="wl-link">Your invite link</label>
+            <input class="serve-input" id="wl-link" readonly value="servecleaning.com/invite/[CODE]" style="flex:1 1 240px;width:auto;height:48px">
+            <button class="serve-btn serve-btn-gold" id="copy" type="button" style="min-height:48px">Copy link</button>
+          </div>
+        </div>
+        <button id="edit" type="button" style="margin-top:18px;min-height:44px;background:none;border:0;font:500 14px var(--serve-font-body);color:var(--serve-gray-400);text-decoration:underline;text-underline-offset:3px;cursor:pointer">Change my details</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section aria-labelledby="perks-h" style="background:var(--serve-cream);padding:88px 20px 80px">
+  <div class="wrap">
+    <div style="text-align:center"><span class="serve-eyebrow on-light">What membership includes</span></div>
+    <h2 id="perks-h" class="serve-display" style="margin:14px auto 0;max-width:760px;text-align:center;font-size:46px;line-height:1.1;color:#1f2937">One concierge for every clean your home needs.</h2>
+    <div class="grid3" style="margin-top:52px">
+      <article class="serve-card-paper">
+        <div class="serve-icon-tile"><svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-5h4v5"/></svg></div>
+        <h3 class="serve-display" style="margin:20px 0 8px;font-size:24px;color:#1f2937">Your neighbors' most trusted</h3>
+        <p style="margin:0;font-size:15.5px;color:var(--serve-gray-600)">Only local, owner-run companies already cleaning homes on streets like yours, reviewed by Serve before they're listed.</p>
+      </article>
+      <article class="serve-card-paper">
+        <div class="serve-icon-tile"><svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17h16"/><path d="M6 17a6 6 0 0 1 12 0"/><path d="M12 8V6"/><path d="M10 6h4"/><path d="M3 20h18"/></svg></div>
+        <h3 class="serve-display" style="margin:20px 0 8px;font-size:24px;color:#1f2937">Handled, start to finish</h3>
+        <p style="margin:0;font-size:15.5px;color:var(--serve-gray-600)">Text us what you need. Serve matches the right company, confirms your window and follows up after every visit.</p>
+      </article>
+      <article class="serve-card-paper">
+        <div class="serve-icon-tile"><svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h10v18l-2.5-1.5L12 21l-2.5-1.5L7 21z"/><path d="M10 8h4M10 12h4"/></svg></div>
+        <h3 class="serve-display" style="margin:20px 0 8px;font-size:24px;color:#1f2937">Prices that hold</h3>
+        <p style="margin:0;font-size:15.5px;color:var(--serve-gray-600)">Free estimates by phone or walkthrough, and every quote kept on record, so the price you're quoted is the price you pay.</p>
+      </article>
+    </div>
+    <div style="margin-top:44px;padding:26px 28px;border-radius:14px;background:var(--serve-night-800);display:flex;gap:18px 28px;align-items:center;flex-wrap:wrap">
+      <div class="serve-display" style="font-size:22px;color:#f9fafb">Every clean, one place</div>
+      <ul id="services" style="list-style:none;margin:0;padding:0;display:flex;gap:8px;flex-wrap:wrap;flex:1 1 520px"></ul>
+    </div>
+  </div>
+</section>
+
+<section aria-labelledby="how-h" style="background:#fff;padding:84px 20px">
+  <div class="wrap">
+    <h2 id="how-h" class="serve-display" style="margin:0;text-align:center;font-size:40px;color:#1f2937">How access works</h2>
+    <p style="margin:10px auto 0;max-width:560px;text-align:center;font-size:17px;color:var(--serve-gray-500)">Serve opens neighborhood by neighborhood, so the network is ready before you are.</p>
+    <ol class="grid3" style="list-style:none;margin:48px 0 0;padding:0;gap:36px">
+      <li style="border-top:2px solid #1f2937;padding-top:22px"><div style="font:italic 400 44px/1 var(--serve-font-display);color:var(--serve-gold-ink)">01</div><h3 style="margin:14px 0 6px;font-size:19px;color:#1f2937">Request your invitation</h3><p style="margin:0;font-size:15.5px;color:var(--serve-gray-600)">Your neighborhood and mobile number. That's all we need.</p></li>
+      <li style="border-top:2px solid #1f2937;padding-top:22px"><div style="font:italic 400 44px/1 var(--serve-font-display);color:var(--serve-gold-ink)">02</div><h3 style="margin:14px 0 6px;font-size:19px;color:#1f2937">We open your neighborhood</h3><p style="margin:0;font-size:15.5px;color:var(--serve-gray-600)">With the trusted companies already working on your streets, ready to take your home.</p></li>
+      <li style="border-top:2px solid #1f2937;padding-top:22px"><div style="font:italic 400 44px/1 var(--serve-font-display);color:var(--serve-gold-ink)">03</div><h3 style="margin:14px 0 6px;font-size:19px;color:#1f2937">Meet your concierge</h3><p style="margin:0;font-size:15.5px;color:var(--serve-gray-600)">One text for any clean. We book it, confirm it and keep every quote on record.</p></li>
+    </ol>
+  </div>
+</section>
+
+<section aria-labelledby="cta-h" style="position:relative;overflow:hidden;isolation:isolate;background:var(--serve-night-900);padding:84px 20px 96px;text-align:center">
+  <svg aria-hidden="true" viewBox="0 0 1200 300" preserveAspectRatio="none" style="position:absolute;left:0;right:0;bottom:0;width:100%;height:120px;color:#000;opacity:.35;z-index:-1" fill="currentColor"><use href="#skyline"/></svg>
+  <span class="serve-eyebrow">Limited early access</span>
+  <h2 id="cta-h" class="serve-display" style="margin:16px auto 0;max-width:760px;font-size:48px;line-height:1.1;color:#f9fafb">Your street's most trusted cleaners, one text away.</h2>
+  <a class="serve-btn serve-btn-gold" href="#join" style="margin-top:30px">Request your invitation</a>
+</section>
+
+<footer style="background:var(--serve-night-950);color:var(--serve-gray-400);padding:36px 20px 24px">
+  <div style="max-width:1200px;margin:0 auto;display:flex;flex-wrap:wrap;gap:24px;justify-content:space-between;align-items:center">
+    <div><span style="display:block;font:800 26px var(--serve-font-display);color:#fff">Serve</span><span style="font-size:14px">Greater Boston's home cleaning concierge</span></div>
+    <div style="display:flex;gap:24px;font-size:14px;flex-wrap:wrap"><a href="/for-companies" style="color:var(--serve-gray-400)">Run a cleaning company? Apply to join</a><a href="/terms" style="color:var(--serve-gray-400)">Terms</a><a href="/privacy" style="color:var(--serve-gray-400)">Privacy</a></div>
+  </div>
+  <div style="max-width:1200px;margin:24px auto 0;padding-top:18px;border-top:1px solid #1f2937;font-size:13px;color:var(--serve-gray-500)">© 2026 Serve</div>
+</footer>
+
+<!-- Shared skyline shape -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs><path id="skyline" d="M0,300 V240 H36 V222 H78 V255 H108 V196 H126 V150 H162 V196 H186 V244 H214 V120 H236 V96 H262 V88 H300 V132 H322 V174 H344 V150 H372 V210 H396 V250 H430 V168 H448 V120 L458,92 L468,120 H486 V168 H500 V236 H540 V206 H612 A28,28 0 0 1 668,206 H690 V240 H720 V214 H744 V150 L754,110 L764,150 H784 V214 H800 V246 H840 V190 H878 V210 H906 V160 H944 V128 H980 V186 H1010 V232 H1046 V204 H1080 V226 H1120 V246 H1160 V236 H1200 V300 Z"/></defs>
+</svg>
+
+<script>
+(() => {
+  // In production: fetch partners (name, slug, logo_url, logo_bg) from the database.
+  const PARTNERS = [
+    ['roses', "Rose's Cleaning Inc", '#ffffff'], ['sonia', "Sonia's Cleaning Services", '#ffffff'],
+    ['taskforce', 'Taskforce Cleaning Services', '#ffffff'], ['moro', 'Moro Pro Cleaning', '#ffffff'],
+    ['c247', '247 Cleaning Boston', '#ffffff'], ['cambridge', 'Cambridge Clean Co', '#0ca9bb'],
+    ['jma', 'JMA Cleaning Services', '#000000'], ['pam', 'Pam Cleaning Services', '#ffffff'],
+    ['flawless', 'Boston Flawless Homes', '#ffffff'], ['enis', 'Enis Cleaning', '#ffffff'],
+    ['maria', 'Maria By House Cleaning', '#ffffff'], ['taty', 'Taty Cleaning Services', '#ffffff'],
+    ['luminos', 'Luminos Cleaning Services', '#ffffff'], ['bluehouse', 'Blue House Cleaning', '#ffffff'],
+  ].map(([slug, name, bg]) => ({ slug, name, bg, logo: `../logos/${slug}.png` }));
+
+  const SPEED = 1; // global motion multiplier
+  const SERVICES = ['Recurring cleaning', 'Deep cleaning', 'Move-in / move-out', 'Post-construction', 'Airbnb turnovers', 'Home organizing', 'Apartments & condos', 'Offices'];
+  const LANES = [
+    { top: 6, h: 46, op: .38, dur: 120, blur: 1.2, z: 1 },
+    { top: 128, h: 62, op: .62, dur: 92, blur: .4, z: 3 },
+    { top: 62, h: 52, op: .46, dur: 108, blur: .9, z: 2 },
+    { top: 236, h: 76, op: .85, dur: 74, blur: 0, z: 4 },
+    { top: 330, h: 50, op: .44, dur: 112, blur: 1, z: 2 },
+    { top: 412, h: 66, op: .70, dur: 84, blur: .2, z: 3 },
+    { top: 182, h: 44, op: .34, dur: 130, blur: 1.3, z: 1 },
+  ];
+  const BOATS = [
+    { bottom: 70, w: 30, dur: 160, at: .25, back: true, main: '#cbd5e1', jib: '#94a3b8', op: .55 },
+    { bottom: 52, w: 44, dur: 118, at: .70, back: false, main: '#e5e7eb', jib: '#cbd5e1', op: .75 },
+    { bottom: 34, w: 58, dur: 96, at: .10, back: false, main: 'var(--serve-gold)', jib: '#e5e7eb', op: .90 },
+    { bottom: 16, w: 74, dur: 140, at: .55, back: true, main: '#f3f4f6', jib: '#cbd5e1', op: .95 },
+  ];
+  const el = (tag, cls, style) => { const n = document.createElement(tag); if (cls) n.className = cls; if (style) n.style.cssText = style; return n; };
+
+  // Stars
+  const stars = document.getElementById('stars');
+  for (let i = 0; i < 46; i++) {
+    const s = i % 6 === 0 ? 2.5 : i % 3 === 0 ? 2 : 1.4;
+    stars.appendChild(el('span', 'serve-star', `left:${((i * 37.3 + (i % 5) * 11) % 100).toFixed(1)}%;top:${((i * 19.7 + (i % 7) * 5) % 92).toFixed(1)}%;width:${s}px;height:${s}px;animation-duration:${3 + (i % 5)}s;animation-delay:${-(i * .7)}s`));
+  }
+
+  // Floating partner logos
+  const sky = document.getElementById('sky-logos');
+  PARTNERS.forEach((p, i) => {
+    const L = LANES[i % LANES.length];
+    const dur = L.dur / SPEED;
+    const frac = ((i * .618) + (i % 2 ? .5 : 0)) % 1;
+    const drift = el('div', 'serve-drift', `top:${L.top}px;z-index:${L.z};animation-duration:${dur}s;animation-delay:${-(frac * dur)}s`);
+    const bob = el('div', 'serve-bob', `animation-duration:${5 + (i % 4) * 1.3}s;animation-delay:${-(i * .9)}s`);
+    const card = el('div', 'serve-logo-card', `height:${L.h}px;background:${p.bg};opacity:${L.op};filter:blur(${L.blur}px)`);
+    const img = el('img', '', `display:block;height:${L.h - 18}px;width:auto;max-width:${Math.round(L.h * 2.6)}px;object-fit:contain`);
+    img.alt = ''; img.src = p.logo;
+    img.onerror = () => { const t = el('span', 'lc-name' + (p.bg === '#ffffff' ? '' : ' on-dark')); t.textContent = p.name; img.replaceWith(t); };
+    card.appendChild(img); bob.appendChild(card); drift.appendChild(bob); sky.appendChild(drift);
+  });
+  document.getElementById('partner-count').textContent = PARTNERS.length;
+
+  // River: ripples + sailboats
+  const river = document.getElementById('river');
+  for (let i = 0; i < 14; i++) {
+    river.appendChild(el('span', 'serve-wave', `left:${((i * 23.7) % 96).toFixed(1)}%;top:${18 + ((i * 29) % 92)}px;width:${30 + (i % 4) * 22}px;animation-duration:${4 + (i % 3) * 1.5}s;animation-delay:${-(i * .8)}s`));
+  }
+  BOATS.forEach((b) => {
+    const dur = b.dur / SPEED;
+    const boat = el('div', 'serve-boat', `bottom:${b.bottom}px;opacity:${b.op};animation-name:${b.back ? 'serve-sail-back' : 'serve-sail'};animation-duration:${dur}s;animation-delay:${-(b.at * dur)}s`);
+    boat.innerHTML = `<div class="serve-rock" style="animation-duration:${(3.5 + b.w / 30).toFixed(1)}s"><svg viewBox="0 0 60 60" width="${b.w}" height="${b.w}" style="display:block;${b.back ? 'transform:scaleX(-1)' : ''}"><line x1="30" y1="5" x2="30" y2="45" stroke="#cbd5e1" stroke-width="1.4"/><path d="M31.5 7 L31.5 43 L53 43 Z" fill="${b.main}"/><path d="M28.5 13 L28.5 43 L11 43 Z" fill="${b.jib}"/><path d="M5 45 H55 L49 53 H11 Z" fill="#cbd5e1"/><path d="M14 56 H46" stroke="#e5e7eb" stroke-width="1.2" stroke-linecap="round" opacity=".35"/></svg></div>`;
+    river.appendChild(boat);
+  });
+
+  // Services
+  const ul = document.getElementById('services');
+  SERVICES.forEach((s) => { const li = el('li', 'serve-chip-gold'); li.textContent = s; ul.appendChild(li); });
+
+  // Form behaviour
+  const hood = document.getElementById('wl-hood');
+  const phone = document.getElementById('wl-phone');
+  const err = document.getElementById('wl-err');
+  const fmt = (d) => d.length > 6 ? `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}` : d.length > 3 ? `(${d.slice(0, 3)}) ${d.slice(3)}` : d;
+  phone.addEventListener('input', () => { phone.value = fmt(phone.value.replace(/\D/g, '').slice(0, 10)); err.hidden = true; });
+  hood.addEventListener('input', () => { err.hidden = true; });
+
+  document.getElementById('wl-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const h = hood.value.trim();
+    const d = phone.value.replace(/\D/g, '');
+    if (!h || d.length !== 10) { err.hidden = false; return; }
+    // TODO(prod): POST { hood: h, phone: d } to the waitlist endpoint; store SMS consent with timestamp.
+    document.getElementById('done-phone').textContent = `(${d.slice(0, 3)}) •••-${d.slice(6)}`;
+    document.getElementById('done-hood').textContent = /^\d{5}$/.test(h) ? `ZIP ${h}` : h.replace(/\b\w/g, (c) => c.toUpperCase());
+    document.getElementById('state-form').hidden = true;
+    document.getElementById('state-done').hidden = false;
+  });
+  document.getElementById('edit').addEventListener('click', () => {
+    document.getElementById('state-done').hidden = true;
+    document.getElementById('state-form').hidden = false;
+  });
+  const copy = document.getElementById('copy');
+  copy.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(document.getElementById('wl-link').value); } catch (_) {}
+    copy.textContent = 'Copied';
+  });
+})();
+</script>
+</body>
+</html>

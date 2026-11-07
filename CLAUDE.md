@@ -45,6 +45,35 @@ During and at the end of meaningful work:
 These files provide continuity through saved context. They do not synchronize
 live conversations or prove the other agent has already read an update.
 
+## Design system — "Boston Night" (2026-11-07, required for all UI work)
+
+Serve's design system lives in `design/serve/` (the founder's design kit).
+Before building or changing any UI:
+1. Read `design/serve/DESIGN.md` in full.
+2. Use the tokens in `design/serve/tokens.css`. The build serves it as
+   `/serve-tokens.css`; a Worker page loads it with `shell({ night: true })`.
+   Never hard-code a hex value that exists as a token. This site has no
+   Tailwind: `tailwind.preset.js` is kept as the kit shipped it, for reference.
+3. Match `design/serve/reference/waitlist.html` for look, motion and voice. It
+   is framework-free on purpose: port it, don't paste it.
+
+The hero is already ported: `renderBostonNightHero()` in `src/marketplace.js`
+(this repo's `<BostonNightHero>`, with slots for the form, the partners and a
+motion speed). Use it; don't build a second one.
+
+Rules that matter most:
+- Hero/landing screens use the Boston Night hero. App screens (portals,
+  booking, settings) use the slate nav + white workspace, with no ambient motion.
+- Gold (#c9a96e) is an accent only: one gold CTA per viewport, never a background.
+- Headlines in Times New Roman; everything functional in Inter.
+- Honor prefers-reduced-motion. Every page works from 360px to 1440px.
+- Never invent counts, ratings or reviews: data comes from D1 or is omitted.
+- Partner logos and counts come from the D1 `providers` table (`logo_path`,
+  `logo_bg`) through `publicProvider()`, never a hard-coded list. Publicly,
+  only listed companies (listed = 1 AND status = 'approved').
+
+When asked to build a new screen, first state which DESIGN.md §8 treatment applies.
+
 ## Project Overview
 Serve is a startup home cleaning business serving the Greater Boston area. The website is currently an early-stage MVP and should be improved into a polished, professional, high-converting landing page.
 

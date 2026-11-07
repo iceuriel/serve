@@ -14,6 +14,34 @@ accurate except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-11-07, Claude Code: "Boston Night" design system + hero
+
+The founder supplied a design kit (`serve-design-kit/`, outside the repo).
+- Installed it as `design/serve/`: DESIGN.md, README, tokens.css, the Tailwind
+  preset (reference only, since this site has no Tailwind) and the reference
+  `waitlist.html`. Left out the kit's empty `logos/` folder, because logos come
+  from D1. CLAUDE.md and AGENTS.md got the same "Design system" block.
+- The build serves the tokens as `/serve-tokens.css`. `shell({ night: true })`
+  loads them and swaps the slate nav for the hero's transparent one.
+- `renderBostonNightHero()` in `src/marketplace.js` is the kit's
+  `<BostonNightHero>`. It draws everything on the server with the reference's
+  numbers, so it ships no new script, and reduced motion comes from
+  tokens.css. Slots: `form` (caller markup), `partners` (publicProvider
+  objects from D1), `speed` (0.25–4). Text options are escaped, logos must
+  be same-site and nav links same-site. The partner count appears only when
+  there are partners.
+- Wired in as a **founder preview only**: `/providers?preview=KEY&hero=night`
+  shows the directory with the night hero and the search form. The public
+  `/providers` keeps the slate hero, and three separate guards keep it so.
+- Tests: `tests/marketplace.test.js` §4c, 24 checks. Mutation-checked:
+  dropping the logo check, always printing a count, and letting the public
+  page take `?hero=night` each turn it red. All 45 files pass. Headless
+  screenshots at 1440px and 390px match the reference.
+- Next (README prompts 2 and 3, not started): a /waitlist page with its table,
+  then restyling /providers and the profile per DESIGN.md §8. With 0 companies
+  listed, the public night hero would have an empty sky and no count; that is
+  by design (never invent numbers).
+
 ## Current work — 2026-11-07, Claude Code: 14th partner, Blue House Cleaning
 
 The founder added Blue House Cleaning (Quincy, owner Tiago Camara) as PRV-0014.

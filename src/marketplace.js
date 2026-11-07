@@ -199,7 +199,9 @@ export async function handleMarketplace(request, env, ctx, url) {
      one founder click. The preview branches are therefore checked first and
      return without touching the cache in either direction. */
   if (p === "/providers") {
-    if (previewAllowed(url, env)) return directoryPage(env, previewKeyOf(env));
+    if (previewAllowed(url, env)) {
+      return directoryPage(env, previewKeyOf(env), url.searchParams.get("hero") === "night");
+    }
     return cached(request, ctx, () => directoryPage(env, ""));
   }
   const m = p.match(/^\/providers\/([^\/]+)$/);
@@ -459,7 +461,7 @@ function estimateAnswer(wantsHtml, payload, status, slug) {
 
 /* ---------- pages ---------- */
 
-async function directoryPage(env, previewKey) {
+async function directoryPage(env, previewKey, night) {
   if (!env || !env.MARKET_DB) return htmlRes(comingSoon(), 200);
   let providers;
   try {
@@ -468,7 +470,7 @@ async function directoryPage(env, previewKey) {
     console.error("directory read failed: " + err);
     return htmlRes(comingSoon(), 503, "no-store");
   }
-  if (previewKey) return previewRes(renderDirectory(providers, { previewKey }));
+  if (previewKey) return previewRes(renderDirectory(providers, { previewKey, night }));
   return htmlRes(renderDirectory(providers), 200, "public, max-age=" + PAGE_TTL_S);
 }
 
@@ -497,7 +499,116 @@ function previewRes(html) {
 const LOGO_SVG = (color, width) =>
   `<svg role="img" aria-label="Serve, Greater Boston" width="${width}" height="${Math.round(width * 1.14)}" viewBox="45 10 200 228" class="mk-mark"><path d="M 88 150 L 88 78 L 145 30 L 202 78 L 202 118" fill="none" stroke="${color}" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"></path><text x="145.5" y="196" text-anchor="middle" font-family="'Times New Roman', Times, serif" font-size="64" letter-spacing="1" fill="${color}">Serve</text><text x="147.2" y="228" text-anchor="middle" font-family="'Times New Roman', Times, serif" font-size="16" letter-spacing="4.3" fill="${color}">GREATER BOSTON</text></svg>`;
 
-function shell({ title, description, canonical, noindex, body, jsonLd }) {
+/* ---------- the Boston Night hero (design/serve/DESIGN.md §5) ----------
+   This repo's <BostonNightHero>: a port of design/serve/reference/waitlist.html.
+   It is drawn entirely here, with the reference's own numbers (stars, seven
+   logo lanes, the Charles and four boats), so a page ships no extra script
+   and looks finished on first paint. The motion is CSS from serve-tokens.css
+   and stops under prefers-reduced-motion.
+
+   Options:
+     partners   publicProvider() objects, i.e. D1 rows through the whitelist.
+                Never a hard-coded list: the sky grows as the network grows.
+     form       markup the CALLER writes; the one slot that is not escaped.
+     speed      motion multiplier, 0.25 to 4 (DESIGN.md §7). Default 1.
+     eyebrow, title, accent, intro, opening   text, always escaped.
+     navLinks   [{ href, label, ghost }], same-site hrefs only.
+   The partner count is printed only when there are partners: DESIGN.md §9,
+   never invent a number. */
+const BN_SKYLINE = "M0,300 V240 H36 V222 H78 V255 H108 V196 H126 V150 H162 V196 H186 V244 H214 V120 H236 V96 H262 V88 H300 V132 H322 V174 H344 V150 H372 V210 H396 V250 H430 V168 H448 V120 L458,92 L468,120 H486 V168 H500 V236 H540 V206 H612 A28,28 0 0 1 668,206 H690 V240 H720 V214 H744 V150 L754,110 L764,150 H784 V214 H800 V246 H840 V190 H878 V210 H906 V160 H944 V128 H980 V186 H1010 V232 H1046 V204 H1080 V226 H1120 V246 H1160 V236 H1200 V300 Z";
+/* Lane order is the reference's, which interleaves near and far lanes so
+   neighbouring logos never share a depth. */
+const BN_LANES = [
+  { top: 6, h: 46, op: 0.38, dur: 120, blur: 1.2, z: 1 },
+  { top: 128, h: 62, op: 0.62, dur: 92, blur: 0.4, z: 3 },
+  { top: 62, h: 52, op: 0.46, dur: 108, blur: 0.9, z: 2 },
+  { top: 236, h: 76, op: 0.85, dur: 74, blur: 0, z: 4 },
+  { top: 330, h: 50, op: 0.44, dur: 112, blur: 1, z: 2 },
+  { top: 412, h: 66, op: 0.70, dur: 84, blur: 0.2, z: 3 },
+  { top: 182, h: 44, op: 0.34, dur: 130, blur: 1.3, z: 1 },
+];
+const BN_BOATS = [
+  { bottom: 70, w: 30, dur: 160, at: 0.25, back: true, main: "#cbd5e1", jib: "#94a3b8", op: 0.55 },
+  { bottom: 52, w: 44, dur: 118, at: 0.70, back: false, main: "#e5e7eb", jib: "#cbd5e1", op: 0.75 },
+  { bottom: 34, w: 58, dur: 96, at: 0.10, back: false, main: "var(--serve-gold)", jib: "#e5e7eb", op: 0.90 },
+  { bottom: 16, w: 74, dur: 140, at: 0.55, back: true, main: "#f3f4f6", jib: "#cbd5e1", op: 0.95 },
+];
+const ARROW_SVG = `<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>`;
+
+export function renderBostonNightHero(opts) {
+  const o = opts || {};
+  const raw = Number(o.speed);
+  const speed = raw > 0 ? Math.min(Math.max(raw, 0.25), 4) : 1;
+  const s = (n) => (Math.round(n * 100) / 100) + "s";
+  const partners = (o.partners || []).filter((p) => p && p.name);
+  const sameSite = (h) => /^(\/|#)[^\s"'<>]*$/.test(String(h || "")) ? String(h) : "";
+
+  let stars = "";
+  for (let i = 0; i < 46; i++) {
+    const size = i % 6 === 0 ? 2.5 : i % 3 === 0 ? 2 : 1.4;
+    stars += `<span class="serve-star" style="left:${((i * 37.3 + (i % 5) * 11) % 100).toFixed(1)}%;top:${((i * 19.7 + (i % 7) * 5) % 92).toFixed(1)}%;width:${size}px;height:${size}px;animation-duration:${3 + (i % 5)}s;animation-delay:${s(-(i * 0.7))}"></span>`;
+  }
+
+  const logos = partners.map((p, i) => {
+    const L = BN_LANES[i % BN_LANES.length];
+    const dur = L.dur / speed;
+    const frac = ((i * 0.618) + (i % 2 ? 0.5 : 0)) % 1;
+    const bg = safeHex(p.logoBg, "#ffffff");
+    const src = safeImagePath(p.logo);
+    const inner = src
+      ? `<img src="${esc(src)}" alt="" loading="lazy" style="height:${L.h - 18}px;max-width:${Math.round(L.h * 2.6)}px">`
+      : `<span class="bn-logo-name${bg.toLowerCase() === "#ffffff" ? "" : " bn-logo-name--on-dark"}">${esc(p.name)}</span>`;
+    return `<div class="serve-drift" style="top:${L.top}px;z-index:${L.z};animation-duration:${s(dur)};animation-delay:${s(-(frac * dur))}">` +
+      `<div class="serve-bob" style="animation-duration:${s(5 + (i % 4) * 1.3)};animation-delay:${s(-(i * 0.9))}">` +
+      `<div class="serve-logo-card" style="height:${L.h}px;background:${bg};opacity:${L.op};filter:blur(${L.blur}px)">${inner}</div></div></div>`;
+  }).join("");
+
+  let river = "";
+  for (let i = 0; i < 14; i++) {
+    river += `<span class="serve-wave" style="left:${((i * 23.7) % 96).toFixed(1)}%;top:${18 + ((i * 29) % 92)}px;width:${30 + (i % 4) * 22}px;animation-duration:${s(4 + (i % 3) * 1.5)};animation-delay:${s(-(i * 0.8))}"></span>`;
+  }
+  river += BN_BOATS.map((b) => {
+    const dur = b.dur / speed;
+    return `<div class="serve-boat" style="bottom:${b.bottom}px;opacity:${b.op};animation-name:${b.back ? "serve-sail-back" : "serve-sail"};animation-duration:${s(dur)};animation-delay:${s(-(b.at * dur))}">` +
+      `<div class="serve-rock" style="animation-duration:${s(3.5 + b.w / 30)}"><svg viewBox="0 0 60 60" width="${b.w}" height="${b.w}"${b.back ? ` style="transform:scaleX(-1)"` : ""}>` +
+      `<line x1="30" y1="5" x2="30" y2="45" stroke="#cbd5e1" stroke-width="1.4"/><path d="M31.5 7 L31.5 43 L53 43 Z" fill="${b.main}"/><path d="M28.5 13 L28.5 43 L11 43 Z" fill="${b.jib}"/><path d="M5 45 H55 L49 53 H11 Z" fill="#cbd5e1"/><path d="M14 56 H46" stroke="#e5e7eb" stroke-width="1.2" stroke-linecap="round" opacity=".35"/></svg></div></div>`;
+  }).join("");
+
+  const links = (o.navLinks || []).map((l) => {
+    const href = sameSite(l && l.href);
+    if (!href || !l.label) return "";
+    return l.ghost ? `<a class="serve-btn serve-btn-ghost" href="${esc(href)}">${esc(l.label)}</a>`
+      : `<a class="bn-nav__link" href="${esc(href)}">${esc(l.label)}</a>`;
+  }).join("");
+
+  const status = [
+    o.opening ? `<span class="bn-status__item"><span class="bn-live"></span>Now opening in ${esc(o.opening)}</span>` : "",
+    partners.length ? `<span class="bn-status__item"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--serve-gold)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg>${partners.length} trusted local ${partners.length === 1 ? "company" : "companies"} in the network</span>` : "",
+  ].join("");
+
+  return `<section class="serve-sky bn-hero" aria-labelledby="bn-h">
+<svg width="0" height="0" class="bn-defs" aria-hidden="true"><defs><path id="bn-skyline" d="${BN_SKYLINE}"/></defs></svg>
+<div aria-hidden="true" class="bn-stars">${stars}</div>
+<div aria-hidden="true" class="bn-glow"></div>
+<div aria-hidden="true" class="bn-logos">${logos}</div>
+<svg aria-hidden="true" class="bn-skyline bn-skyline--back" viewBox="0 0 1200 300" preserveAspectRatio="none" fill="currentColor"><use href="#bn-skyline"/></svg>
+<svg aria-hidden="true" class="bn-skyline bn-skyline--front" viewBox="0 0 1200 300" preserveAspectRatio="none" fill="currentColor"><use href="#bn-skyline"/></svg>
+<div aria-hidden="true" class="bn-river"><svg class="bn-reflection" viewBox="0 0 1200 300" preserveAspectRatio="none" fill="currentColor"><use href="#bn-skyline"/></svg>${river}</div>
+<nav aria-label="Main" class="bn-nav"><div class="bn-nav__inner">
+<a href="/" class="bn-wordmark" aria-label="Serve home"><svg aria-hidden="true" width="34" height="30" viewBox="80 22 130 104"><path d="M 88 120 L 88 78 L 145 30 L 202 78 L 202 118" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Serve</span></a>
+${links ? `<div class="bn-nav__links">${links}</div>` : ""}
+</div></nav>
+<div class="bn-body"><div class="serve-glass bn-glass">
+${o.eyebrow ? `<div class="serve-eyebrow ruled">${esc(o.eyebrow)}</div>` : ""}
+<h1 id="bn-h" class="serve-display bn-title">${esc(o.title || "")}${o.accent ? `<br><span class="accent">${esc(o.accent)}</span>` : ""}</h1>
+${o.intro ? `<p class="bn-intro">${esc(o.intro)}</p>` : ""}
+${o.form || ""}
+${status ? `<div class="bn-status">${status}</div>` : ""}
+</div></div>
+</section>`;
+}
+
+function shell({ title, description, canonical, noindex, body, jsonLd, night }) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -514,11 +625,12 @@ ${description ? `<meta property="og:description" content="${esc(description)}">`
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
+${night ? `<link rel="stylesheet" href="/serve-tokens.css">` : ""}
 <link rel="stylesheet" href="/marketplace.css">
 ${jsonLd ? `<script type="application/ld+json">${JSON.stringify(jsonLd).replace(/</g, "\\u003c")}</script>` : ""}
 </head>
 <body class="mk">
-<nav class="nav">
+${night ? "" : `<nav class="nav">
 <div class="nav__inner">
 <a href="/" class="nav__logo">Serve</a>
 <ul class="nav__links">
@@ -537,7 +649,7 @@ ${jsonLd ? `<script type="application/ld+json">${JSON.stringify(jsonLd).replace(
 <li><a href="/#quote">Instant Booking</a></li>
 </ul>
 </div>
-</nav>
+</nav>`}
 <main id="main">
 ${body}
 </main>
@@ -595,7 +707,25 @@ ${p.areaShort ? `<p class="mk-card__area">${esc(p.areaShort)}</p>` : ""}
   }).join("\n");
 
   const banner = key ? `<div class="mk-preview" role="note"><strong>Preview.</strong> Showing every company, including ${drafts} ${drafts === 1 ? "draft" : "drafts"} the public cannot see. This page is not indexed and not cached. Don't share this link.</div>` : "";
-  const body = `${banner}<section class="mk-hero"><div class="mk-wrap">
+  /* DESIGN.md §8, marketplace home: the Boston Night hero, with the search
+     form in place of the waitlist form. Founder preview only for now
+     (?preview=…&hero=night); the public directory keeps the slate hero. The
+     form keeps the data-find hook and the nameless input of the slate one. */
+  const night = !!(key && opts && opts.night);
+  const hero = night ? renderBostonNightHero({
+    partners: list,
+    eyebrow: "Greater Boston",
+    title: "Boston's most trusted",
+    accent: "cleaners.",
+    navLinks: [{ href: withPreview("/providers", key), label: "Find a Provider" },
+      { href: "/#quote", label: "Instant Booking", ghost: true }],
+    form: `<form class="bn-find" action="/providers" method="get" role="search" data-find>
+<label class="sr-only" for="mk-near">Neighborhood or ZIP</label>
+<input class="serve-input" id="mk-near" type="text" placeholder="Neighborhood or ZIP" maxlength="40" autocomplete="off" enterkeyhint="search">
+<button class="serve-btn serve-btn-gold" type="submit">Find Providers ${ARROW_SVG}</button>
+</form>
+<p class="bn-instant">No time to waste? <a href="/#quote">Instantly book in under 1 minute</a> and we'll handle your booking.</p>`,
+  }) : `<section class="mk-hero"><div class="mk-wrap">
 ${LOGO_SVG("#ffffff", 104)}
 <h1 class="mk-hl">Boston's Most Trusted Cleaners</h1>
 <form class="mk-find" action="/providers" method="get" role="search" data-find>
@@ -604,7 +734,8 @@ ${LOGO_SVG("#ffffff", 104)}
 <button class="btn btn--primary" type="submit">Find Providers</button>
 </form>
 <p class="mk-hero__instant">No time to waste? <a href="/#quote">Instantly book in under 1 minute</a> and we'll handle your booking.</p>
-</div></section>
+</div></section>`;
+  const body = `${banner}${hero}
 <section class="mk-section" id="providers"><div class="mk-wrap">
 <div class="mk-filters" role="group" aria-label="Filter providers">
 <div class="mk-filters__row"><span class="mk-label">Area</span>${chips("region", [["all", "All areas"]].concat(REGIONS))}</div>
@@ -620,6 +751,7 @@ ${list.length ? `<div class="mk-grid">${cards}</div>` : `<p class="mk-empty">Com
     description: "Compare local, owner-run cleaning companies across Greater Boston and request a free estimate by phone or walkthrough through Serve.",
     canonical: key ? "" : "https://servecleaning.com/providers",
     noindex: !!key,
+    night,
     body,
     jsonLd: key ? null : {
       "@context": "https://schema.org", "@type": "ItemList",

@@ -1,0 +1,139 @@
+/* Serve design tokens — "Boston Night" system.
+   Import once at the app root (e.g. app/globals.css: @import "./serve-tokens.css";). */
+
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap");
+
+:root {
+  /* Ink — the night palette */
+  --serve-night-950: #0b1220;  /* deepest sky, water, footer */
+  --serve-night-900: #111827;  /* dark sections, button text on gold */
+  --serve-night-850: #141d2e;  /* mid sky */
+  --serve-night-800: #1f2937;  /* nav, dark cards, primary slate */
+  --serve-night-700: #24304a;  /* low sky */
+  --serve-night-600: #2a3550;  /* back skyline layer */
+  --serve-dusk:      #3a3a4a;  /* horizon */
+
+  /* Accent — gold, used sparingly for "members" moments */
+  --serve-gold:      #c9a96e;  /* eyebrows, primary CTA fill, hairlines on dark */
+  --serve-gold-ink:  #8a6d3b;  /* gold text on light backgrounds (passes 4.5:1 on cream) */
+  --serve-gold-line: rgba(201, 169, 110, .38);
+  --serve-gold-glow: rgba(201, 169, 110, .22);
+
+  /* Paper — light sections */
+  --serve-cream:       #f7f4ee;  /* feature sections */
+  --serve-cream-line:  #e7e1d4;
+  --serve-white:       #ffffff;
+  --serve-gray-50:     #f9fafb;
+  --serve-gray-200:    #e5e7eb;
+  --serve-gray-300:    #d1d5db;
+  --serve-gray-400:    #9ca3af;  /* muted text on dark */
+  --serve-gray-500:    #6b7280;  /* muted text on light */
+  --serve-gray-600:    #4b5563;  /* body text on light */
+  --serve-gray-700:    #374151;
+  --serve-text-on-dark: #f9fafb;
+  --serve-body-on-dark: #d1d5db;
+
+  /* Status */
+  --serve-live:  #4ade80;  /* "now opening" dot */
+  --serve-error: #fca5a5;  /* error text on dark */
+
+  /* Type */
+  --serve-font-display: "Times New Roman", Times, serif;  /* headlines, wordmark, numerals */
+  --serve-font-body: "Inter", system-ui, sans-serif;
+
+  /* Radii */
+  --serve-r-sm: 8px;
+  --serve-r-md: 10px;   /* inputs, buttons */
+  --serve-r-lg: 14px;   /* cards */
+  --serve-r-xl: 20px;   /* glass hero card */
+  --serve-r-pill: 999px;
+
+  /* Shadows */
+  --serve-shadow-card: 0 1px 3px rgba(0,0,0,.1), 0 1px 2px rgba(0,0,0,.06);
+  --serve-shadow-float: 0 14px 34px rgba(0,0,0,.45);
+  --serve-shadow-glass: 0 40px 90px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.06);
+
+  /* Layout */
+  --serve-max: 1120px;
+  --serve-gutter: 20px;
+}
+
+/* ---------- Surfaces ---------- */
+.serve-sky {
+  background: linear-gradient(180deg, var(--serve-night-950) 0%, var(--serve-night-850) 45%, var(--serve-night-700) 78%, var(--serve-dusk) 100%);
+  color: #fff;
+  position: relative; overflow: hidden; isolation: isolate;
+}
+.serve-glass {
+  background: rgba(11, 18, 32, .66);
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--serve-gold-line);
+  border-radius: var(--serve-r-xl);
+  box-shadow: var(--serve-shadow-glass);
+}
+
+/* ---------- Type ---------- */
+.serve-display { font-family: var(--serve-font-display); font-weight: 800; letter-spacing: -.5px; line-height: 1.05; }
+.serve-display em, .serve-display .accent { font-style: italic; font-weight: 400; color: var(--serve-gold); }
+.serve-eyebrow {
+  font: 700 12.5px var(--serve-font-body); letter-spacing: .32em; text-transform: uppercase; color: var(--serve-gold);
+  display: inline-flex; align-items: center; gap: 14px;
+}
+.serve-eyebrow.ruled::before, .serve-eyebrow.ruled::after { content: ""; width: 36px; height: 1px; background: currentColor; opacity: .7; }
+.serve-eyebrow.on-light { color: var(--serve-gold-ink); }
+
+/* ---------- Controls ---------- */
+.serve-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 56px; padding: 0 26px; border-radius: var(--serve-r-md); border: 0; cursor: pointer;
+  font: 700 16px var(--serve-font-body); text-decoration: none; white-space: nowrap;
+}
+.serve-btn-gold { background: var(--serve-gold); color: var(--serve-night-900); box-shadow: 0 10px 24px rgba(201,169,110,.25); }
+.serve-btn-gold:hover { filter: brightness(1.06); }
+.serve-btn-ghost { background: transparent; color: var(--serve-text-on-dark); border: 1px solid rgba(255,255,255,.28); min-height: 44px; padding: 0 18px; font-size: 14.5px; font-weight: 600; }
+.serve-btn-ghost:hover { border-color: #fff; }
+.serve-btn-slate { background: var(--serve-night-800); color: #fff; }
+
+.serve-input {
+  width: 100%; min-width: 0; height: 56px; padding: 0 16px; border-radius: var(--serve-r-md);
+  border: 1px solid rgba(255,255,255,.18); background: #fff; color: var(--serve-night-900);
+  font: 500 16px var(--serve-font-body);
+}
+.serve-input::placeholder { color: var(--serve-gray-500); }
+.serve-input:focus { outline: 3px solid rgba(201,169,110,.55); outline-offset: 1px; }
+
+.serve-chip-gold { font-size: 14px; font-weight: 500; padding: 7px 14px; border-radius: var(--serve-r-pill); border: 1px solid rgba(201,169,110,.45); color: #f3f4f6; }
+
+.serve-card-paper { background: #fff; border: 1px solid var(--serve-cream-line); border-radius: var(--serve-r-lg); padding: 30px 28px; }
+.serve-icon-tile { width: 48px; height: 48px; border-radius: 12px; background: var(--serve-night-800); display: flex; align-items: center; justify-content: center; color: var(--serve-gold); }
+
+.serve-logo-card {
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 12px; padding: 8px 16px; border: 1px solid rgba(255,255,255,.14);
+  box-shadow: var(--serve-shadow-float);
+}
+
+/* ---------- Motion ---------- */
+@keyframes serve-drift     { from { left: -260px } to { left: 100% } }
+@keyframes serve-sail      { from { left: -120px } to { left: 100% } }
+@keyframes serve-sail-back { from { left: 100% } to { left: -120px } }
+@keyframes serve-bob       { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-10px) } }
+@keyframes serve-rock      { 0%,100% { transform: translateY(0) rotate(-2deg) } 50% { transform: translateY(-3px) rotate(2deg) } }
+@keyframes serve-twinkle   { 0%,100% { opacity: .15 } 50% { opacity: .9 } }
+@keyframes serve-shimmer   { 0%,100% { opacity: .08; transform: translateX(0) } 50% { opacity: .35; transform: translateX(14px) } }
+@keyframes serve-rise      { from { opacity: 0; transform: translateY(14px) } to { opacity: 1; transform: translateY(0) } }
+
+.serve-drift { position: absolute; left: -260px; animation: serve-drift linear infinite; will-change: left; }
+.serve-bob   { animation: serve-bob ease-in-out infinite; }
+.serve-boat  { position: absolute; animation-timing-function: linear; animation-iteration-count: infinite; }
+.serve-rock  { animation: serve-rock 4.5s ease-in-out infinite; transform-origin: 50% 90%; }
+.serve-star  { position: absolute; border-radius: 50%; background: #fff; animation: serve-twinkle ease-in-out infinite; }
+.serve-wave  { position: absolute; height: 2px; border-radius: 2px; background: var(--serve-gray-200); animation: serve-shimmer ease-in-out infinite; }
+.serve-rise  { animation: serve-rise .5s ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .serve-drift, .serve-bob, .serve-boat, .serve-rock, .serve-star, .serve-wave, .serve-rise { animation: none !important; }
+}
+@media (max-width: 760px) {
+  .serve-logo-card { transform: scale(.68); transform-origin: left center; }
+}

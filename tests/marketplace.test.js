@@ -52,7 +52,7 @@ function makeKV() {
 /* ---------- load the module the way the Worker bundle sees it ---------- */
 const MARKET_SRC = read('src/marketplace.js');
 const EXPORTS = ['handleMarketplace', 'publicProvider', 'validateEstimate', 'renderDirectory',
-  'renderProfile', 'esc', 'safeImagePath', 'safeHttpUrl', 'normalizePhone', 'SERVICE_TAGS', 'REGIONS'];
+  'renderProfile', 'renderBostonNightHero', 'esc', 'safeImagePath', 'safeHttpUrl', 'normalizePhone', 'SERVICE_TAGS', 'REGIONS'];
 
 function loadMarket(fetchImpl, logs, cachesImpl) {
   const box = {
@@ -281,6 +281,72 @@ console.log('\n=== 4b. a preview can never reach the public cache ===');
     u('/providers/taskforce-cleaning-services?preview=' + PREVIEW));
   res = await M.handleMarketplace(get('/providers/taskforce-cleaning-services'), env, null, u('/providers/taskforce-cleaning-services'));
   t('a previewed draft profile is still a 404 to the public', res.status === 404);
+}
+
+console.log('\n=== 4c. the Boston Night hero (design/serve/DESIGN.md §5) ===');
+{
+  const M = loadMarket(async () => new Response('{}'), []);
+  const hero = (o) => M.renderBostonNightHero(o);
+  const P = (name, extra) => Object.assign({ name, logo: '/images/providers/x/logo.png', logoBg: '#ffffff' }, extra);
+
+  let h = hero({ title: 'T', partners: [] });
+  t('no partners: no count line, no invented number', !/\d+ trusted local/.test(h) && !h.includes('bn-status'));
+  t('…and no "now opening" unless a neighborhood is given', !h.includes('Now opening'));
+  h = hero({ title: 'T', opening: 'Union Square', partners: [P('A'), P('B'), P('C')] });
+  t('the count is the number of partners passed in', h.includes('3 trusted local companies in the network'));
+  t('…with the neighborhood named', h.includes('Now opening in Union Square'));
+  t('one logo card per partner', (h.match(/class="serve-logo-card"/g) || []).length === 3);
+
+  h = hero({ title: '<script>x()</script>', accent: '"><b>', intro: '<i>', eyebrow: '<u>', opening: '<s>',
+    partners: [P('<img src=x onerror=alert(1)>', { logo: '' })] });
+  t('every text option and partner name is escaped',
+    !h.includes('<script>x') && !h.includes('"><b>') && !h.includes('<i>') && !h.includes('<u>') &&
+    !h.includes('<s>') && !h.includes('<img src=x'));
+  t('a partner without a logo shows its name instead', h.includes('bn-logo-name') && h.includes('&lt;img src=x'));
+  h = hero({ title: 'T', partners: [P('Evil', { logo: 'https://tracker.example.com/p.png', logoBg: 'red;background:url(x)' })] });
+  t('an off-site logo is dropped, never loaded', !h.includes('tracker.example.com'));
+  t('…and a bad background colour falls back to white', h.includes('background:#ffffff') && !h.includes('url(x)'));
+  h = hero({ title: 'T', navLinks: [{ href: 'javascript:alert(1)', label: 'x' }, { href: 'https://elsewhere.example', label: 'y' },
+    { href: '/providers', label: 'Find' }] });
+  t('nav links must be same-site', !h.includes('javascript:') && !h.includes('elsewhere.example') && h.includes('href="/providers"'));
+  t('the form slot is the caller\'s markup, unescaped', hero({ title: 'T', form: '<form data-x></form>' }).includes('<form data-x></form>'));
+
+  /* The reference's lane math: logo i rides lane i mod 7, and the speed
+     multiplier divides every crossing time. */
+  const many = Array.from({ length: 8 }, (_, i) => P('Co ' + i));
+  h = hero({ title: 'T', partners: many });
+  const tops = [...h.matchAll(/class="serve-drift" style="top:(\d+)px/g)].map((m) => +m[1]);
+  t('logos fill the seven reference lanes in order, then wrap', JSON.stringify(tops) === JSON.stringify([6, 128, 62, 236, 330, 412, 182, 6]), tops);
+  const durs = (x) => [...x.matchAll(/class="serve-drift"[^>]*animation-duration:([\d.]+)s/g)].map((m) => +m[1]);
+  t('speed 1 keeps the reference crossing times', durs(h)[0] === 120 && durs(h)[3] === 74, durs(h));
+  t('speed 2 halves them', durs(hero({ title: 'T', partners: many, speed: 2 }))[0] === 60);
+  t('a silly speed is clamped, not trusted', durs(hero({ title: 'T', partners: many, speed: 1000 }))[0] === 30 &&
+    durs(hero({ title: 'T', partners: many, speed: -5 }))[0] === 120);
+  t('the scene has its 46 stars, 14 ripples and 4 boats',
+    (h.match(/class="serve-star"/g) || []).length === 46 && (h.match(/class="serve-wave"/g) || []).length === 14 &&
+    (h.match(/class="serve-boat"/g) || []).length === 4);
+  const tokens = read('design/serve/tokens.css');
+  t('tokens.css stops all of that motion under prefers-reduced-motion',
+    /prefers-reduced-motion[^}]*\.serve-drift[^}]*\.serve-boat[^}]*\.serve-star[^}]*\.serve-wave[^}]*animation:\s*none/.test(tokens));
+  t('the build serves the tokens at /serve-tokens.css',
+    read('scripts/build-site.sh').includes('cp design/serve/tokens.css "$OUT"/serve-tokens.css'));
+
+  /* In the directory: founder preview only, partners straight from D1. */
+  const d1 = makeD1();
+  const env = { MARKET_DB: d1.binding, MARKET_PREVIEW_KEY: PREVIEW };
+  const u = (p) => new URL('https://servecleaning.com' + p);
+  let res = await M.handleMarketplace(get('/providers?preview=' + PREVIEW + '&hero=night'), env, null,
+    u('/providers?preview=' + PREVIEW + '&hero=night'));
+  let html = await res.text();
+  t('the preview can show the night hero', html.includes('class="serve-sky bn-hero"') && html.includes('href="/serve-tokens.css"'));
+  t('…with one logo per company in D1', (html.match(/class="serve-logo-card"/g) || []).length === N_PARTNERS);
+  t('…each logo the company\'s own file from its row', html.includes('src="/images/providers/blue-house-cleaning/logo.png"'));
+  t('…the search still works (hook kept, input still nameless)',
+    /<form class="bn-find"[^>]*data-find/.test(html) && !/<input[^>]*id="mk-near"[^>]*\sname=/.test(html));
+  t('…and it is still an uncached preview', res.headers.get('Cache-Control') === 'no-store');
+  res = await M.handleMarketplace(get('/providers?hero=night'), env, null, u('/providers?hero=night'));
+  html = await res.text();
+  t('the public directory ignores ?hero=night', !html.includes('bn-hero') && !html.includes('serve-tokens.css'));
 }
 
 console.log('\n=== 5. POST /api/estimate ===');
