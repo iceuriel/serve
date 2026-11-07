@@ -14,6 +14,23 @@ accurate except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-11-07, Claude Code: 14th partner, Blue House Cleaning
+
+The founder added Blue House Cleaning (Quincy, owner Tiago Camara) as PRV-0014.
+- `db/first-partners.json` and the regenerated seed carry the public fields
+  only. Phone, website and the confirm list are in the private full copy.
+  Rating: Thumbtack 5.0 (65), checked 2026-11-07, not shown until
+  `rating_checked_on` is set.
+- Logo: their logo has their phone number printed on it, so Serve cropped it
+  to the house and wordmark (`images/providers/blue-house-cleaning/logo.png`).
+  The owner should OK the crop. No photos: the site's photos look AI-generated.
+- `tests/marketplace.test.js` now takes provider and photo counts from the
+  JSON instead of hardcoding 13 and 20.
+- **NOT YET IN LIVE D1.** The founder runs once:
+  `npx.cmd wrangler d1 execute serve-marketplace --remote --file db/seed-first-partners.sql`
+  INSERT OR IGNORE, so the 13 existing rows are untouched; only Blue House
+  is added, unlisted.
+
 ## Current work — 2026-11-07, Claude Code: /providers on phones + ZIP search
 
 Founder, testing the preview on an iPhone: one company filled the whole

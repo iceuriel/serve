@@ -86,6 +86,10 @@ const get = (p, headers) => new Request('https://servecleaning.com' + p, { metho
 const postJson = (body, headers) => new Request('https://servecleaning.com/api/estimate', {
   method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json', Accept: 'application/json' }, headers || {}),
   body: JSON.stringify(body) });
+// Counts come from the seed's source, so adding a company doesn't mean editing tests.
+const PARTNERS = JSON.parse(read('db/first-partners.json'));
+const N_PARTNERS = PARTNERS.length;
+const N_PHOTOS = PARTNERS.reduce((n, p) => n + p.photos.length, 0);
 const listOne = (raw, slug) => raw.prepare("UPDATE providers SET listed = 1, status = 'approved' WHERE slug = ?").run(slug);
 
 (async function run() {
@@ -94,13 +98,13 @@ console.log('=== 1. schema and seed ===');
 {
   const { raw } = makeD1();
   const counts = raw.prepare('SELECT count(*) n, sum(listed) l FROM providers').get();
-  t('13 providers seeded', counts.n === 13, counts.n);
+  t(N_PARTNERS + ' providers seeded (every row in first-partners.json)', N_PARTNERS >= 13 && counts.n === N_PARTNERS, counts.n);
   t('the seed lists NOBODY', counts.l === 0, counts.l);
   t('every seeded provider is a prospect', raw.prepare("SELECT count(*) n FROM providers WHERE status <> 'prospect'").get().n === 0);
   raw.exec(read('db/seed-first-partners.sql'));
   t('re-running the seed duplicates nothing',
-    raw.prepare('SELECT count(*) n FROM providers').get().n === 13 &&
-    raw.prepare('SELECT count(*) n FROM provider_photos').get().n === 20);
+    raw.prepare('SELECT count(*) n FROM providers').get().n === N_PARTNERS &&
+    raw.prepare('SELECT count(*) n FROM provider_photos').get().n === N_PHOTOS);
   const cols = raw.prepare('PRAGMA table_info(estimate_requests)').all().map((c) => c.name);
   t('estimate_requests keeps the quoted price', ['quoted_price_cents', 'quoted_frequency', 'quoted_at'].every((c) => cols.includes(c)), cols);
   t('estimate_requests has client_ref for retries', cols.includes('client_ref'));
@@ -228,8 +232,8 @@ console.log('\n=== 4. routes: listed, unlisted, preview ===');
   res = await M.handleMarketplace(get('/providers?preview=' + PREVIEW), env, null, u('/providers?preview=' + PREVIEW));
   html = await res.text();
   const cardCount = (html.match(/<article class="mk-card"/g) || []).length;
-  t('the preview directory shows all 13 companies', res.status === 200 && cardCount === 13, cardCount);
-  t('…badges the 12 drafts and not the listed one', (html.match(/Draft · not public/g) || []).length === 12);
+  t('the preview directory shows all ' + N_PARTNERS + ' companies', res.status === 200 && cardCount === N_PARTNERS, cardCount);
+  t('…badges the ' + (N_PARTNERS - 1) + ' drafts and not the listed one', (html.match(/Draft · not public/g) || []).length === N_PARTNERS - 1);
   t('…links each card to its own preview', html.includes('href="/providers/taskforce-cleaning-services?preview=' + PREVIEW + '"') &&
     html.includes('href="/providers/taskforce-cleaning-services?preview=' + PREVIEW + '#estimate"'));
   t('…is noindex in the markup AND the header, and uncached',

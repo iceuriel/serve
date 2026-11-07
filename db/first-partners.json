@@ -914,5 +914,70 @@
     "sort_rank": 130,
     "photos": [],
     "quotes": []
+  },
+  {
+    "id": "PRV-0014",
+    "slug": "blue-house-cleaning",
+    "name": "Blue House Cleaning",
+    "tagline": "A small, owner-run Quincy team that quotes your home after a free walkthrough.",
+    "about": "Blue House Cleaning is a small, locally owned company based in Quincy and run by its owner, Tiago. Most of their work is recurring home cleaning, along with deep cleans, move-outs, vacation rentals and some commercial spaces. Every quote starts with a free walkthrough, so the price is made for your space rather than guessed. They take pride in the details, especially sanitizing kitchens and bathrooms, and they're comfortable working in homes with pets.",
+    "brand_color": "#1d4ed8",
+    "logo_path": "/images/providers/blue-house-cleaning/logo.png",
+    "logo_bg": "#ffffff",
+    "years_label": "21 yrs in business",
+    "owner_public_name": "Tiago Camara",
+    "team_label": "Small team",
+    "service_area": "Quincy and nearby Greater Boston",
+    "area_short": "Quincy · Greater Boston",
+    "regions": [
+      "south",
+      "core"
+    ],
+    "services": [
+      "House & apartment cleaning",
+      "Recurring cleaning",
+      "Deep cleaning",
+      "Move-out cleaning",
+      "Vacation rental cleaning",
+      "Commercial",
+      "Inside windows, fridge, oven and baseboards"
+    ],
+    "service_tags": [
+      "Recurring",
+      "Deep clean",
+      "Move in / out",
+      "Airbnb"
+    ],
+    "claims": [
+      "Owner-run",
+      "Free walkthrough quotes",
+      "Background-checked"
+    ],
+    "policies": [
+      "Free on-site walkthrough before every quote",
+      "Homes with pets welcome",
+      "Pay by cash, check, Venmo or Zelle"
+    ],
+    "pricing_text": "Not published. Quoted after a free walkthrough of your home.",
+    "deals": [],
+    "price_label": "Pricing",
+    "price_value": "Free walkthrough",
+    "card_note": "Quotes after seeing your home",
+    "rating": 5,
+    "review_count": 65,
+    "rating_source": "Thumbtack",
+    "rating_checked_on": "",
+    "status": "prospect",
+    "listed": 0,
+    "sort_rank": 140,
+    "photos": [],
+    "quotes": [
+      {
+        "quote": "Very detailed cleaning which covers the top cabinets of the kitchen",
+        "author": "Yiling",
+        "source": "Thumbtack",
+        "source_url": ""
+      }
+    ]
   }
 ]
