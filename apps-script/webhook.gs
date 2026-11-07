@@ -1,7 +1,23 @@
 /**
  * Serve — Booking webhook (doPost)   ·   LEADS MASTER, servecos.com
  * ==================================================================
- * VERSION STAMP:  2026-09-29  ·  master  ·  r62 — the portal can ask for a plumber
+ * VERSION STAMP:  2026-11-06  ·  master  ·  r63 — the marketplace emails the founder
+ *
+ * r63 = MARKETPLACE ESTIMATE REQUESTS. INCLUDES r62 BELOW — one paste.
+ *       One new event_type, "estimate_request", sent by the Worker AFTER the
+ *       request is saved in Cloudflare D1. It emails the founder and appends a
+ *       copy to ESTIMATE_REQUESTS_LOG (auto-created). It writes no JOBS, LEADS
+ *       or EVENTS row. Needs a NEW Script Property, MARKET_BRIDGE_SECRET, equal
+ *       to the Worker secret of the same name.
+ *
+ *       ORDER: paste + deploy this, set the Script Property, and ONLY THEN set
+ *       the Worker secret MARKET_BRIDGE_SECRET. The Worker does not call the
+ *       webhook at all while its secret is unset, so the site can ship first.
+ *       The wrong order is not dangerous but is noisy: r62 does not know this
+ *       event, so it files a near-empty EVENTS row and a vague "Serve Event"
+ *       email per request (no secret is written — bridge_token is not an
+ *       EVENTS column). The request itself is safe in D1 either way.
+ *       See "r63 — MARKETPLACE ESTIMATE REQUESTS" at the end of the file.
  *
  * r62 = THE PORTAL BECOMES THE PLACE A CUSTOMER ASKS FOR ANYTHING ELSE.
  *       INCLUDES r61 BELOW — this is one paste, not two.
@@ -1617,6 +1633,10 @@ function routePost(e, parsed) {
        EVENTS one — and because it is the single caller allowed past the
        ops-owned guard on payment_status. */
     if (eventType === "payment_event") return handlePaymentEvent(ss, data);
+    /* r63. A marketplace estimate request, relayed by the Worker AFTER it is
+       saved in D1. Email the founder and keep a log row; never a JOBS or
+       EVENTS row — this is not a booking. See handleEstimateRequest. */
+    if (eventType === "estimate_request") return handleEstimateRequest(ss, data);
     /* r48. A cleaner's note on a room, from the partner ticket. */
     if (eventType === "partner_note") return handlePartnerNote(ss, data);
 
@@ -1966,7 +1986,7 @@ function routeGet(e) {
      health stamp below rather than creating anything. */
   if (p.booking) return handleBookingStatus(p.booking);
 
-  return json({ ok: true, service: "serve-booking-webhook", version: "2026-09-29 r62" });
+  return json({ ok: true, service: "serve-booking-webhook", version: "2026-11-06 r63" });
 }
 
 
@@ -10556,3 +10576,127 @@ function handleRequestPhoto(ss, data) {
 }
 
 /* END SERVICE REQUESTS */
+
+/* ============================================================
+   r63 — MARKETPLACE ESTIMATE REQUESTS (2026-11-06)
+   ============================================================
+
+   THE RECORD IS IN CLOUDFLARE D1, NOT HERE. The Worker saves every estimate
+   request to D1 (src/marketplace.js) and only then calls this, so a request is
+   never lost because Apps Script was cold, slow or down. This handler does two
+   things and nothing else:
+
+     1. Emails the founder, which is how a request reaches a human today.
+     2. Appends a LOG row to ESTIMATE_REQUESTS_LOG, so the history is visible
+        from the workbook the founder already lives in.
+
+   THE LOG IS A COPY. Editing it changes nothing in D1, and it deliberately has
+   no status column so nobody is tempted to work requests from it. It writes no
+   JOBS, LEADS or EVENTS row: an estimate request is not a booking and not yet
+   a customer.
+
+   ONLY THE WORKER MAY CALL THIS. MARKET_BRIDGE_SECRET is this surface's own
+   Script Property — not PAYMENT_BRIDGE_SECRET, not PHOTO_BRIDGE_SECRET — so a
+   leak of any one credential never opens another surface. Compared trimmed on
+   both sides, and refused identically whether it is missing or wrong, exactly
+   as handlePaymentEvent does (see the r51 note there).
+   ============================================================ */
+const ESTIMATE_LOG_TAB = "ESTIMATE_REQUESTS_LOG";
+const ESTIMATE_LOG_HEADERS = ["request_id", "created_at", "provider_id", "provider_name",
+  "method", "time_pref", "phone", "address", "zip", "sms_consent", "source", "logged_at"];
+
+function handleEstimateRequest(ss, data) {
+  var secret = String(
+    PropertiesService.getScriptProperties().getProperty("MARKET_BRIDGE_SECRET") || "").trim();
+  var offered = String(data.bridge_token || "").trim();
+  if (!secret) {
+    console.error("estimate_request refused: MARKET_BRIDGE_SECRET is not set in Script Properties.");
+    return json({ ok: false, error: "not_found" });
+  }
+  if (offered !== secret) {
+    console.error("estimate_request refused: bridge token mismatch (offered " +
+                  offered.length + " chars, expected " + secret.length + ").");
+    return json({ ok: false, error: "not_found" });
+  }
+
+  var r = data.request || {};
+  var requestId = String(r.request_id || "").trim();
+  if (!/^EST-[A-Z0-9]{6,20}$/.test(requestId)) return json({ ok: false, error: "bad_request" });
+  var method = r.method === "walkthrough" ? "walkthrough" : r.method === "phone" ? "phone" : "";
+  if (!method) return json({ ok: false, error: "bad_request" });
+
+  var record = {
+    request_id:    requestId,
+    created_at:    String(r.created_at || "").slice(0, 40),
+    provider_id:   String(r.provider_id || "").slice(0, 40),
+    provider_name: String(r.provider_name || "").slice(0, 120),
+    method:        method,
+    time_pref:     r.time_pref === "later" ? "later" : "earlier",
+    phone:         String(r.phone || "").slice(0, 40),
+    address:       method === "walkthrough" ? String(r.address || "").slice(0, 200) : "",
+    zip:           String(r.zip || "").replace(/[^0-9]/g, "").slice(0, 5),
+    sms_consent:   r.sms_consent === true ? "yes" : "no",
+    source:        String(r.source || "").slice(0, 80),
+    logged_at:     new Date().toISOString(),
+  };
+
+  /* Idempotent on request_id: the Worker does not retry today, but a log that
+     doubles under a retry is a log nobody trusts. */
+  assertWritable(ESTIMATE_LOG_TAB);
+  var sheet = ss.getSheetByName(ESTIMATE_LOG_TAB);
+  if (!sheet) {
+    sheet = ss.insertSheet(ESTIMATE_LOG_TAB);
+    sheet.appendRow(ESTIMATE_LOG_HEADERS);
+    sheet.setFrozenRows(1);
+    console.log('Created the "' + ESTIMATE_LOG_TAB + '" tab.');
+  }
+  var values = sheetValues(sheet);
+  var headers = (values[0] || ESTIMATE_LOG_HEADERS).map(String);
+  var idCol = headers.indexOf("request_id");
+  for (var i = 1; i < values.length; i++) {
+    if (idCol >= 0 && String(values[i][idCol]) === requestId) return json({ ok: true, duplicate: true });
+  }
+  sheet.appendRow(headers.map(function (name) {
+    return record[name] === undefined ? "" : record[name];
+  }));
+
+  /* A mail failure is reported, not swallowed: the Worker leaves notified_at
+     blank in D1 when this is not ok, and that blank is the founder's list of
+     requests nobody was told about. The log row above stays either way. */
+  try {
+    sendEstimateRequestEmail(record);
+  } catch (mailErr) {
+    console.error("estimate request email failed for " + requestId + ": " + mailErr);
+    return json({ ok: false, error: "mail_failed" });
+  }
+  return json({ ok: true, request_id: requestId });
+}
+
+function sendEstimateRequestEmail(record) {
+  var when = record.time_pref === "later" ? "Later in the day (12–5)" : "Earlier in the day (8–12)";
+  MailApp.sendEmail(
+    notifyEmail(),
+    "Serve Estimate — " + record.provider_name + " · " +
+      (record.method === "walkthrough" ? "Walkthrough" : "Phone") +
+      (record.zip ? " · " + record.zip : ""),
+    "Someone asked a marketplace company for an estimate.\n" +
+    "THIS IS NOT A BOOKING. Nothing is scheduled, priced or charged.\n\n" +
+    "— WHO THEY ASKED —\n" +
+    "Company:   " + record.provider_name + " (" + record.provider_id + ")\n" +
+    "Estimate:  " + (record.method === "walkthrough" ? "In-person walkthrough" : "Over the phone") + "\n" +
+    "Best time: " + when + "\n" +
+    "\n— HOW TO REACH THEM —\n" +
+    "Phone:     " + record.phone + "\n" +
+    (record.method === "walkthrough" ? "Address:   " + record.address + "\n" : "") +
+    "Texts OK:  " + (record.sms_consent === "yes" ? "yes — they ticked the SMS consent box" :
+                     "NO — call only, do not text") + "\n" +
+    "\n— NEXT —\n" +
+    "Pass this to " + record.provider_name + " and ask them to reach the client during that window.\n" +
+    "When they quote, record the price against " + record.request_id + " — that number is the\n" +
+    "thing Serve exists to keep.\n" +
+    "\nRequest:   " + record.request_id + "  ·  received " + record.created_at + "\n" +
+    (record.source ? "Source:    " + record.source + "\n" : "") +
+    "The record is in D1. " + ESTIMATE_LOG_TAB + " is a copy — editing it changes nothing.\n");
+}
+
+/* END MARKETPLACE ESTIMATE REQUESTS */

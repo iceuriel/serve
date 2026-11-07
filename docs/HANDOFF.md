@@ -6,10 +6,117 @@ assistant with no access to this repo. Self-contained on purpose.
 **Companion doc:** `/docs/SCHEMA.md` — authoritative for every column's meaning
 and who writes it. This file is the narrative; that file is the contract.
 
-**Latest session: 2026-09-29 (Home services — the portal asks for a plumber).**
+**Latest session: 2026-11-06 (Marketplace phase 1 — D1, /providers, webhook r63; local only).**
+Previous: 2026-09-29 (Home services — the portal asks for a plumber).
 Jump to [what changed on 2026-09-08 / 09](#session-2026-09-08--09) for the
 current state. The sections below it describe earlier builds and remain
 accurate except where a later section supersedes them.
+
+---
+
+## Current work — 2026-11-06, Claude Code: marketplace phase 1 (D1 + /providers)
+
+**STATE AS OF THE PUSH (2026-11-06), checked rather than assumed:**
+- D1 `serve-marketplace` created (id in `wrangler.jsonc`, binding `MARKET_DB`
+  — wrangler's prompt offered `serve_marketplace`, which the code would not
+  see; renamed). Migration 0001 applied remotely; seed applied remotely
+  (45 queries = 13 providers + 20 photos + 12 quotes), **all unlisted**.
+- Webhook **r63 deployed**: `/exec` answered `"2026-11-06 r63"` twice before
+  the push. Founder set Script Property `MARKET_BRIDGE_SECRET`, then the Worker
+  secrets `MARKET_BRIDGE_SECRET` and `MARKET_PREVIEW_KEY` — in that order.
+- The live D1 rows were seeded BEFORE the repo copy was scrubbed, so the live
+  `provider_quotes.source_url` still links each company's own website. Run
+  once: `UPDATE provider_quotes SET source_url = ''` (see below).
+- After the push: check `/api/health` for `has_marketplace_db: true` and
+  `can_notify_estimates: true`, and preview one draft. Not yet done at the time
+  of writing.
+
+**45 test files pass**
+(new: `tests/marketplace.test.js`, which runs the real migration and seed on
+real SQLite via `node:sqlite`, and was mutation-checked — leaking a phone,
+unescaping a name and ignoring `listed` each turn it red).
+
+**Founder decisions, 2026-11-06** (asked and answered, not defaults):
+1. Build the marketplace at **`/providers`** first. **The homepage is not
+   swapped** until enough owners have approved their profiles.
+2. **A business's own phone, email and website are never shown publicly.**
+   Every estimate request goes through Serve.
+3. Marketplace data lives in **Cloudflare D1 now**, not Sheets.
+
+Background: the founder phoned prospects and 13 companies said they want to be
+listed (names in `db/first-partners.json`; private context in shared memory).
+The design was agreed on a private claude.ai design canvas: directory cards,
+profile, a simplified estimate request (phone or walkthrough → phone [+
+address] → earlier/later → submit), a business portal that only lists inbound
+requests, and a client portal with quote requests and "My home".
+
+### What exists now
+
+| File | What |
+|---|---|
+| `migrations/0001_marketplace.sql` | D1 schema. Contract in SCHEMA.md "The marketplace — Cloudflare D1". |
+| `db/first-partners.json` → `scripts/seed-partners.js` → `db/seed-first-partners.sql` | The 13 profiles, drafted by Serve from each company's public website. **Seeded UNLISTED** (forced), ratings unverified (left un-shown). Owner must approve before listing. `internal_notes` holds each company's "confirm on the call" list. |
+| `images/providers/<slug>/` | Logos and the companies' own work photos (stock photos were left out). |
+| `src/marketplace.js` | `/providers`, `/providers/<slug>` (server-rendered, cached 5 min, founder preview via `?preview=`), `/api/providers`, `POST /api/estimate`. |
+| `src/worker.js` | One-line import + `isMarketplacePath()` hand-off after the API routes; `/api/health` gains `has_marketplace_db` and `can_notify_estimates`. |
+| `marketplace.css`, `marketplace-client.js` | Staged in `build-site.sh`. Filters and the estimate form are enhancements; with JS off the form still posts and gets a full page back. |
+| `apps-script/webhook.gs` **r63** | `event_type: "estimate_request"` → founder email + `ESTIMATE_REQUESTS_LOG` copy. Own secret `MARKET_BRIDGE_SECRET`. Writes no JOBS/LEADS/EVENTS. |
+| `wrangler.jsonc` | D1 binding **commented out** (a placeholder id would fail every git deploy) + the two new secrets documented. |
+
+**Without the D1 binding nothing breaks**: `/providers` says "opening soon",
+`/api/estimate` answers `unavailable`. So the site CAN be pushed before the
+database exists.
+
+### To turn it on (founder; needs a Cloudflare login, which this machine lacks)
+
+1. `npx wrangler login` → `npx wrangler d1 create serve-marketplace` → paste the
+   id into `wrangler.jsonc`, uncomment the block.
+2. `npx wrangler d1 migrations apply serve-marketplace --remote`, then
+   `npx wrangler d1 execute serve-marketplace --remote --file db/seed-first-partners.sql`.
+3. Paste webhook **r63**, deploy a new version, confirm `/exec` says r63, add
+   Script Property `MARKET_BRIDGE_SECRET` (new random string).
+4. `npx wrangler secret put MARKET_BRIDGE_SECRET` (same value) and
+   `npx wrangler secret put MARKET_PREVIEW_KEY` (another one). **Bridge secret
+   last** — see the r63 header for why the order matters.
+5. Push. Check `/api/health`: `has_marketplace_db: true`,
+   `can_notify_estimates: true`. Preview a draft at
+   `/providers/roses-cleaning?preview=<key>`.
+6. Per company, after the owner approves: verify rating (set
+   `rating_checked_on`), insurance (`insurance_verified`), then
+   `UPDATE providers SET listed = 1, status = 'approved', owner_approved_at = …`.
+   Add `/providers` (and each listed profile) to `sitemap.xml` when the first
+   one goes live — not before, or Google indexes an empty directory.
+
+### Verified, and not
+
+- Verified: the migration + seed apply to SQLite 3.51 and re-running the seed
+  duplicates nothing; the directory, two profiles and the walkthrough toggle
+  were rendered from the real module against the real stylesheets and looked
+  at in Chrome (desktop width).
+- **Not verified:** phone-width layout (the browser window would not resize);
+  anything on real D1, a real Worker deploy, or a real r63 email.
+
+### Open items for the founder
+
+- **The SMS consent wording** on the estimate form is adapted from the booking
+  form. Serve's A2P 10DLC campaign was registered for cleaning appointments;
+  confirm estimate texts fit it before texting anyone from this form. Until
+  then the founder email says "do not text" for anyone who did not tick it.
+- **Per-company follow-ups** (contact-detail mismatches, photo consent, owner
+  names to confirm) are in each D1 row's `internal_notes` and in the private
+  copy `../.agent-memory/marketplace/first-partners.full.json`. **This repo is
+  PUBLIC** — no business's internal phone, email, website or notes may be
+  committed here; the repo seed carries none (a test enforces it).
+- Directory ordering (`sort_rank`) is a placeholder; ranking neutrality is
+  still an open decision.
+
+### Phase 2 — next
+
+Business portal "Estimate requests" (D1-backed; needs its own token audience,
+not the Apps Script vendor HMAC), client portal (quote requests + My home on
+`homes`/`home_rooms`), recording the quoted price, an admin page so profiles
+are not edited in SQL, notifying the business directly, then the homepage
+swap.
 
 ---
 

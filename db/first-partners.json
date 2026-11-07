@@ -1,0 +1,918 @@
+[
+  {
+    "id": "PRV-0001",
+    "slug": "roses-cleaning",
+    "name": "Rose's Cleaning Inc",
+    "tagline": "Family- and woman-owned cleaning and organizing, run by Rose Santa Rita since 2008.",
+    "about": "Rose started cleaning homes in 2006 and has owned the business since 2008. The company avoids \"cleaning by the numbers\" in favor of custom, hands-on service, and gives free estimates in person or by FaceTime or WhatsApp video. They also do professional organizing, and are registered to work on federal properties.",
+    "brand_color": "#f3722b",
+    "logo_path": "/images/providers/roses-cleaning/logo.svg",
+    "logo_bg": "#1f2937",
+    "years_label": "18 yrs in business",
+    "owner_public_name": "Rose Santa Rita",
+    "team_label": "Multiple crews",
+    "service_area": "Boston area, South Shore and Cape Cod",
+    "area_short": "Boston · Quincy · South Shore",
+    "regions": [
+      "core",
+      "south"
+    ],
+    "services": [
+      "Home cleaning",
+      "Move-in / move-out",
+      "Post-construction",
+      "Professional organizing",
+      "Carpet & upholstery",
+      "Office & commercial"
+    ],
+    "service_tags": [
+      "Move in / out",
+      "Post-construction"
+    ],
+    "claims": [
+      "Licensed and insured in MA",
+      "Woman-owned",
+      "Free walkthrough or video estimates"
+    ],
+    "policies": [
+      "Fully licensed and insured in Massachusetts (as stated)",
+      "Free estimates in person or by video call",
+      "Eco-friendly products",
+      "Family-owned and woman-owned"
+    ],
+    "pricing_text": "Not published. Free in-person or video estimates.",
+    "deals": [],
+    "price_label": "Pricing",
+    "price_value": "Free estimate",
+    "card_note": "Owner-run since 2008",
+    "rating": 4.7,
+    "review_count": 57,
+    "rating_source": "Google",
+    "rating_checked_on": "",
+    "status": "prospect",
+    "listed": 0,
+    "sort_rank": 10,
+    "photos": [
+      {
+        "path": "/images/providers/roses-cleaning/photo-1.png",
+        "caption": "Rose's team"
+      },
+      {
+        "path": "/images/providers/roses-cleaning/photo-2.jpg",
+        "caption": "Bedroom, before"
+      },
+      {
+        "path": "/images/providers/roses-cleaning/photo-3.jpg",
+        "caption": "Same bedroom, after"
+      },
+      {
+        "path": "/images/providers/roses-cleaning/photo-4.jpg",
+        "caption": "Living room, after"
+      }
+    ],
+    "quotes": [
+      {
+        "quote": "Rose's Cleaning is the BEST service you will ever find.",
+        "author": "Meagan",
+        "source": "their website",
+        "source_url": ""
+      },
+      {
+        "quote": "Highly recommend Rose's Cleaning Inc. to anyone looking for reliable, top-tier home cleaning!",
+        "author": "Chelsey",
+        "source": "their website",
+        "source_url": ""
+      }
+    ]
+  },
+  {
+    "id": "PRV-0002",
+    "slug": "sonias-cleaning-services",
+    "name": "Sonia's Cleaning Services",
+    "tagline": "The cleaning service you don't have to supervise. Same cleaner every visit, cleaning since 2002.",
+    "about": "Owner Sonia Vasconcelos has been cleaning homes since 2002. Recurring clients get the same cleaner each visit with no contract, and if anything is missed, the team comes back for a free re-clean when it is reported within 24 hours. Regular cleans are a flat price per visit based on home size and how often; deep, move and post-construction cleans are billed by the hour.",
+    "brand_color": "#461f5c",
+    "logo_path": "/images/providers/sonias-cleaning-services/logo.svg",
+    "logo_bg": "#ffffff",
+    "years_label": "Cleaning since 2002",
+    "owner_public_name": "Sonia Vasconcelos",
+    "team_label": "Background-checked team",
+    "service_area": "Newton, Chestnut Hill, Brookline, Wellesley, Needham, Belmont, Dedham, plus MetroWest",
+    "area_short": "Newton · Brookline · Wellesley",
+    "regions": [
+      "west"
+    ],
+    "services": [
+      "Recurring house cleaning",
+      "Deep / spring cleaning",
+      "Move-in / move-out",
+      "Post-construction",
+      "Airbnb turnovers",
+      "Office & small business"
+    ],
+    "service_tags": [
+      "Recurring",
+      "Deep clean",
+      "Move in / out",
+      "Post-construction",
+      "Airbnb"
+    ],
+    "claims": [
+      "Bonded, licensed and insured",
+      "Background-checked team",
+      "Free re-clean guarantee"
+    ],
+    "policies": [
+      "Bonded, licensed and insured (as stated)",
+      "Free re-clean if reported within 24 hours",
+      "Same cleaner every visit",
+      "No contracts, change or cancel anytime",
+      "Eco-friendly, pet- and child-safe products"
+    ],
+    "pricing_text": "Flat price per visit for regular cleans and Airbnb turnovers. Hourly for deep, move and post-construction cleans. Recurring visits are discounted, and estimates are free.",
+    "deals": [],
+    "price_label": "Pricing",
+    "price_value": "Flat rate per visit",
+    "card_note": "Bonded & insured",
+    "rating": 5,
+    "review_count": 47,
+    "rating_source": "Google",
+    "rating_checked_on": "",
+    "status": "prospect",
+    "listed": 0,
+    "sort_rank": 20,
+    "photos": [
+      {
+        "path": "/images/providers/sonias-cleaning-services/photo-1.jpg",
+        "caption": "Sonia's team and company car"
+      },
+      {
+        "path": "/images/providers/sonias-cleaning-services/photo-2.jpg",
+        "caption": "Kitchen clean in progress"
+      },
+      {
+        "path": "/images/providers/sonias-cleaning-services/photo-3.jpg",
+        "caption": "Faucet, before"
+      },
+      {
+        "path": "/images/providers/sonias-cleaning-services/photo-4.jpg",
+        "caption": "Faucet, after"
+      }
+    ],
+    "quotes": [
+      {
+        "quote": "Her service is always of the highest standard.",
+        "author": "Rosana",
+        "source": "their website",
+        "source_url": ""
+      },
+      {
+        "quote": "The team is very professional, responds quickly, and is on time!",
+        "author": "Dana",
+        "source": "their website",
+        "source_url": ""
+      }
+    ]
+  },
+  {
+    "id": "PRV-0003",
+    "slug": "taskforce-cleaning-services",
+    "name": "Taskforce Cleaning Services",
+    "tagline": "Recurring house cleaning from a vetted crew, with more than 16,000 cleanings done.",
+    "about": "Taskforce is an Everett-based company focused on high-quality recurring house cleaning. It reports more than 14 years of experience and over 16,000 cleanings. Technicians are vetted when hired, and the company holds IICRC cleaning-technician certification, a Nextdoor Neighborhood Faves listing and a Cleaning for a Reason partnership.",
+    "brand_color": "#1f3c88",
+    "logo_path": "/images/providers/taskforce-cleaning-services/logo.png",
+    "logo_bg": "#ffffff",
+    "years_label": "14+ yrs experience",
+    "owner_public_name": "",
+    "team_label": "",
+    "service_area": "Everett, Malden, Melrose, Medford, Somerville, Cambridge, Arlington, Lexington, Boston, Revere, Woburn",
+    "area_short": "Everett · Somerville · Cambridge",
+    "regions": [
+      "core",
+      "north"
+    ],
+    "services": [
+      "Recurring (weekly, biweekly, monthly)",
+      "Deep cleaning",
+      "Move-in / move-out",
+      "One-time cleaning",
+      "Post-construction",
+      "Office & commercial",
+      "Disinfecting"
+    ],
+    "service_tags": [
+      "Recurring",
+      "Deep clean",
+      "Move in / out",
+      "Post-construction"
+    ],
+    "claims": [
+      "Fully insured",
+      "IICRC certified",
+      "Satisfaction guaranteed"
+    ],
+    "policies": [
+      "Fully insured (as stated)",
+      "Technicians vetted when hired",
+      "Satisfaction guaranteed",
+      "IICRC certified cleaning technician",
+      "Cleaning for a Reason partner"
+    ],
+    "pricing_text": "No base prices published. Current offers:",
+    "deals": [
+      "25% off the first deep clean with 6 months of recurring service",
+      "Up to $100 off: $50 off a deep clean, then $25 off each of the next two cleans"
+    ],
+    "price_label": "Current offer",
+    "price_value": "25% off first deep clean",
+    "card_note": "IICRC certified",
+    "rating": 5,
+    "review_count": 67,
+    "rating_source": "Google",
+    "rating_checked_on": "",
+    "status": "prospect",
+    "listed": 0,
+    "sort_rank": 30,
+    "photos": [],
+    "quotes": []
+  },
+  {
+    "id": "PRV-0004",
+    "slug": "moro-pro-cleaning",
+    "name": "Moro Pro Cleaning",
+    "tagline": "A cleaner home and more time for yourself. Melrose-based, serving Greater Boston and the North Shore.",
+    "about": "Moro Pro Cleaning is based in Melrose. Customers can see an instant price and book online, with no contracts and easy rescheduling, and pay after the clean is finished. The company says it has more than 130 five-star reviews across Google and Thumbtack.",
+    "brand_color": "#3a7dbf",
+    "logo_path": "/images/providers/moro-pro-cleaning/logo.png",
+    "logo_bg": "#ffffff",
+    "years_label": "",
+    "owner_public_name": "",
+    "team_label": "",
+    "service_area": "Melrose, Medford, Cambridge, Boston, North Shore",
+    "area_short": "Melrose · Medford · Cambridge",
+    "regions": [
+      "core",
+      "north"
+    ],
+    "services": [
+      "Standard cleaning",
+      "Deep cleaning",
+      "Move-in / move-out",
+      "Airbnb & vacation rentals",
+      "Post-construction",
+      "Commercial"
+    ],
+    "service_tags": [
+      "Recurring",
+      "Deep clean",
+      "Move in / out",
+      "Post-construction",
+      "Airbnb"
+    ],
+    "claims": [
+      "Licensed and fully insured",
+      "Satisfaction guaranteed",
+      "No contracts"
+    ],
+    "policies": [
+      "Licensed and fully insured (as stated)",
+      "Background-checked cleaners (per their FAQ)",
+      "Satisfaction guaranteed",
+      "No contracts, easy rescheduling",
+      "Pay after the clean"
+    ],
+    "pricing_text": "They show instant prices online through a calculator. Ask if Serve can show their starting prices here.",
+    "deals": [],
+    "price_label": "Pricing",
+    "price_value": "Instant price online",
+    "card_note": "Satisfaction guaranteed",
+    "rating": 4.8,
+    "review_count": 41,
+    "rating_source": "Google",
+    "rating_checked_on": "",
+    "status": "prospect",
+    "listed": 0,
+    "sort_rank": 40,
+    "photos": [
+      {
+        "path": "/images/providers/moro-pro-cleaning/photo-1.jpg",
+        "caption": "Living room, after"
+      },
+      {
+        "path": "/images/providers/moro-pro-cleaning/photo-2.jpg",
+        "caption": "Bedroom, after"
+      },
+      {
+        "path": "/images/providers/moro-pro-cleaning/photo-3.jpg",
+        "caption": "Shower, after"
+      }
+    ],
+    "quotes": []
+  },
+  {
+    "id": "PRV-0005",
+    "slug": "247-cleaning-boston",
+    "name": "247 Cleaning Boston",
+    "tagline": "Detail-focused home cleaning with the same trusted team every visit.",
+    "about": "247 Cleaning Boston cleans homes and businesses across Greater Boston with eco-conscious products. The \"247\" stands for their commitment, not their hours. Reviews describe Carlos as the main contact, who texts ahead to confirm every appointment, and the team will use your own products if you ask.",
+    "brand_color": "#0082fb",
+    "logo_path": "/images/providers/247-cleaning-boston/logo.png",
+    "logo_bg": "#ffffff",
+    "years_label": "",
+    "owner_public_name": "Carlos Duarte",
+    "team_label": "",
+    "service_area": "Boston, Arlington and Greater Boston",
+    "area_short": "Boston · Arlington",
+    "regions": [
+      "core"
+    ],
+    "services": [
+      "Regular cleaning (weekly, biweekly, monthly)",
+      "Deep cleaning",
+      "Move-in / move-out",
+      "Post-construction",
+      "Commercial"
+    ],
+    "service_tags": [
+      "Recurring",
+      "Deep clean",
+      "Move in / out",
+      "Post-construction"
+    ],
+    "claims": [
+      "Fully insured",
+      "Same team every visit",
+      "Eco-friendly products"
+    ],
+    "policies": [
+      "Fully insured (as stated)",
+      "The same team every visit",
+      "Eco-friendly products, or yours on request",
+      "Texts to confirm every appointment"
+    ],
+    "pricing_text": "Not published. Free quotes.",
+    "deals": [],
+    "price_label": "Pricing",
+    "price_value": "Free quote",
+    "card_note": "Fully insured",
+    "rating": 5,
+    "review_count": 40,
+    "rating_source": "Google",
+    "rating_checked_on": "",
+    "status": "prospect",
+    "listed": 0,
+    "sort_rank": 50,
+    "photos": [
+      {
+        "path": "/images/providers/247-cleaning-boston/photo-1.jpg",
+        "caption": "Oven, after"
+      },
+      {
+        "path": "/images/providers/247-cleaning-boston/photo-2.jpg",
+        "caption": "Gas range, after"
+      },
+      {
+        "path": "/images/providers/247-cleaning-boston/photo-3.jpg",
+        "caption": "From their before-and-after gallery"
+      }
+    ],
+    "quotes": [
+      {
+        "quote": "Carlos is a great communicator, always texting to confirm the appointment.",
+        "author": "Jillian",
+        "source": "their website",
+        "source_url": ""
+      },
+      {
+        "quote": "Everything is gleaming.",
+        "author": "Virginia",
+        "source": "their website",
+        "source_url": ""
+      }
+    ]
+  },
+  {
+    "id": "PRV-0006",
+    "slug": "cambridge-clean-co",
+    "name": "Cambridge Clean Co",
+    "tagline": "Locally owned, family-run home cleaning for Cambridge and nearby towns, backed by a free re-clean guarantee.",
+    "about": "Cambridge Clean Co is a family-owned cleaning company based on Concord Avenue in Cambridge. Clients can book online, and every cleaner is interviewed, identity-checked and background- and reference-checked before joining the team. Customer reviews name the owner, Rich Porter, as their main contact.",
+    "brand_color": "#0ca9bb",
+    "logo_path": "/images/providers/cambridge-clean-co/logo.png",
+    "logo_bg": "#0ca9bb",
+    "years_label": "",
+    "owner_public_name": "Richard Porter",
+    "team_label": "",
+    "service_area": "Cambridge, Somerville, Arlington, Boston, Belmont, Brookline",
+    "area_short": "Cambridge · Somerville · Arlington",
+    "regions": [
+      "core"
+    ],
+    "services": [
+      "Recurring cleaning",
+      "Deep cleaning",
+      "Move-in / move-out",
+      "Apartments & condos",
+      "Commercial & janitorial"
+    ],
+    "service_tags": [
+      "Recurring",
+      "Deep clean",
+      "Move in / out"
+    ],
+    "claims": [
+      "Background-checked cleaners",
+      "Satisfaction guarantee",
+      "Family-owned"
+    ],
+    "policies": [
+      "100% satisfaction guarantee: free re-clean if you are unhappy",
+      "Cleaners are background-, reference- and ID-checked",
+      "Pet-friendly technicians",
+      "Book online"
+    ],
+    "pricing_text": "Not published. They quote online or after a call.",
+    "deals": [],
+    "price_label": "Pricing",
+    "price_value": "Book online",
+    "card_note": "Re-clean guarantee",
+    "rating": 5,
+    "review_count": 82,
+    "rating_source": "Google",
+    "rating_checked_on": "",
+    "status": "prospect",
+    "listed": 0,
+    "sort_rank": 60,
+    "photos": [],
+    "quotes": [
+      {
+        "quote": "Richard and the team at Cambridge Clean Co are a pleasure to work with.",
+        "author": "Lea",
+        "source": "their website",
+        "source_url": ""
+      },
+      {
+        "quote": "Consistently impressed with their thoroughness and professionalism.",
+        "author": "Amy",
+        "source": "their website",
+        "source_url": ""
+      }
+    ]
+  },
+  {
+    "id": "PRV-0007",
+    "slug": "jma-cleaning-services",
+    "name": "JMA Cleaning Services",
+    "tagline": "Reliable, insured, detail-oriented cleaning for homes and businesses in Somerville and Boston.",
+    "about": "JMA Cleaning Service works in Boston and Somerville with trained teams focused on \"efficiency, safety, and consistent quality.\" They offer recurring or one-time home cleans, post-construction cleanups and office cleaning, and promise transparent pricing with clear estimates. Quotes are by phone or WhatsApp, and their site is in English and Portuguese.",
+    "brand_color": "#1fb5c1",
+    "logo_path": "/images/providers/jma-cleaning-services/logo.jpg",
+    "logo_bg": "#000000",
+    "years_label": "",
+    "owner_public_name": "",
+    "team_label": "",
+    "service_area": "Somerville, Boston",
+    "area_short": "Somerville · Boston",
+    "regions": [
+      "core"
+    ],
+    "services": [
+      "Recurring cleaning",
+      "One-time cleaning",
+      "Post-construction",
+      "Office & commercial"
+    ],
+    "service_tags": [
+      "Recurring",
+      "Post-construction"
+    ],
+    "claims": [
+      "Insured staff",
+      "Background-checked teams",
+      "Clear written estimates"
+    ],
+    "policies": [
+      "Insured staff (as stated)",
+      "Background-checked teams",
+      "Flexible scheduling",
+      "Transparent pricing and clear estimates"
+    ],
+    "pricing_text": "Not published. Estimates by phone or WhatsApp.",
+    "deals": [],
+    "price_label": "Pricing",
+    "price_value": "Free estimate",
+    "card_note": "Background-checked",
+    "rating": 5,
+    "review_count": 43,
+    "rating_source": "Google",
+    "rating_checked_on": "",
+    "status": "prospect",
+    "listed": 0,
+    "sort_rank": 70,
+    "photos": [
+      {
+        "path": "/images/providers/jma-cleaning-services/photo-1.jpg",
+        "caption": "Oven, after"
+      },
+      {
+        "path": "/images/providers/jma-cleaning-services/photo-2.jpg",
+        "caption": "Bathtub, after"
+      },
+      {
+        "path": "/images/providers/jma-cleaning-services/photo-3.jpg",
+        "caption": "From their website"
+      }
+    ],
+    "quotes": []
+  },
+  {
+    "id": "PRV-0008",
+    "slug": "pam-cleaning-services",
+    "name": "Pam Cleaning Services",
+    "tagline": "Fully insured house and office cleaning across Greater Boston, trusted since 2020.",
+    "about": "Pam Cleaning has cleaned Greater Boston homes and offices since 2020. Recurring plans have no contract and can be cancelled anytime, and you pay after each clean, with no deposit or card needed. They use eco-friendly products chosen to cut down on harsh chemicals and strong fumes. A typical clean takes 2 to 3 hours.",
+    "brand_color": "#d9577a",
+    "logo_path": "/images/providers/pam-cleaning-services/logo.png",
+    "logo_bg": "#ffffff",
+    "years_label": "6 yrs in business",
+    "owner_public_name": "Pam",
+    "team_label": "",
+    "service_area": "Waltham, Watertown, Newton, Needham, Milton, Medford, plus Boston, Cambridge, Somerville, Brookline",
+    "area_short": "Waltham · Newton · Medford",
+    "regions": [
+      "core",
+      "west",
+      "north"
+    ],
+    "services": [
+      "Recurring (weekly, biweekly, monthly)",
+      "Deep cleaning",
+      "Move-in / move-out",
+      "Post-construction",
+      "Student dorms & apartments",
+      "Commercial"
+    ],
+    "service_tags": [
+      "Recurring",
+      "Deep clean",
+      "Move in / out",
+      "Post-construction"
+    ],
+    "claims": [
+      "Fully insured",
+      "No contracts",
+      "Eco-friendly products"
+    ],
+    "policies": [
+      "Fully insured with liability coverage (as stated)",
+      "No contracts, cancel anytime",
+      "Pay after each clean: cash, check, Venmo or Zelle",
+      "Eco-friendly products"
+    ],
+    "pricing_text": "No dollar prices published. Recurring plans are discounted:",
+    "deals": [
+      "Weekly: 20% off",
+      "Every 2 weeks: 15% off",
+      "Monthly: 10% off",
+      "Refer a friend: you both save $20"
+    ],
+    "price_label": "Recurring plans",
+    "price_value": "Up to 20% off",
+    "card_note": "Fully insured",
+    "rating": 5,
+    "review_count": 76,
+    "rating_source": "Google",
+    "rating_checked_on": "",
+    "status": "prospect",
+    "listed": 0,
+    "sort_rank": 80,
+    "photos": [],
+    "quotes": [
+      {
+        "quote": "Pam and Val are thorough and reliable.",
+        "author": "Claudia",
+        "source": "their website",
+        "source_url": ""
+      },
+      {
+        "quote": "The team is professional, punctual, and very thorough.",
+        "author": "Kimberly",
+        "source": "their website",
+        "source_url": ""
+      }
+    ]
+  },
+  {
+    "id": "PRV-0009",
+    "slug": "boston-flawless-homes",
+    "name": "Boston Flawless Homes",
+    "tagline": "Personalized cleaning and home organizing, from regular cleans to Airbnb turnovers.",
+    "about": "Boston Flawless Homes says its mission is to turn any space into \"a flawless and welcoming environment.\" The team handles regular and deep cleans, move-ins and move-outs, Airbnb turnovers and professional organizing, using high-quality products that are safe for pets. Reviews name Catielly as the person leading the team.",
+    "brand_color": "#b8901a",
+    "logo_path": "/images/providers/boston-flawless-homes/logo.png",
+    "logo_bg": "#ffffff",
+    "years_label": "",
+    "owner_public_name": "Catielly",
+    "team_label": "",
+    "service_area": "Boston, Brookline, Cambridge, Somerville, Newton, Waltham, Watertown, Arlington",
+    "area_short": "Boston · Brookline · Newton",
+    "regions": [
+      "core",
+      "west"
+    ],
+    "services": [
+      "Regular cleaning",
+      "Deep cleaning",
+      "Move-in",
+      "Move-out",
+      "Airbnb cleaning",
+      "Professional organizing",
+      "Post-construction",
+      "Commercial"
+    ],
+    "service_tags": [
+      "Recurring",
+      "Deep clean",
+      "Move in / out",
+      "Post-construction",
+      "Airbnb"
+    ],
+    "claims": [
+      "Fully licensed and insured",
+      "Pet-friendly products",
+      "Quality guarantee"
+    ],
+    "policies": [
+      "Fully licensed and insured (as stated on their site)",
+      "Quality guarantee (terms not listed)",
+      "Pet-friendly products",
+      "Brings high-quality products and supplies"
+    ],
+    "pricing_text": "Not published. They quote on request.",
+    "deals": [],
+    "price_label": "Pricing",
+    "price_value": "Free quote",
+    "card_note": "Licensed & insured",
+    "rating": 5,
+    "review_count": 202,
+    "rating_source": "Google",
+    "rating_checked_on": "",
+    "status": "prospect",
+    "listed": 0,
+    "sort_rank": 90,
+    "photos": [],
+    "quotes": [
+      {
+        "quote": "An absolutely amazing and professional service experience.",
+        "author": "Daniel",
+        "source": "their website",
+        "source_url": ""
+      },
+      {
+        "quote": "I had an incredible experience with them.",
+        "author": "Luzimar",
+        "source": "their website",
+        "source_url": ""
+      }
+    ]
+  },
+  {
+    "id": "PRV-0010",
+    "slug": "enis-cleaning",
+    "name": "Enis Cleaning",
+    "tagline": "Home cleaning and maid service across Metro Boston, from a team that started in Boston.",
+    "about": "Enis Cleaning started in Boston \"with a passion for providing cleaning service and healthy home environments\" and has since expanded to New York City. Its experienced cleaners handle house cleaning, maid service and business cleaning, with free quotes. Regular hours are 8 AM to 6 PM, and other times can be arranged.",
+    "brand_color": "#3f9a3a",
+    "logo_path": "/images/providers/enis-cleaning/logo.jpg",
+    "logo_bg": "#ffffff",
+    "years_label": "",
+    "owner_public_name": "Eni Carneiro",
+    "team_label": "",
+    "service_area": "Metro Boston, including Medford, Brookline, Needham, Wellesley",
+    "area_short": "Medford · Brookline · Needham",
+    "regions": [
+      "core",
+      "north",
+      "west"
+    ],
+    "services": [
+      "House cleaning",
+      "Maid service",
+      "Commercial cleaning"
+    ],
+    "service_tags": [],
+    "claims": [
+      "Free quotes",
+      "Residential and commercial",
+      "Based in Medford"
+    ],
+    "policies": [
+      "Free quotes",
+      "Hours 8 AM to 6 PM, other times by arrangement",
+      "Also operates in New York City"
+    ],
+    "pricing_text": "Not published. Newsletter subscribers get 10% off the first clean.",
+    "deals": [],
+    "price_label": "New clients",
+    "price_value": "10% off first clean",
+    "card_note": "Free quotes",
+    "rating": 4.9,
+    "review_count": 523,
+    "rating_source": "Google",
+    "rating_checked_on": "",
+    "status": "prospect",
+    "listed": 0,
+    "sort_rank": 100,
+    "photos": [],
+    "quotes": []
+  },
+  {
+    "id": "PRV-0011",
+    "slug": "maria-by-house-cleaning",
+    "name": "Maria By House Cleaning",
+    "tagline": "Chelsea-based home and office cleaning, with customer service as the first priority.",
+    "about": "Maria By House Cleaning is based on Broadway in Chelsea and says customer service is its number one priority. The team does regular, deep and move-in/move-out cleans for apartments and homes, plus offices, clinics and post-construction cleanups. They use steam for carpets, polishing, and products described as safe for families and pets.",
+    "brand_color": "#8b1a1a",
+    "logo_path": "/images/providers/maria-by-house-cleaning/logo.png",
+    "logo_bg": "#ffffff",
+    "years_label": "8 yrs experience",
+    "owner_public_name": "",
+    "team_label": "",
+    "service_area": "Chelsea, Boston",
+    "area_short": "Chelsea · Boston",
+    "regions": [
+      "core",
+      "north"
+    ],
+    "services": [
+      "Regular cleaning",
+      "Deep cleaning",
+      "Apartment cleaning",
+      "Monthly recurring",
+      "Move-in / move-out",
+      "Construction cleanup",
+      "Office & clinic"
+    ],
+    "service_tags": [
+      "Recurring",
+      "Deep clean",
+      "Move in / out",
+      "Post-construction"
+    ],
+    "claims": [
+      "Free estimates",
+      "Pet-safe products",
+      "Steam cleaning"
+    ],
+    "policies": [
+      "Free estimates",
+      "Products safe for families and pets",
+      "Steam cleaning for carpets",
+      "Reach them by WhatsApp"
+    ],
+    "pricing_text": "Not published. Free estimates.",
+    "deals": [],
+    "price_label": "Pricing",
+    "price_value": "Free estimate",
+    "card_note": "Pet-safe products",
+    "rating": 4.9,
+    "review_count": 48,
+    "rating_source": "Google",
+    "rating_checked_on": "",
+    "status": "prospect",
+    "listed": 0,
+    "sort_rank": 110,
+    "photos": [
+      {
+        "path": "/images/providers/maria-by-house-cleaning/photo-1.jpg",
+        "caption": "Kitchen, from their website"
+      }
+    ],
+    "quotes": []
+  },
+  {
+    "id": "PRV-0012",
+    "slug": "taty-cleaning-services",
+    "name": "Taty Cleaning Services",
+    "tagline": "Quincy-based home and office cleaning, with same-day or next-day availability.",
+    "about": "Taty Cleaning Services is a Quincy company cleaning homes and businesses across Greater Boston. Their \"vetted team\" handles weekly, biweekly and monthly cleans, deep and move-in/move-out cleans, Airbnb turnovers and post-construction work. You can book online or ask for a free quote, often for the same or next day.",
+    "brand_color": "#1f6fc5",
+    "logo_path": "/images/providers/taty-cleaning-services/logo.png",
+    "logo_bg": "#ffffff",
+    "years_label": "",
+    "owner_public_name": "",
+    "team_label": "",
+    "service_area": "Quincy, Boston, South Shore",
+    "area_short": "Quincy · Boston",
+    "regions": [
+      "core",
+      "south"
+    ],
+    "services": [
+      "Recurring cleaning",
+      "Deep cleaning",
+      "Move-in / move-out",
+      "Airbnb & rentals",
+      "Post-construction",
+      "Custom plans",
+      "Commercial"
+    ],
+    "service_tags": [
+      "Recurring",
+      "Deep clean",
+      "Move in / out",
+      "Post-construction",
+      "Airbnb"
+    ],
+    "claims": [
+      "Vetted team",
+      "Eco-friendly products",
+      "Book online"
+    ],
+    "policies": [
+      "Vetted cleaning team",
+      "Eco-friendly results",
+      "Same-day or next-day availability",
+      "Online booking and free quotes"
+    ],
+    "pricing_text": "Not published. Free quotes.",
+    "deals": [],
+    "price_label": "Pricing",
+    "price_value": "Free quote",
+    "card_note": "Book online",
+    "rating": 5,
+    "review_count": 45,
+    "rating_source": "Google",
+    "rating_checked_on": "",
+    "status": "prospect",
+    "listed": 0,
+    "sort_rank": 120,
+    "photos": [
+      {
+        "path": "/images/providers/taty-cleaning-services/photo-1.jpg",
+        "caption": "Floors, in progress"
+      },
+      {
+        "path": "/images/providers/taty-cleaning-services/photo-2.jpg",
+        "caption": "Bathroom floor"
+      }
+    ],
+    "quotes": []
+  },
+  {
+    "id": "PRV-0013",
+    "slug": "luminos-cleaning-services",
+    "name": "Luminos Cleaning Services",
+    "tagline": "A family cleaning company serving the South Shore with natural, pet-friendly products.",
+    "about": "Luminos is a family business with more than eight years of experience cleaning homes and businesses on the South Shore. They mainly use non-toxic, hypoallergenic, pet-friendly products and use stronger ones only when needed. They say they stick to the quoted price unless you change the job.",
+    "brand_color": "#1e5ba8",
+    "logo_path": "/images/providers/luminos-cleaning-services/logo.png",
+    "logo_bg": "#ffffff",
+    "years_label": "8+ yrs experience",
+    "owner_public_name": "",
+    "team_label": "Family team",
+    "service_area": "Quincy, Braintree, Weymouth, Hingham, Hull, Cohasset, Scituate, Norwell, Hanover, Marshfield, Randolph",
+    "area_short": "Quincy · Braintree · Hingham",
+    "regions": [
+      "south"
+    ],
+    "services": [
+      "House & apartment cleaning",
+      "Deep cleaning",
+      "Move-in / move-out",
+      "Construction cleanup",
+      "Commercial",
+      "After-party cleaning"
+    ],
+    "service_tags": [
+      "Deep clean",
+      "Move in / out",
+      "Post-construction"
+    ],
+    "claims": [
+      "Family business",
+      "Pet-friendly products",
+      "Sticks to the quoted price"
+    ],
+    "policies": [
+      "Sticks to the quoted price unless the job changes",
+      "Non-toxic, hypoallergenic, pet-friendly products",
+      "Free quotes by phone or online"
+    ],
+    "pricing_text": "Not published. Free quotes.",
+    "deals": [],
+    "price_label": "Pricing",
+    "price_value": "Free quote",
+    "card_note": "Keeps the quoted price",
+    "rating": 5,
+    "review_count": 88,
+    "rating_source": "Google",
+    "rating_checked_on": "",
+    "status": "prospect",
+    "listed": 0,
+    "sort_rank": 130,
+    "photos": [],
+    "quotes": []
+  }
+]

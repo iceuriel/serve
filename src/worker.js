@@ -64,6 +64,12 @@
 import {
   computeQuote, serveGeo, lookupGeo, PRICING_VERSION, zipTier,
 } from "./engine.generated.mjs";
+/* The marketplace (2026-11-06): /providers, /providers/<slug>, /api/providers
+   and /api/estimate, all backed by D1. A separate module so nothing in it can
+   reach the booking paths above, and so this file's one-engine import stays
+   exactly what the test harness parses. KEEP THIS ON ONE LINE — the harness
+   swaps it for the module it loads itself. */
+import * as Market from "./marketplace.js";
 
 /**
  * Can this Worker price a home the same way the browser just did?
@@ -249,6 +255,13 @@ export default {
     if (url.pathname === "/api/portal")   return handlePortal(request, env, ctx);
     if (url.pathname === "/api/vendor")   return handleVendor(request, env);
     if (url.pathname === "/api/health")   return handleHealth(env);
+
+    /* The marketplace. Only its own paths are handed over, so a fault in it can
+       never reach a booking route above or the static site below. */
+    if (isMarketplacePath(url.pathname)) {
+      const res = await Market.handleMarketplace(request, env, ctx, url);
+      if (res) return res;
+    }
 
     /* Printed QR codes, before the asset server can 404 them. */
     const short = shortLinkRedirect(url);
@@ -974,6 +987,12 @@ async function handleVendor(request, env) {
    moment this endpoint becomes a leak — four characters of a key plus the
    provider name is a real head start. There is a test asserting no value is
    returned. */
+function isMarketplacePath(pathname) {
+  const p = pathname.replace(/\/+$/, "");
+  return p === "/api/estimate" || p === "/api/providers" || p === "/providers" ||
+         p.startsWith("/providers/");
+}
+
 function handleHealth(env) {
   const names = Object.keys(env || {})
     .filter(k => typeof env[k] !== "function")
@@ -1003,6 +1022,12 @@ function handleHealth(env) {
        request away from being obvious, instead of a support call. */
     can_record_payments: !!(env && env.STRIPE_WEBHOOK_SECRET &&
                             env.PAYMENT_BRIDGE_SECRET && env.WEBHOOK_URL),
+    /* The marketplace (2026-11-06). has_marketplace_db false means /providers
+       says "opening soon" and /api/estimate refuses. can_notify_estimates false
+       beside it means requests ARE saved but the founder is never emailed —
+       the quiet failure, so it is reported on its own. */
+    has_marketplace_db: !!(env && env.MARKET_DB),
+    can_notify_estimates: !!(env && env.MARKET_BRIDGE_SECRET && env.WEBHOOK_URL),
     bindings: names,
   });
 }

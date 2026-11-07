@@ -89,6 +89,13 @@ cp booking-live.js booking-photos.js "$OUT"/
 # their jobs and their profile. Same noindex + no-store + no-referrer as the
 # other two token-bearing pages.
 cp v.html vendor.js "$OUT"/
+
+# The marketplace (2026-11-06). /providers and /providers/<slug> are rendered by
+# the Worker from D1 (src/marketplace.js) — there is no HTML file to stage —
+# but the pages load these two static files. Staged but not listed, every
+# profile would render unstyled and the estimate form would fall back to a
+# plain POST: working, and looking broken, in production only.
+cp marketplace.css marketplace-client.js "$OUT"/
 # sitemap.xml lists the pages worth indexing; robots.txt points crawlers and
 # AI shopping agents at it and allows the whole public site. robots.txt is
 # fetched from the ROOT by convention — staged but not listed here, it 404s and

@@ -1332,6 +1332,84 @@ gives `· SLOT NOT MARKED` and the slot stays open until fixed by hand.
 
 ---
 
+## The marketplace — Cloudflare D1 (2026-11-06)
+
+**A third data store, and the first that is not a Google Sheet.** Founder
+decision 2026-11-06: marketplace data lives in D1 from the start. Database
+`serve-marketplace`, Worker binding `MARKET_DB`, schema in
+`migrations/0001_marketplace.sql` (applied with
+`npx wrangler d1 migrations apply serve-marketplace --remote`). Read and
+written ONLY by `src/marketplace.js`. Sheets stay the record for everything
+else — bookings, payments, the brokered lane, vendors, availability.
+
+| Table | One row per | Written by |
+|---|---|---|
+| `providers` | marketplace company (`PRV-0001`) | seed + founder by hand (phase 2: admin page, vendor self-edit) |
+| `provider_photos` | picture on a profile | seed / founder |
+| `provider_quotes` | someone else's words about a company, with source | seed / founder |
+| `clients` | phone number that has asked for an estimate (`CLI-…`) | `/api/estimate` |
+| `estimate_requests` | estimate request (`EST-…`) | `/api/estimate`; quote fields by founder (phase 2: business portal) |
+| `homes`, `home_rooms` | client home and its rooms ("My home") | phase 2 — tables exist, nothing writes them yet |
+
+### `providers` — the rules that matter
+
+- **`listed = 1` AND `status = 'approved'` is the ONLY thing that makes a
+  company public** — directory, profile, `/api/providers`, and able to receive
+  requests. Both are set BY HAND after the owner approves their profile. The
+  seed forces `listed = 0` whatever the JSON says.
+- **`internal_phone`, `internal_email`, `internal_contact`, `website_url`,
+  `internal_notes` and `vendor_id` are never rendered and never returned.**
+  Founder decision 2026-11-06: every request goes through Serve.
+  `publicProvider()` is a whitelist built field by field; a new column reaches
+  no page until it is added there on purpose. `tests/marketplace.test.js`
+  greps every seeded profile for the business's phone number.
+- **`rating` / `review_count` are shown only when `rating_checked_on` is set**,
+  and then always with `rating_source` and the date. The seeded numbers came
+  from prospect research and are unverified, so every seed row leaves it blank.
+- **`claims` are the company's own words** and render under "From <name>:".
+  **`insurance_verified` / `registration_verified` are Serve's checks** and
+  render as "verified by Serve" only when 1. Never put a claim in a verified
+  column because the company said so.
+- `logo_path` and photo `path` must be same-origin `/images/…` (files live in
+  `images/providers/<slug>/`, staged with `images/`). Anything else is dropped.
+  `brand_color` / `logo_bg` must be `#rrggbb`. A logo must READ on its
+  `logo_bg` — Rose's is white text and needs a dark one.
+- `regions` ∈ `core · north · west · south`; `service_tags` ∈ `SERVICE_TAGS`
+  in `src/marketplace.js`. Unknown values are dropped, not shown.
+- `sort_rank` orders the directory ascending. **It is a placeholder** — how
+  ranking stays neutral is an open founder decision.
+
+### `estimate_requests`
+
+`method` ∈ `phone · walkthrough`; `address` only for a walkthrough (never
+logged — the Worker logs provider, method and ZIP only). `time_pref` ∈
+`earlier · later` (8–12 / 12–5, the same windows as the booking form).
+`client_ref` is minted by the page; a retry carrying the same one gets the
+original row back (unique partial index). `quoted_price_cents`,
+`quoted_frequency`, `quote_note`, `quoted_at` hold **the quoted price — the one
+number the marketplace exists to keep**; nothing writes them yet (phase 2).
+`notified_at` is stamped when webhook r63 confirms the founder email: **a blank
+`notified_at` is a request nobody was told about.**
+
+### Leads MASTER: `ESTIMATE_REQUESTS_LOG` (r63, auto-created)
+
+`request_id · created_at · provider_id · provider_name · method · time_pref ·
+phone · address · zip · sms_consent · source · logged_at`
+
+**A COPY, NOT THE RECORD.** Appended by webhook r63 when the Worker relays a
+saved request; editing it changes nothing in D1, and it deliberately has no
+status column. Idempotent on `request_id`.
+
+### Secrets and keys
+
+`MARKET_BRIDGE_SECRET` — Worker secret AND Apps Script Script Property, equal,
+and different from the photo and payment bridge secrets. Set the Worker side
+LAST (after r63 is deployed). `MARKET_PREVIEW_KEY` — Worker secret;
+`/providers/<slug>?preview=<key>` shows an unlisted profile, noindex and
+uncached. Anyone holding the link sees every draft.
+
+---
+
 ## Endpoints
 
 Two Apps Script web apps, in two different spreadsheets, deployed separately.
