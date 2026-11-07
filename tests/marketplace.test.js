@@ -54,8 +54,9 @@ const MARKET_SRC = read('src/marketplace.js');
 const EXPORTS = ['handleMarketplace', 'publicProvider', 'validateEstimate', 'renderDirectory',
   'renderProfile', 'esc', 'safeImagePath', 'safeHttpUrl', 'normalizePhone', 'SERVICE_TAGS', 'REGIONS'];
 
-function loadMarket(fetchImpl, logs) {
+function loadMarket(fetchImpl, logs, cachesImpl) {
   const box = {
+    caches: cachesImpl,
     console: { log: (m) => logs.push(String(m)), warn: (m) => logs.push(String(m)), error: (m) => logs.push(String(m)) },
     crypto: require('crypto').webcrypto, TextEncoder, TextDecoder, URL, URLSearchParams,
     Request, Response, Headers, AbortController, setTimeout, clearTimeout, JSON,
@@ -219,6 +220,60 @@ console.log('\n=== 4. routes: listed, unlisted, preview ===');
   res = await M.handleMarketplace(get('/providers'), {}, null, u('/providers'));
   html = await res.text();
   t('without the D1 binding the page says it is opening soon', res.status === 200 && html.includes('opening soon'));
+
+  /* The preview directory: every draft, each linking to its own preview. */
+  res = await M.handleMarketplace(get('/providers?preview=' + PREVIEW), env, null, u('/providers?preview=' + PREVIEW));
+  html = await res.text();
+  const cardCount = (html.match(/<article class="mk-card"/g) || []).length;
+  t('the preview directory shows all 13 companies', res.status === 200 && cardCount === 13, cardCount);
+  t('…badges the 12 drafts and not the listed one', (html.match(/Draft · not public/g) || []).length === 12);
+  t('…links each card to its own preview', html.includes('href="/providers/taskforce-cleaning-services?preview=' + PREVIEW + '"') &&
+    html.includes('href="/providers/taskforce-cleaning-services?preview=' + PREVIEW + '#estimate"'));
+  t('…is noindex in the markup AND the header, and uncached',
+    html.includes('<meta name="robots" content="noindex">') && (res.headers.get('X-Robots-Tag') || '').includes('noindex') &&
+    res.headers.get('Cache-Control') === 'no-store');
+  t('…has no canonical and no structured data', !html.includes('rel="canonical"') && !html.includes('application/ld+json'));
+  t('…still carries no internal field', !html.includes('555-0177') && !html.includes('SECRET-NOTE') && !html.includes('owner@example.com'));
+  res = await M.handleMarketplace(get('/providers?preview=nope'), env, null, u('/providers?preview=nope'));
+  html = await res.text();
+  t('a wrong key gets the public directory, drafts hidden', !html.includes('Draft · not public') && !html.includes('Taskforce'));
+  res = await M.handleMarketplace(get('/providers/taskforce-cleaning-services?preview=' + PREVIEW), env, null,
+    u('/providers/taskforce-cleaning-services?preview=' + PREVIEW));
+  html = await res.text();
+  t('a previewed profile links back to the preview directory', html.includes('href="/providers?preview=' + PREVIEW + '"'));
+  res = await M.handleMarketplace(get('/providers/roses-cleaning?preview=' + PREVIEW), env, null,
+    u('/providers/roses-cleaning?preview=' + PREVIEW));
+  t('even a LISTED profile opened with the key is noindex and uncached',
+    (await res.text()).includes('noindex') && res.headers.get('Cache-Control') === 'no-store');
+}
+
+console.log('\n=== 4b. a preview can never reach the public cache ===');
+{
+  /* A real-shaped edge cache: keyed on the URL, exactly as caches.default is. */
+  const store = new Map();
+  const fakeCaches = { default: {
+    match: async (req) => { const r = store.get(req.url); return r ? r.clone() : undefined; },
+    put: async (req, res) => { store.set(req.url, res.clone()); },
+  } };
+  const M = loadMarket(async () => new Response('{}'), [], fakeCaches);
+  const d1 = makeD1();
+  listOne(d1.raw, 'roses-cleaning');
+  const env = { MARKET_DB: d1.binding, MARKET_PREVIEW_KEY: PREVIEW };
+  const u = (p) => new URL('https://servecleaning.com' + p);
+
+  await M.handleMarketplace(get('/providers?preview=' + PREVIEW), env, null, u('/providers?preview=' + PREVIEW));
+  t('opening the preview stores nothing', store.size === 0, [...store.keys()]);
+  let res = await M.handleMarketplace(get('/providers'), env, null, u('/providers'));
+  let html = await res.text();
+  t('the public page afterwards shows no draft', !html.includes('Draft · not public') && !html.includes('Taskforce'));
+  t('…and it is the public page that got cached', store.size === 1 && store.has('https://servecleaning.com/providers'));
+  res = await M.handleMarketplace(get('/providers?preview=' + PREVIEW), env, null, u('/providers?preview=' + PREVIEW));
+  html = await res.text();
+  t('a preview after that is not served from the public cache', html.includes('Draft · not public'));
+  await M.handleMarketplace(get('/providers/taskforce-cleaning-services?preview=' + PREVIEW), env, null,
+    u('/providers/taskforce-cleaning-services?preview=' + PREVIEW));
+  res = await M.handleMarketplace(get('/providers/taskforce-cleaning-services'), env, null, u('/providers/taskforce-cleaning-services'));
+  t('a previewed draft profile is still a 404 to the public', res.status === 404);
 }
 
 console.log('\n=== 5. POST /api/estimate ===');

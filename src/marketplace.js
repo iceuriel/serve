@@ -193,15 +193,36 @@ export async function handleMarketplace(request, env, ctx, url) {
   const p = url.pathname.replace(/\/+$/, "") || "/";
   if (p === "/api/estimate") return handleEstimate(request, env, ctx);
   if (p === "/api/providers") return handleProvidersJson(request, env);
-  if (p === "/providers") return cached(request, ctx, () => directoryPage(env));
+  /* A PREVIEW NEVER GOES THROUGH cached(). The cache key drops the query
+     string, so a preview answered through it would be stored as the PUBLIC
+     page and served to everyone for five minutes — every draft published by
+     one founder click. The preview branches are therefore checked first and
+     return without touching the cache in either direction. */
+  if (p === "/providers") {
+    if (previewAllowed(url, env)) return directoryPage(env, previewKeyOf(env));
+    return cached(request, ctx, () => directoryPage(env, ""));
+  }
   const m = p.match(/^\/providers\/([^\/]+)$/);
   if (m) {
     const slug = m[1].toLowerCase();
-    const preview = previewAllowed(url, env);
-    if (preview) return profilePage(env, slug, true);
-    return cached(request, ctx, () => profilePage(env, slug, false));
+    if (previewAllowed(url, env)) return profilePage(env, slug, previewKeyOf(env));
+    return cached(request, ctx, () => profilePage(env, slug, ""));
   }
   return null;
+}
+
+function previewKeyOf(env) {
+  return String((env && env.MARKET_PREVIEW_KEY) || "").trim();
+}
+
+/* Carries the preview key onto a link, so the founder can move between
+   drafts. Only ever rendered into a page that was itself opened with the key. */
+function withPreview(href, key) {
+  if (!key) return href;
+  const i = href.indexOf("#");
+  const base = i === -1 ? href : href.slice(0, i);
+  const hash = i === -1 ? "" : href.slice(i);
+  return base + (base.includes("?") ? "&" : "?") + "preview=" + encodeURIComponent(key) + hash;
 }
 
 function previewAllowed(url, env) {
@@ -241,6 +262,17 @@ async function listedProviders(db) {
   const { results } = await db.prepare(
     "SELECT * FROM providers WHERE listed = 1 AND status = 'approved' ORDER BY sort_rank, name").all();
   return (results || []).map((r) => publicProvider(r, [], []));
+}
+
+/* Founder preview only: every company that has not been removed, each marked
+   with whether the public can see it. `isDraft` is added BESIDE the whitelist
+   output rather than inside publicProvider, so the public shape stays exactly
+   what /api/providers returns. */
+async function allProvidersForPreview(db) {
+  const { results } = await db.prepare(
+    "SELECT * FROM providers WHERE status <> 'removed' ORDER BY sort_rank, name").all();
+  return (results || []).map((r) => Object.assign(publicProvider(r, [], []),
+    { isDraft: !(Number(r.listed) === 1 && r.status === "approved") }));
 }
 
 async function providerBySlug(db, slug, includeUnlisted) {
@@ -427,28 +459,39 @@ function estimateAnswer(wantsHtml, payload, status, slug) {
 
 /* ---------- pages ---------- */
 
-async function directoryPage(env) {
+async function directoryPage(env, previewKey) {
   if (!env || !env.MARKET_DB) return htmlRes(comingSoon(), 200);
   let providers;
-  try { providers = await listedProviders(env.MARKET_DB); }
-  catch (err) {
+  try {
+    providers = previewKey ? await allProvidersForPreview(env.MARKET_DB) : await listedProviders(env.MARKET_DB);
+  } catch (err) {
     console.error("directory read failed: " + err);
     return htmlRes(comingSoon(), 503, "no-store");
   }
+  if (previewKey) return previewRes(renderDirectory(providers, { previewKey }));
   return htmlRes(renderDirectory(providers), 200, "public, max-age=" + PAGE_TTL_S);
 }
 
-async function profilePage(env, slug, preview) {
+async function profilePage(env, slug, previewKey) {
   if (!env || !env.MARKET_DB) return htmlRes(comingSoon(), 404, "no-store");
   let found;
-  try { found = await providerBySlug(env.MARKET_DB, slug, preview); }
+  try { found = await providerBySlug(env.MARKET_DB, slug, !!previewKey); }
   catch (err) {
     console.error("profile read failed: " + err);
     return htmlRes(comingSoon(), 503, "no-store");
   }
-  if (!found) return htmlRes(notFound(), 404, "public, max-age=60");
-  return htmlRes(renderProfile(found.pub, { preview: preview && !found.isPublic }),
-    200, preview ? "no-store" : "public, max-age=" + PAGE_TTL_S);
+  if (!found) return htmlRes(notFound(), 404, previewKey ? "no-store" : "public, max-age=60");
+  if (previewKey) return previewRes(renderProfile(found.pub, { preview: !found.isPublic, previewKey }));
+  return htmlRes(renderProfile(found.pub, {}), 200, "public, max-age=" + PAGE_TTL_S);
+}
+
+/* Every page opened with the preview key: never stored anywhere, never
+   indexed — said in the header as well as the markup, because a crawler that
+   finds the URL reads the header before the page. */
+function previewRes(html) {
+  const res = htmlRes(html, 200, "no-store");
+  res.headers.set("X-Robots-Tag", "noindex, nofollow");
+  return res;
 }
 
 const LOGO_SVG = (color, width) =>
@@ -527,27 +570,32 @@ function notFound() {
   });
 }
 
-export function renderDirectory(providers) {
+export function renderDirectory(providers, opts) {
   const list = providers || [];
+  const key = (opts && opts.previewKey) || "";
+  const href = (slug, hash) => esc(withPreview("/providers/" + slug + (hash || ""), key));
+  const drafts = list.filter((p) => p.isDraft).length;
   const chips = (name, items) => items.map(([k, label], i) =>
     `<button type="button" class="mk-chip" data-filter="${name}" data-value="${esc(k)}" aria-pressed="${i === 0 ? "true" : "false"}">${esc(label)}</button>`).join("");
   const cards = list.map((p) => {
     const tags = p.serviceTags.slice(0, 3).length ? p.serviceTags.slice(0, 3) : p.services.slice(0, 3);
     return `<article class="mk-card" data-regions="${esc(p.regions.join(" "))}" data-tags="${esc(p.serviceTags.join("|"))}">
-<a class="mk-card__logo" href="/providers/${esc(p.slug)}" style="background:${p.logoBg};border-top-color:${p.brandColor}" aria-label="${esc(p.name)}">${p.logo ? `<img src="${esc(p.logo)}" alt="" loading="lazy">` : `<span class="mk-card__mono">${esc(p.name.charAt(0))}</span>`}</a>
+${p.isDraft ? `<span class="mk-draft">Draft · not public</span>` : ""}
+<a class="mk-card__logo" href="${href(p.slug)}" style="background:${p.logoBg};border-top-color:${p.brandColor}" aria-label="${esc(p.name)}">${p.logo ? `<img src="${esc(p.logo)}" alt="" loading="lazy">` : `<span class="mk-card__mono">${esc(p.name.charAt(0))}</span>`}</a>
 <div class="mk-card__body">
-<h2 class="mk-card__name"><a href="/providers/${esc(p.slug)}">${esc(p.name)}</a></h2>
+<h2 class="mk-card__name"><a href="${href(p.slug)}">${esc(p.name)}</a></h2>
 ${p.areaShort ? `<p class="mk-card__area">${esc(p.areaShort)}</p>` : ""}
 <p class="mk-card__meta">${p.rating ? `<strong>&#9733; ${esc(p.rating.toFixed(1))}</strong> <span>${esc(p.reviewCount)} ${esc(p.ratingSource)} reviews</span>` : ""}${p.yearsLabel ? `<span>${esc(p.yearsLabel)}</span>` : ""}</p>
 <p class="mk-card__tagline">${esc(p.tagline)}</p>
 <ul class="mk-tags">${tags.map((t) => `<li>${esc(t)}</li>`).join("")}</ul>
 <div class="mk-card__foot"><div><span class="mk-label">${esc(p.priceLabel)}</span><strong>${esc(p.priceValue)}</strong></div>${p.cardNote ? `<span class="mk-card__note">&#10003; ${esc(p.cardNote)}</span>` : ""}</div>
-<div class="mk-card__actions"><a class="btn btn--ghost" href="/providers/${esc(p.slug)}">View Profile</a><a class="btn btn--primary" href="/providers/${esc(p.slug)}#estimate">Get Estimate</a></div>
+<div class="mk-card__actions"><a class="btn btn--ghost" href="${href(p.slug)}">View Profile</a><a class="btn btn--primary" href="${href(p.slug, "#estimate")}">Get Estimate</a></div>
 </div>
 </article>`;
   }).join("\n");
 
-  const body = `<section class="mk-hero"><div class="mk-wrap">
+  const banner = key ? `<div class="mk-preview" role="note"><strong>Preview.</strong> Showing every company, including ${drafts} ${drafts === 1 ? "draft" : "drafts"} the public cannot see. This page is not indexed and not cached. Don't share this link.</div>` : "";
+  const body = `${banner}<section class="mk-hero"><div class="mk-wrap">
 ${LOGO_SVG("#ffffff", 104)}
 <h1 class="mk-hl">Boston's Most Trusted Cleaners</h1>
 <p class="mk-hero__sub">Local, owner-run cleaning companies. Compare them, then get a free estimate by phone or walkthrough.</p>
@@ -566,9 +614,10 @@ ${list.length ? `<div class="mk-grid">${cards}</div>` : `<p class="mk-empty">Com
   return shell({
     title: "Find a Home Cleaning Provider in Greater Boston — Serve",
     description: "Compare local, owner-run cleaning companies across Greater Boston and request a free estimate by phone or walkthrough through Serve.",
-    canonical: "https://servecleaning.com/providers",
+    canonical: key ? "" : "https://servecleaning.com/providers",
+    noindex: !!key,
     body,
-    jsonLd: {
+    jsonLd: key ? null : {
       "@context": "https://schema.org", "@type": "ItemList",
       itemListElement: list.map((p, i) => ({ "@type": "ListItem", position: i + 1,
         url: "https://servecleaning.com/providers/" + p.slug, name: p.name })),
@@ -590,7 +639,7 @@ export function renderProfile(p, opts) {
 
   const body = `${o.preview ? `<div class="mk-preview" role="note"><strong>Preview.</strong> This profile is not public. Only people with the preview link can see it.</div>` : ""}
 <header class="mk-phead" style="border-bottom-color:${p.brandColor}"><div class="mk-wrap">
-<a class="mk-phead__back" href="/providers">&larr; All providers</a>
+<a class="mk-phead__back" href="${esc(withPreview("/providers", o.previewKey || ""))}">&larr; All providers</a>
 <div class="mk-phead__row">
 <div class="mk-phead__logo" style="background:${p.logoBg}">${p.logo ? `<img src="${esc(p.logo)}" alt="${esc(p.name)} logo">` : `<span class="mk-card__mono">${esc(p.name.charAt(0))}</span>`}</div>
 <div class="mk-phead__text">
@@ -649,9 +698,9 @@ ${methods.map(([v, label, hint], i) => `<label class="mk-choice"><input type="ra
     title: p.name + " — Home Cleaning in Greater Boston | Serve",
     description: (p.tagline || p.about).slice(0, 155),
     canonical: "https://servecleaning.com/providers/" + p.slug,
-    noindex: !!o.preview,
+    noindex: !!(o.preview || o.previewKey),
     body,
-    jsonLd: o.preview ? null : Object.assign({
+    jsonLd: (o.preview || o.previewKey) ? null : Object.assign({
       "@context": "https://schema.org", "@type": "HouseCleaningService",
       name: p.name, description: p.about, areaServed: p.serviceArea || "Greater Boston, MA",
       url: "https://servecleaning.com/providers/" + p.slug,

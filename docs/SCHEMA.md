@@ -1405,8 +1405,16 @@ status column. Idempotent on `request_id`.
 `MARKET_BRIDGE_SECRET` — Worker secret AND Apps Script Script Property, equal,
 and different from the photo and payment bridge secrets. Set the Worker side
 LAST (after r63 is deployed). `MARKET_PREVIEW_KEY` — Worker secret;
-`/providers/<slug>?preview=<key>` shows an unlisted profile, noindex and
-uncached. Anyone holding the link sees every draft.
+`/providers?preview=<key>` lists EVERY company not `removed`, drafts badged
+"Draft · not public", each card linking to `/providers/<slug>?preview=<key>`.
+Every preview response is `no-store` with `X-Robots-Tag: noindex, nofollow`
+and a noindex meta, no canonical, no JSON-LD. Anyone holding the link sees
+every draft.
+
+> **A PREVIEW MUST NEVER GO THROUGH `cached()`.** The public cache key drops
+> the query string, so a preview answered through it would be stored as the
+> public `/providers` and served to everyone. `tests/marketplace.test.js` §4b
+> runs a URL-keyed cache and fails if opening a preview stores anything.
 
 ---
 
