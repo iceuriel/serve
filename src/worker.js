@@ -192,7 +192,9 @@ function shortLinkRedirect(url) {
   const tags = SHORT_LINKS[path || "/"];
   if (!tags) return null;
 
-  const dest = new URL("/", url.origin);
+  /* /instant, the Instant Booking page (2026-11-07): "/" is becoming the
+     marketplace, and a scanned card should land on the booking form. */
+  const dest = new URL("/instant", url.origin);
   for (const [k, v] of Object.entries(tags)) dest.searchParams.set(k, v);
   for (const [k, v] of url.searchParams) dest.searchParams.set(k, v);
 
@@ -258,8 +260,8 @@ export default {
 
     /* The marketplace. Only its own paths are handed over, so a fault in it can
        never reach a booking route above or the static site below. */
-    if (isMarketplacePath(url.pathname)) {
-      const res = await Market.handleMarketplace(request, env, ctx, url);
+    if (isMarketplacePath(url.pathname) || isMarketplaceHome(url)) {
+      const res = await Market.handleMarketplace(request, env, ctx, url, { home: MARKETPLACE_IS_HOME });
       if (res) return res;
     }
 
@@ -987,6 +989,21 @@ async function handleVendor(request, env) {
    moment this endpoint becomes a leak — four characters of a key plus the
    provider name is a real head start. There is a test asserting no value is
    returned. */
+/* THE HOMEPAGE SWITCH (founder, 2026-11-07: the marketplace becomes the main
+   page; Instant Booking moves to /instant).
+   false: the public "/" is still index.html. Only "/?preview=<key>" is handed
+   to the marketplace, which shows the founder the marketplace home there; a
+   wrong key gets null back and falls through to index.html.
+   true: the public "/" is the marketplace. Flip it once enough owners have
+   approved their profiles: with nobody listed, the home would be an empty
+   directory. The short links (_redirects and SHORT_LINKS above) already land
+   on /instant, so flipping this does not move any printed card. */
+const MARKETPLACE_IS_HOME = false;
+
+function isMarketplaceHome(url) {
+  return url.pathname === "/" && (MARKETPLACE_IS_HOME || url.searchParams.has("preview"));
+}
+
 function isMarketplacePath(pathname) {
   const p = pathname.replace(/\/+$/, "");
   return p === "/api/estimate" || p === "/api/providers" || p === "/providers" ||

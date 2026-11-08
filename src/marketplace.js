@@ -192,8 +192,9 @@ const ERROR_TEXT = {
 
 /* ---------- routing ---------- */
 
-/** Returns a Response for a marketplace path, or null for anything else. */
-export async function handleMarketplace(request, env, ctx, url) {
+/** Returns a Response for a marketplace path, or null for anything else.
+    opts.home is the Worker's MARKETPLACE_IS_HOME switch (see worker.js). */
+export async function handleMarketplace(request, env, ctx, url, opts) {
   const p = url.pathname.replace(/\/+$/, "") || "/";
   if (p === "/api/estimate") return handleEstimate(request, env, ctx);
   if (p === "/api/providers") return handleProvidersJson(request, env);
@@ -202,6 +203,14 @@ export async function handleMarketplace(request, env, ctx, url) {
      page and served to everyone for five minutes — every draft published by
      one founder click. The preview branches are therefore checked first and
      return without touching the cache in either direction. */
+  /* "/" — the marketplace is the homepage (founder, 2026-11-07). Until the
+     Worker's MARKETPLACE_IS_HOME is flipped, only the founder preview sees it
+     there: null hands the public "/" back to the static index.html. */
+  if (p === "/") {
+    if (previewAllowed(url, env)) return directoryPage(env, previewKeyOf(env));
+    if (opts && opts.home) return cached(request, ctx, () => directoryPage(env, ""));
+    return null;
+  }
   if (p === "/providers") {
     if (previewAllowed(url, env)) return directoryPage(env, previewKeyOf(env));
     return cached(request, ctx, () => directoryPage(env, ""));
@@ -653,7 +662,7 @@ export function renderBostonNightHero(opts) {
 <svg aria-hidden="true" class="bn-skyline bn-skyline--front" viewBox="0 0 1200 300" preserveAspectRatio="none" fill="currentColor"><use href="#bn-skyline"/></svg>
 <div aria-hidden="true" class="bn-river"><svg class="bn-reflection" viewBox="0 0 1200 300" preserveAspectRatio="none" fill="currentColor"><use href="#bn-skyline"/></svg>${river}</div>
 <nav aria-label="Main" class="bn-nav"><div class="bn-nav__inner">
-<a href="/" class="bn-wordmark" aria-label="Serve home"><svg aria-hidden="true" width="34" height="30" viewBox="80 22 130 104"><path d="M 88 120 L 88 78 L 145 30 L 202 78 L 202 118" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Serve</span></a>
+<a href="${esc(sameSite(o.homeHref) || "/")}" class="bn-wordmark" aria-label="Serve home"><svg aria-hidden="true" width="34" height="30" viewBox="80 22 130 104"><path d="M 88 120 L 88 78 L 145 30 L 202 78 L 202 118" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Serve</span></a>
 ${links ? `<div class="bn-nav__links">${links}</div>` : ""}
 </div></nav>`;
 
@@ -748,7 +757,7 @@ export function renderProviderGrid(list, opts) {
 <div class="mk-empty" data-empty${none ? "" : " hidden"}>
 <div class="mk-empty__title" data-empty-title>${none ? "Book instantly in the meantime." : ""}</div>
 <p>Serve opens neighborhood by neighborhood. Book instantly and we'll find a trusted company for you${WAITLIST_HREF ? ", or join the list for your area" : ""}.</p>
-<div class="mk-empty__actions"><a class="mk-btn mk-btn--slate" href="/#quote">Instant Booking</a>${WAITLIST_HREF ? `<a class="mk-btn mk-btn--outline" href="${WAITLIST_HREF}">Join the waitlist</a>` : ""}</div>
+<div class="mk-empty__actions"><a class="mk-btn mk-btn--slate" href="/instant">Instant Booking</a>${WAITLIST_HREF ? `<a class="mk-btn mk-btn--outline" href="${WAITLIST_HREF}">Join the waitlist</a>` : ""}</div>
 </div>`;
 }
 
@@ -781,7 +790,7 @@ ${night ? "" : `<nav class="nav">
 <li><a href="/providers">Find a Provider</a></li>
 <li><a href="/#how-it-works">How Serve Works</a></li>
 <li><a href="/services">Services</a></li>
-<li><a href="/#quote" class="nav__cta">Instant Booking</a></li>
+<li><a href="/instant" class="nav__cta">Instant Booking</a></li>
 </ul>
 <button class="nav__hamburger" aria-label="Open menu" aria-expanded="false"><span></span><span></span><span></span></button>
 </div>
@@ -790,7 +799,7 @@ ${night ? "" : `<nav class="nav">
 <li><a href="/providers">Find a Provider</a></li>
 <li><a href="/#how-it-works">How Serve Works</a></li>
 <li><a href="/services">Services</a></li>
-<li><a href="/#quote">Instant Booking</a></li>
+<li><a href="/instant">Instant Booking</a></li>
 </ul>
 </div>
 </nav>`}
@@ -800,7 +809,7 @@ ${body}
 <footer class="mk-footer">
 <div class="mk-wrap mk-footer__inner">
 <div><span class="mk-footer__brand">Serve</span><span>Greater Boston's home service network</span></div>
-<div class="mk-footer__links"><a href="/providers">Providers</a><a href="/#quote">Instant Booking</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a><a href="/sms-terms">SMS Terms</a></div>
+<div class="mk-footer__links"><a href="/providers">Providers</a><a href="/instant">Instant Booking</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a><a href="/sms-terms">SMS Terms</a></div>
 </div>
 </footer>
 <script src="/marketplace-client.js" defer></script>
@@ -814,7 +823,7 @@ function comingSoon() {
     body: `<section class="mk-hero mk-hero--small"><div class="mk-wrap">${LOGO_SVG("#ffffff", 96)}
 <h1 class="mk-hl">Our provider directory is opening soon</h1>
 <p class="mk-hero__sub">We're adding Greater Boston's local cleaning companies now.</p>
-<p><a class="btn btn--primary" href="/#quote">Book a clean instantly instead</a></p></div></section>`,
+<p><a class="btn btn--primary" href="/instant">Book a clean instantly instead</a></p></div></section>`,
   });
 }
 
@@ -845,9 +854,10 @@ export function renderDirectory(providers, opts) {
   const hero = renderBostonNightHero({
     variant: "home",
     partners: list,
+    homeHref: withPreview("/", key),
     eyebrow: "Greater Boston",
     title: "Boston's most trusted home cleaners.",
-    navLinks: [{ href: "#providers", label: "Find a Provider" }, { href: "/#quote", label: "Instant Booking", ghost: true }],
+    navLinks: [{ href: "#providers", label: "Find a Provider" }, { href: "/instant", label: "Instant Booking", ghost: true }],
     form: `<div class="mk-panel">${renderAreaCombobox()}${renderServiceChips()}</div>`,
   });
   const areaData = {
@@ -868,7 +878,7 @@ ${renderProviderGrid(list, { previewKey: key })}
 <div class="mk-instant__eyebrow">Instant Booking</div>
 <h2 id="mk-instant-h">No time to compare?</h2>
 <p>Book in under a minute and Serve picks the right company for your home.</p>
-<a class="mk-btn mk-btn--white" href="/#quote">Get an Instant Price</a>
+<a class="mk-btn mk-btn--white" href="/instant">Get an Instant Price</a>
 </section>
 <script type="application/json" id="mk-areas">${JSON.stringify(areaData).replace(/</g, "\\u003c")}</script>`;
 
@@ -952,7 +962,7 @@ ${methods.map(([v, label, hint], i) => `<label class="mk-choice"><input type="ra
 <p class="mk-note">Free, with no obligation. Serve shares your number${p.estimateWalkthrough ? " (and address, for a walkthrough)" : ""} with ${esc(p.name)} only to arrange this estimate.</p>
 <div class="mk-form__done" data-done hidden><strong>Request sent.</strong> We'll pass it to ${esc(p.name)} and they'll reach you during the time you picked.</div>
 </form>
-<p class="mk-side-instant">Not shopping around? <a href="/#quote">Book instantly</a> and Serve matches you.</p>
+<p class="mk-side-instant">Not shopping around? <a href="/instant">Book instantly</a> and Serve matches you.</p>
 </aside>
 </div>`;
 

@@ -50,7 +50,7 @@ console.log('=== 1. the printed path answers ===');
     t('costs no upstream call', calls.length === 0);
 
     const dest = new URL(to || 'https://x.invalid/');
-    t('lands on the home page', dest.origin + dest.pathname === 'https://servecleaning.com/', to);
+    t('lands on the Instant Booking page', dest.origin + dest.pathname === 'https://servecleaning.com/instant', to);
 
     /* src is what `source`, src_first and src_chain record. Without it the scan
        is credited to nothing. */

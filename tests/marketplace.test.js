@@ -285,6 +285,24 @@ console.log('\n=== 4. routes: listed, unlisted, preview ===');
     u('/providers/roses-cleaning?preview=' + PREVIEW));
   t('even a LISTED profile opened with the key is noindex and uncached',
     (await res.text()).includes('noindex') && res.headers.get('Cache-Control') === 'no-store');
+
+  /* "/" (2026-11-07): the marketplace is the homepage in the preview; the
+     public "/" stays index.html until the Worker's switch is flipped. */
+  res = await M.handleMarketplace(get('/?preview=' + PREVIEW), env, null, u('/?preview=' + PREVIEW));
+  html = await res.text();
+  t('"/" with the key is the preview marketplace home', res.status === 200 && html.includes('Preview.') &&
+    (html.match(/<article class="pc"/g) || []).length === N_PARTNERS && res.headers.get('Cache-Control') === 'no-store');
+  t('…its Serve wordmark stays in the preview', html.includes('class="bn-wordmark"') &&
+    html.includes('href="/?preview=' + PREVIEW + '" class="bn-wordmark"'));
+  t('…and Instant Booking goes to /instant, not the old #quote', html.includes('href="/instant"') && !html.includes('#quote'));
+  t('"/" with a wrong key is handed back to index.html',
+    (await M.handleMarketplace(get('/?preview=nope'), env, null, u('/?preview=nope'))) === null);
+  t('"/" with no key is handed back to index.html while the switch is off',
+    (await M.handleMarketplace(get('/'), env, null, u('/'))) === null);
+  res = await M.handleMarketplace(get('/'), env, null, u('/'), { home: true });
+  html = await res.text();
+  t('with the switch on, "/" is the public marketplace (drafts hidden)', res.status === 200 &&
+    !html.includes('Preview.') && !html.includes('Taskforce'));
 }
 
 console.log('\n=== 4b. a preview can never reach the public cache ===');
@@ -401,7 +419,7 @@ console.log('\n=== 4c. the Boston Night hero (design/serve/DESIGN.md §5) ===');
     blob.areas.filter((a) => a.rank).length === 12, blob.areas && blob.areas.length);
   t('…no gold anywhere on the page', !/c9a96e|serve-gold|serve-btn-gold/i.test(html));
   t('…no Join-the-waitlist link while /waitlist does not exist', !html.includes('Join the waitlist'));
-  t('…the empty state always offers Instant Booking', /data-empty[^]*?href="\/#quote">Instant Booking/.test(html));
+  t('…the empty state always offers Instant Booking', /data-empty[^]*?href="\/instant">Instant Booking/.test(html));
 
   /* Before migration 0002 is applied the page must still render. */
   const old = new DatabaseSync(':memory:');
@@ -510,6 +528,35 @@ console.log('\n=== 6. the Worker hands over only marketplace paths ===');
   t('/providers and /providers/x are marketplace paths', isMk('/providers') && isMk('/providers/') && isMk('/providers/roses-cleaning'));
   t('/api/estimate and /api/providers are marketplace paths', isMk('/api/estimate') && isMk('/api/providers'));
   t('/ /h /api/submit /providersx are not', !isMk('/') && !isMk('/h') && !isMk('/api/submit') && !isMk('/providersx'));
+  const home = SRC.slice(SRC.indexOf('const MARKETPLACE_IS_HOME'), SRC.indexOf('function isMarketplacePath'));
+  const isHome = new Function(home + '; return [isMarketplaceHome, MARKETPLACE_IS_HOME];')();
+  t('the homepage switch is OFF: the public "/" is still index.html', isHome[1] === false);
+  t('"/?preview=" is handed to the marketplace; plain "/" and "/instant" are not',
+    isHome[0](new URL('https://servecleaning.com/?preview=x')) && !isHome[0](new URL('https://servecleaning.com/')) && !isHome[0](new URL('https://servecleaning.com/?src=qr-card')) && !isHome[0](new URL('https://servecleaning.com/instant?preview=x')));
+  t('the switch is passed to the marketplace', SRC.includes('{ home: MARKETPLACE_IS_HOME }'));
+}
+
+console.log('\n=== 6b. /instant, the stand-alone Instant Booking page ===');
+{
+  const page = read('instant.html');
+  const index = read('index.html');
+  const between = (s, a, b) => s.slice(s.indexOf(a), s.indexOf(b, s.indexOf(a)));
+  t('build-site stages instant.html', /cp index\.html instant\.html /.test(read('scripts/build-site.sh')));
+  t('the handset sits above the 1-2-3 progress', page.indexOf('tk-seek__phone') > 0 &&
+    page.indexOf('tk-seek__phone') < page.indexOf('id="flow-progress"'));
+  t('step 1 says Serve prices and coordinates the booking',
+    page.includes('<h2 class="flow-title">Build your clean</h2>') &&
+    page.includes('Tell us about your home — we&rsquo;ll price and coordinate the booking for you.'));
+  t('none of the old homepage is here: no ZIP hero, no How Serve Works, no trust bar',
+    !page.includes('hero-zip') && !page.includes('class="hero"') && !page.includes('how-it-works') && !page.includes('trust-bar'));
+  t('no link to a section this page does not have', !page.includes('href="#after-you-book"'));
+  /* Less the one "See how the day runs" line, whose #after-you-book target is
+     a homepage section this page does not carry. */
+  const noAftercare = (s) => s.replace(/\n\s*<p class="reserve-aftercare">[^\n]*\n/, '\n');
+  t('the booking steps are the same markup as index.html (step 2 onward)',
+    noAftercare(between(page, 'id="step-2"', 'id="state-failed"')) === noAftercare(between(index, 'id="step-2"', 'id="state-failed"')));
+  t('it loads the same scripts, in the same order',
+    (page.match(/<script src="[^"]+"><\/script>/g) || []).join() === (index.match(/<script src="[^"]+"><\/script>/g) || []).join());
 }
 
 console.log('\n=== 7. publishing ===');

@@ -6272,3 +6272,21 @@ body.serve-has-sticky { padding-bottom: 5.5rem; }
         margin: 1rem 2.25rem 0;
     }
 }
+
+
+/* --- /instant: the stand-alone Instant Booking page (2026-11-07) ------
+   Only the handset and the booking flow. The handset sits directly above
+   the 1-2-3 progress, so the flow's own top padding is pulled in to keep
+   them reading as one block rather than two sections. */
+.instant-page { background: var(--color-bg); }
+.instant-ring {
+    display: flex;
+    justify-content: center;
+    padding: 2.25rem 1.25rem 0;
+    background: var(--color-bg);
+}
+.instant-page .quote-section { padding-top: 1.25rem; }
+@media (max-width: 600px) {
+    .instant-ring { padding-top: 1.25rem; }
+    .instant-page .quote-section { padding-top: 0.75rem; }
+}

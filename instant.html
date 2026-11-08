@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<!--
+    /instant — the INSTANT BOOKING page (2026-11-07).
+
+    The marketplace (/providers, and / once it is flipped) is where clients
+    compare companies. This page is the second lane: people who don't want to
+    shop around build their clean, see a price and book. It carries the same
+    Build → Price → Reserve flow as index.html — the #quote section is copied
+    from there verbatim apart from the step-1 sub-line, and script.js drives
+    it the same way. Nothing else from the old homepage is here except the
+    handset animation above the steps.
+
+    IF YOU CHANGE THE QUOTE FLOW IN index.html, CHANGE IT HERE TOO, until the
+    old homepage is retired and this becomes the only copy.
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Instant Booking — Serve</title>
+    <meta name="description" content="Tell us about your home and get a firm price for a Greater Boston home cleaning in about a minute. Serve prices and coordinates the booking for you.">
+    <link rel="canonical" href="https://servecleaning.com/instant">
+    <link rel="icon" type="image/x-icon" href="images/favicon.ico">
+    <link rel="icon" type="image/svg+xml" href="images/favicon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="images/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="images/favicon-192.png">
+    <link rel="apple-touch-icon" href="images/apple-touch-icon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Montserrat:wght@500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="instant-page">
+
+    <nav class="nav">
+        <div class="nav__inner">
+            <a href="/" class="nav__logo">Serve</a>
+            <ul class="nav__links">
+                <li><a href="/providers">Find a Provider</a></li>
+                <li><a href="/services">Services</a></li>
+                <li><a href="/pricing">Pricing</a></li>
+                <li><a href="#quote" class="nav__cta">Instant Booking</a></li>
+            </ul>
+            <button class="nav__hamburger" aria-label="Open menu" aria-expanded="false">
+                <span></span><span></span><span></span>
+            </button>
+        </div>
+        <div class="nav__mobile-menu" id="mobile-menu">
+            <ul>
+                <li><a href="/providers">Find a Provider</a></li>
+                <li><a href="/services">Services</a></li>
+                <li><a href="/pricing">Pricing</a></li>
+                <li><a href="#quote">Instant Booking</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- The handset from How Serve Works, on its own above the 1-2-3 steps. -->
+    <div class="instant-ring" aria-hidden="true">
+        <div class="tk-seek__stage tk-seek__stage--mid">
+            <div class="tk-seek__phone">
+                <div class="tk-seek__screen">
+                    <img class="tk-seek__mark" src="images/favicon.svg" alt="">
+                </div>
+            </div>
+            <span class="tk-seek__wave tk-seek__wave--l is-1"></span>
+            <span class="tk-seek__wave tk-seek__wave--l is-2"></span>
+            <span class="tk-seek__wave tk-seek__wave--r is-1"></span>
+            <span class="tk-seek__wave tk-seek__wave--r is-2"></span>
+            <span class="tk-seek__coin is-1">$</span>
+            <span class="tk-seek__coin is-2">$</span>
+            <span class="tk-seek__coin is-3">$</span>
+        </div>
+    </div>
+
+    <!-- QUOTE FLOW — Build → Price → Reserve -->
+    <section class="quote-section" id="quote">
+        <div class="section-inner">
+
+            <!-- Progress -->
+            <ol class="flow-progress" id="flow-progress" aria-label="Booking progress">
+                <li class="flow-progress__step is-active" data-progress="1">
+                    <span class="flow-progress__num">1</span><span class="flow-progress__label">Build</span>
+                </li>
+                <li class="flow-progress__sep" aria-hidden="true"></li>
+                <li class="flow-progress__step" data-progress="2">
+                    <span class="flow-progress__num">2</span><span class="flow-progress__label">Price</span>
+                </li>
+                <li class="flow-progress__sep" aria-hidden="true"></li>
+                <li class="flow-progress__step" data-progress="3">
+                    <span class="flow-progress__num">3</span><span class="flow-progress__label">Reserve</span>
+                </li>
+            </ol>
+
+            <!-- STEP 1 — Build your clean (no identity collected)
+                 ZIP first, then the specs. An address-first "Find your home"
+                 step sat in front of this for a day and was removed on
+                 2026-09-08: it looked up the property and pre-filled the specs
+                 from public records, and measured against 15 real Boston condo
+                 addresses it matched the actual UNIT 0% of the time. A tower
+                 with hundreds of apartments comes back as one record with one
+                 bedroom count, reported confidently. Pre-filling a wrong number
+                 is worse than an empty field, because it gets confirmed without
+                 being read — which is exactly how a three-storey home was once
+                 quoted as one storey.
+
+                 The customer knows their own bed and bath count. Asking is more
+                 accurate than any of that, and it is free. -->
+            <div class="quote-step step-active" id="step-1" data-progress="1">
+                <header class="step-head">
+                    <h2 class="flow-title">Build your clean</h2>
+                    <p class="flow-sub">Tell us about your home — we&rsquo;ll price and coordinate the booking for you.</p>
+                </header>
+
+                <form class="flow-card" id="build-form" novalidate>
+
+                    <!-- ZIP first -->
+                    <div class="field-block">
+                        <label class="field-label" for="zip">Check if we're in your area</label>
+                        <input class="flow-input" type="text" id="zip" name="zip" inputmode="numeric"
+                               autocomplete="postal-code" maxlength="5" placeholder="ZIP code" required>
+                        <p class="zip-status" id="zip-status" aria-live="polite"></p>
+                    </div>
+
+                    <!-- Bedrooms -->
+                    <div class="field-block">
+                        <span class="field-label">Bedrooms</span>
+                        <div class="stepper" id="stepper-bedrooms" data-min="0" data-max="5" data-value="2">
+                            <button type="button" class="stepper__btn" data-dir="-1" aria-label="Fewer bedrooms">&minus;</button>
+                            <span class="stepper__value" id="bedrooms-value">2</span>
+                            <button type="button" class="stepper__btn" data-dir="1" aria-label="More bedrooms">+</button>
+                        </div>
+                    </div>
+
+                    <!-- Bathrooms. Steps by 0.5: a half bath is a real category
+                         (most Boston single-families have one) and it is the
+                         convention listings are written in. -->
+                    <div class="field-block">
+                        <span class="field-label">Bathrooms</span>
+                        <div class="stepper" id="stepper-bathrooms" data-min="1" data-max="5" data-step="0.5" data-value="1">
+                            <button type="button" class="stepper__btn" data-dir="-1" aria-label="Fewer bathrooms">&minus;</button>
+                            <span class="stepper__value" id="bathrooms-value">1</span>
+                            <button type="button" class="stepper__btn" data-dir="1" aria-label="More bathrooms">+</button>
+                        </div>
+                        <p class="field-hint">Count a half bath &mdash; toilet and sink, no shower &mdash; as 0.5.</p>
+                    </div>
+
+                    <!-- Levels. The hint is not decoration: without it, someone
+                         on the 8th floor of a Seaport tower answers "8". -->
+                    <div class="field-block">
+                        <span class="field-label">How many levels are in your home?</span>
+                        <div class="stepper" id="stepper-levels" data-min="1" data-max="3" data-value="1">
+                            <button type="button" class="stepper__btn" data-dir="-1" aria-label="Fewer levels">&minus;</button>
+                            <span class="stepper__value" id="levels-value">1</span>
+                            <button type="button" class="stepper__btn" data-dir="1" aria-label="More levels">+</button>
+                        </div>
+                        <p class="field-hint">Floors inside your unit &mdash; not the floor your building is on.</p>
+                    </div>
+
+                    <!-- Service -->
+                    <div class="field-block">
+                        <span class="field-label">Choose your clean</span>
+                        <div class="choice-cards">
+                            <label class="choice-card">
+                                <input type="radio" name="service" value="first_clean" checked>
+                                <span class="choice-card__body">
+                                    <span class="choice-card__title">First Clean with Serve</span>
+                                    <span class="choice-card__desc">An introductory deep clean — every room, top to bottom — at 50% off for first-time customers.</span>
+                                </span>
+                            </label>
+                            <label class="choice-card">
+                                <input type="radio" name="service" value="move_out">
+                                <span class="choice-card__body">
+                                    <span class="choice-card__title">Move In / Move Out Clean</span>
+                                    <span class="choice-card__desc">The complete clean for empty homes — moving in, moving out, listing a property, or preparing a family home or estate for its next chapter. Includes appliance interiors, inside cabinets, baseboards, and windows.</span>
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Condition, asked as two things a customer actually knows.
+                         ---------------------------------------------------------
+                         This used to read "How's the home right now? Lightly
+                         lived-in / Average / Needs heavy-duty attention" — a
+                         professional assessment handed to the customer, and then
+                         priced. Three problems stacked: it is not a judgement they
+                         are equipped to make, it is mildly shaming so people
+                         under-report, and under-reporting was REWARDED with a lower
+                         price. The most honest customers subsidised the most
+                         optimistic ones.
+
+                         Time-since-last-clean and pets carry the same pricing
+                         signal and are answerable truthfully by anyone. Serve does
+                         the translation to light/standard/heavy in script.js —
+                         and that translation is the expertise being sold. Asking
+                         the customer to do it was giving the job away. -->
+                    <div class="field-block">
+                        <span class="field-label" id="lastclean-label">When was it last cleaned professionally?</span>
+                        <div class="choice-cards choice-cards--condition" role="radiogroup" aria-labelledby="lastclean-label">
+                            <label class="choice-card choice-card--sm">
+                                <input type="radio" name="last_clean" value="recent">
+                                <span class="choice-card__body"><span class="choice-card__title">Within a month</span></span>
+                            </label>
+                            <label class="choice-card choice-card--sm">
+                                <input type="radio" name="last_clean" value="months" checked>
+                                <span class="choice-card__body"><span class="choice-card__title">A few months ago</span></span>
+                            </label>
+                            <label class="choice-card choice-card--sm">
+                                <input type="radio" name="last_clean" value="long">
+                                <span class="choice-card__body"><span class="choice-card__title">Over a year, or never</span></span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="field-block">
+                        <span class="field-label" id="pets-label">Any pets at home?</span>
+                        <div class="choice-cards choice-cards--condition" role="radiogroup" aria-labelledby="pets-label">
+                            <label class="choice-card choice-card--sm">
+                                <input type="radio" name="has_pets" value="no" checked>
+                                <span class="choice-card__body"><span class="choice-card__title">No pets</span></span>
+                            </label>
+                            <label class="choice-card choice-card--sm">
+                                <input type="radio" name="has_pets" value="yes">
+                                <span class="choice-card__body"><span class="choice-card__title">Yes</span></span>
+                            </label>
+                        </div>
+                        <p class="field-hint">Pet hair takes longer, and we plan the visit around them.</p>
+                    </div>
+
+                    <div class="form-error" id="build-error" aria-live="polite"></div>
+                    <button type="submit" class="btn btn--primary btn--full" id="build-submit">See my price &rarr;</button>
+
+                    <!-- Waitlist swap (shown when ZIP is out of area) -->
+                    <div class="inline-capture" id="zip-waitlist" hidden>
+                        <p class="inline-capture__copy" id="waitlist-copy"></p>
+                        <div class="inline-capture__row">
+                            <input type="email" class="flow-input" id="waitlist-email" placeholder="you@email.com" autocomplete="email">
+                            <button type="button" class="btn btn--primary" id="waitlist-submit">Notify me</button>
+                        </div>
+                        <p class="inline-capture__done" id="waitlist-done" hidden>You're first in line — we'll reach out the moment we're in your area.</p>
+                    </div>
+                </form>
+
+                <!-- The deliberate way into the custom-quote lane. Kept small
+                     and below the primary button on purpose: instant booking is
+                     the product, and this is the door for the job that doesn't
+                     fit through it. -->
+                <p class="reserve-aftercare">
+                    Something unusual &mdash; only part of the home, or a big move-out?
+                    <button type="button" class="scheduler-fallback-link" id="build-custom">Get a custom quote &rarr;</button>
+                </p>
+            </div>
+
+            <!-- STEP 2 — The quote (still no identity) -->
+            <div class="quote-step step-hidden" id="step-2" data-progress="2">
+                <header class="step-head">
+                    <h2 class="flow-title">Your instant price</h2>
+                    <p class="flow-sub">All-in — supplies and card fees included. No surprises at the door.</p>
+                </header>
+
+                <div class="flow-card price-card" id="price-card"><!-- rendered by script.js --></div>
+
+                <!-- Add-ons (First Clean only) -->
+                <div class="flow-card addon-block" id="addon-block" hidden>
+                    <span class="field-label">Add to your first clean</span>
+                    <label class="toggle-row">
+                        <span class="toggle-row__text">
+                            <span class="toggle-row__title">Inside the fridge</span>
+                            <span class="toggle-row__price">+$45</span>
+                        </span>
+                        <input type="checkbox" id="addon-fridge">
+                    </label>
+                    <label class="toggle-row">
+                        <span class="toggle-row__text">
+                            <span class="toggle-row__title">Inside the oven</span>
+                            <span class="toggle-row__price">+$40</span>
+                        </span>
+                        <input type="checkbox" id="addon-oven">
+                    </label>
+                </div>
+
+                <!-- Frequency (First Clean only) -->
+                <div class="flow-card freq-block" id="freq-block" hidden>
+                    <span class="field-label">Keep it going after the first clean?</span>
+                    <div class="freq-options" id="freq-options"><!-- rendered by script.js --></div>
+                    <!-- 2026-09-16: a flat-dollar recurring offer was removed
+                         from here. Nothing in the pricing engine or the
+                         webhook ever applied it, so it was a promise the
+                         system could not keep. This line is true and is
+                         already promised in the /pricing FAQ. Do not put an
+                         offer back here unless computeQuote applies it; see
+                         docs/HANDOFF.md 2026-09-16. -->
+                    <p class="freq-note">No contract &mdash; change or cancel your plan anytime.</p>
+                </div>
+
+                <!-- What's included -->
+                <details class="included-acc">
+                    <summary>What's included</summary>
+                    <div class="included-acc__body" id="included-body"><!-- rendered by script.js --></div>
+                </details>
+
+                <p class="trust-strip">Bonded &amp; insured &middot; Photo-verified quality &middot; All-in price — supplies and card fees included.</p>
+
+                <div class="step-actions">
+                    <button type="button" class="btn btn--ghost" id="back-to-1">&larr; Back</button>
+                    <button type="button" class="btn btn--primary" id="to-reserve">Choose my time &rarr;</button>
+                </div>
+
+                <!-- Ghost email capture -->
+                <div class="ghost-capture">
+                    <button type="button" class="ghost-capture__trigger" id="email-quote-trigger">Email me this quote</button>
+                    <div class="ghost-capture__form" id="email-quote-form" hidden>
+                        <input type="email" class="flow-input" id="email-quote-input" placeholder="you@email.com" autocomplete="email">
+                        <button type="button" class="btn btn--primary" id="email-quote-send">Send</button>
+                        <p class="ghost-capture__done" id="email-quote-done" hidden>Sent — check your inbox.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- STEP 3 — Reserve -->
+            <div class="quote-step step-hidden" id="step-3" data-progress="3">
+                <header class="step-head">
+                    <h2 class="flow-title">Reserve your clean</h2>
+                    <p class="flow-sub">Lock in your spot — we'll reach out to confirm your exact arrival window.</p>
+                </header>
+
+                <form class="flow-card" id="reserve-form" novalidate>
+
+                    <!-- Live scheduler (rendered by script.js when availability loads;
+                         the time-preference radios below remain as the fallback) -->
+                    <div class="field-block" id="scheduler-block" hidden>
+                        <span class="field-label">Pick your day and time
+                            <!-- Shown only in 'scheduler' mode — setTimeUi() keeps it
+                                 hidden while the feed is loading and while the radios
+                                 are standing in, so the badge cannot claim a live feed
+                                 that has not answered. The dot is decorative; "LIVE"
+                                 is real text so it reaches a screen reader. -->
+                            <span class="live-badge" id="scheduler-live" hidden>
+                                <span class="live-badge__dot" aria-hidden="true"></span>LIVE
+                            </span>
+                        </span>
+                        <p class="scheduler-sub">Every open time for the next three weeks — pick what fits.</p>
+                        <p class="scheduler-loading" id="scheduler-loading">Loading times&hellip;</p>
+                        <div class="scheduler-days" id="scheduler-days"><!-- rendered by script.js --></div>
+                        <p class="scheduler-fallback-line" id="scheduler-fallback" hidden>
+                            <span>Need another time?</span>
+                            <button type="button" class="scheduler-fallback-link" id="scheduler-fallback-link">Request another time</button>
+                        </p>
+                    </div>
+
+                    <!-- Time preference (preserved control: earlier / later) -->
+                    <div class="field-block" id="timepref-block">
+                        <span class="field-label">When do you prefer?</span>
+                        <div class="choice-cards">
+                            <label class="choice-card">
+                                <input type="radio" name="time_preference" value="earlier">
+                                <span class="choice-card__body">
+                                    <span class="choice-card__title">Earlier in the day</span>
+                                    <span class="choice-card__desc">Typically 8:00 AM – 12:00 PM</span>
+                                </span>
+                            </label>
+                            <label class="choice-card">
+                                <input type="radio" name="time_preference" value="later">
+                                <span class="choice-card__body">
+                                    <span class="choice-card__title">Later in the day</span>
+                                    <span class="choice-card__desc">Typically 12:00 PM – 5:00 PM</span>
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="field-block">
+                        <label class="field-label" for="r-name">Full name</label>
+                        <input class="flow-input" type="text" id="r-name" name="name" autocomplete="name" placeholder="Jane Smith" required>
+                    </div>
+                    <div class="field-block">
+                        <label class="field-label" for="r-email">Email</label>
+                        <input class="flow-input" type="email" id="r-email" name="email" autocomplete="email" placeholder="jane@example.com" required>
+                    </div>
+                    <div class="field-block">
+                        <label class="field-label" for="r-phone">Phone</label>
+                        <input class="flow-input" type="tel" id="r-phone" name="phone" autocomplete="tel" placeholder="(617) 555-0100" required>
+                    </div>
+
+                    <!-- A2P 10DLC consent. Load-bearing for carrier registration — see
+                         tests/sms-consent.test.js before editing anything in this block.
+                         Both boxes must stay UNCHECKED and OPTIONAL, transactional and
+                         promotional consent must stay on SEPARATE boxes, and the policy
+                         links must stay OUTSIDE the label text as their own anchors.
+
+                         THE INTRO IS NOT PART OF THE CONSENT LANGUAGE, and that is what
+                         makes it allowed. A carrier reviews the LABEL: it must not be
+                         pre-ticked, must not be required, and must carry its own
+                         disclosures. Explaining the benefit ABOVE the labels, as a
+                         sibling of them, is the one lever that moves opt-in without
+                         touching any of that. Nothing here may imply consent is needed
+                         to book — the booking page is emailed either way as of r58, and
+                         the intro says so on purpose.
+
+                         THE TWO BOXES ARE DELIBERATELY NOT EQUAL IN WEIGHT. They used
+                         to render identically, which made the appointment box look like
+                         the same kind of ask as the marketing one and dragged it down by
+                         association. Primary/secondary is presentation only: both are
+                         still unchecked, still optional, still separate. -->
+                    <div class="sms-consent">
+                        <div class="sms-consent__intro">
+                            <h3 class="sms-consent__title">Text me about my cleaning</h3>
+                            <p class="sms-consent__lede">Your booking page link is emailed to you
+                            either way &mdash; it is where you reschedule, cancel, pay and tell us
+                            how to get in. Tick this and we'll text it as well &mdash; plus your
+                            confirmation, any schedule changes, and a heads-up when your cleaner
+                            is on the way.</p>
+                        </div>
+
+                        <label class="sms-consent__opt sms-consent__opt--primary">
+                            <input type="checkbox" id="sms-transactional" name="sms_transactional" value="yes">
+                            <span>I agree to receive text messages from Serve about my cleaning
+                            appointments, including confirmations, scheduling updates, and cleaner
+                            arrival notifications, at the number provided. Consent is not a condition
+                            of purchase. Message frequency varies. Message and data rates may apply.
+                            Reply STOP to opt out or HELP for help.</span>
+                        </label>
+
+                        <label class="sms-consent__opt sms-consent__opt--secondary">
+                            <input type="checkbox" id="sms-promotional" name="sms_promotional" value="yes">
+                            <span>I agree to receive occasional promotional text messages from Serve,
+                            including offers and rebooking reminders. Consent is not a condition of
+                            purchase. Message and data rates may apply. Reply STOP to opt out.</span>
+                        </label>
+
+                        <p class="sms-consent-links">
+                            <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a> &middot;
+                            <a href="/sms-terms" target="_blank" rel="noopener">SMS Terms</a>
+                        </p>
+                    </div>
+
+                    <div class="field-block">
+                        <label class="field-label" for="r-address">Street address</label>
+                        <!-- STREET ONLY. The placeholder used to read "123 Beacon St, Boston, MA"
+                             and people copied the shape they were shown: one booking arrived as
+                             "19 Glenbrook Ln,Arlington ma" and the city and state were baked into
+                             its property_key forever, while another arrived clean as
+                             "500 Broadway". The label always said "Street address"; the example
+                             said otherwise, and the example is what people follow.
+
+                             City and state are redundant here — the ZIP above is required and is
+                             what actually drives tier, geo factor and the PROPERTIES key. Every
+                             test fixture in the suite already uses "123 Beacon St". -->
+                        <!-- SUGGESTIONS LIVE HERE NOW, and only here.
+                             They were on an address-first first step until
+                             2026-09-08. The step is gone; the suggestions are
+                             worth keeping, because this is the field a cleaner
+                             has to navigate by and a typo in it is a real
+                             problem. Measured at 100% street match on 25 real
+                             Boston condo addresses.
+
+                             THE ZIP IS NEVER WRITTEN BACK FROM A SUGGESTION.
+                             It is sent TO the suggester to rank results and
+                             nothing returns along that path. Geoapify gave
+                             02117 for 37 Appleton St (a PO-box ZIP), 02205 for
+                             118 B St, and 01890 — Winchester — for 5 Lagrange
+                             St. Writing those into the ZIP field tripped the
+                             coverage gate and rejected real Back Bay customers
+                             mid-booking. The ZIP the customer typed in step 1
+                             is the only one this flow trusts.
+
+                             autocomplete="off" so Chrome's own saved-address
+                             dropdown does not stack on top of this one. -->
+                        <div class="ac">
+                            <input class="flow-input" type="text" id="r-address" name="address"
+                                   autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+                                   role="combobox" aria-expanded="false" aria-autocomplete="list"
+                                   aria-controls="r-address-list" placeholder="123 Beacon St" required>
+                            <ul class="ac__list" id="r-address-list" role="listbox"
+                                aria-label="Address suggestions" hidden></ul>
+                        </div>
+                        <p class="field-hint">Just the street &mdash; your ZIP already tells us the city.</p>
+                        <p class="ac__credit" id="r-address-credit" hidden>Address suggestions powered by <a href="https://www.geoapify.com/" rel="noopener nofollow" target="_blank">Geoapify</a></p>
+                    </div>
+                    <div class="field-block">
+                        <label class="field-label" for="r-unit">Unit / Apt <span class="opt">(optional)</span></label>
+                        <input class="flow-input" type="text" id="r-unit" name="unit" autocomplete="address-line2" placeholder="Apt 4B">
+                    </div>
+
+                    <!-- The "anything we should know?" textarea was removed here on 2026-09-01.
+                         Pets, parking, access and rooms to skip are all worth knowing, but asking
+                         for them at the moment of commitment costs a booking, and a free-text box
+                         is the worst shape to ask in — it arrives as prose that has to be read and
+                         re-typed into PROPERTY_MEMORY by hand. It is collected AFTER reservation
+                         instead, where friction costs nothing and the answers can be structured.
+
+                         WHAT THIS TURNED OFF, until that replacement ships: JOBS.customer_notes
+                         and JOBS.pets_flag now arrive blank, and the booking email's "WHAT THEY
+                         TOLD US" block is empty on every job. detectPets() in script.js is kept
+                         deliberately — it is the parser the replacement needs. -->
+                    <div class="form-error" id="reserve-error" aria-live="polite"></div>
+                    <p class="reserve-terms">By selecting <strong>Reserve my clean</strong>, you
+                        agree to Serve's <a href="/terms" target="_blank" rel="noopener">Terms of
+                        Service</a> and acknowledge the
+                        <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</p>
+                    <div class="step-actions">
+                        <button type="button" class="btn btn--ghost" id="back-to-2">&larr; Back</button>
+                        <button type="submit" class="btn btn--primary" id="reserve-submit">Reserve my clean</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Custom quote — the edge-case lane.
+                 =========================================================
+                 THIS IS THE SECOND PRODUCT, NOT THE MAIN ONE. Instant booking
+                 is what Serve sells; the price on screen is the price. This
+                 lane exists for the jobs a calculator has no business pricing:
+                 homes past the flat-rate table, and scopes that aren't "clean
+                 the home" — only the downstairs, a move-out on an empty
+                 four-bedroom, one room that needs three hours of it.
+
+                 Reached two ways: automatically at 5+ bedrooms, and
+                 deliberately from the link under the Build step.
+
+                 The scope box is the reason this works. Without it these
+                 arrive as an email address and no idea what the person wants,
+                 and the reply is a question rather than a number. -->
+            <div class="quote-step step-hidden" id="state-overflow" data-progress="1">
+                <div class="flow-card inline-capture">
+                    <h2 class="flow-title">Let's quote this one by hand</h2>
+                    <p class="inline-capture__copy">Most homes book instantly at the price on screen. Yours has something the calculator shouldn't price on its own &mdash; a size, or a scope worth a real look. Tell us what you need and we'll come back today with a firm number and a date.</p>
+
+                    <div class="field-block">
+                        <label class="field-label" for="overflow-notes">What do you need done?</label>
+                        <textarea class="flow-input" id="overflow-notes" rows="4"
+                                  placeholder="e.g. Just the downstairs and the kitchen &mdash; upstairs is fine.&#10;Or: full move-out, empty 4BR, oven and fridge included."></textarea>
+                        <p class="field-hint">The more specific you are, the closer our first number is.</p>
+                    </div>
+
+                    <input type="text" class="flow-input" id="overflow-name" placeholder="Your name" autocomplete="name">
+                    <input type="email" class="flow-input" id="overflow-email" placeholder="you@email.com" autocomplete="email">
+                    <input type="tel" class="flow-input" id="overflow-phone" placeholder="Phone (optional)" autocomplete="tel">
+                    <button type="button" class="btn btn--primary btn--full" id="overflow-submit">Send my custom quote</button>
+                    <p class="inline-capture__done" id="overflow-done" hidden>Got it — we'll email your custom quote today.</p>
+                    <div class="step-actions">
+                        <button type="button" class="btn btn--ghost" id="overflow-back">&larr; Back</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Reservation confirmation -->
+            <div class="quote-step step-hidden" id="state-confirmed" data-progress="3">
+                <div class="flow-confirm">
+                    <div class="flow-confirm__mark" aria-hidden="true">&check;</div>
+                    <h2>You're on the schedule.</h2>
+                    <p id="confirm-copy">Serve is coordinating with our provider network. We'll reach out shortly to confirm your exact arrival window.</p>
+                    <div class="steps__ring" aria-hidden="true">
+                        <div class="tk-seek__stage tk-seek__stage--sm">
+                            <div class="tk-seek__phone">
+                                <div class="tk-seek__screen">
+                                    <img class="tk-seek__mark" src="images/favicon.svg" alt="" loading="lazy">
+                                </div>
+                            </div>
+                            <span class="tk-seek__wave tk-seek__wave--l is-1"></span>
+                            <span class="tk-seek__wave tk-seek__wave--l is-2"></span>
+                            <span class="tk-seek__wave tk-seek__wave--r is-1"></span>
+                            <span class="tk-seek__wave tk-seek__wave--r is-2"></span>
+                            <span class="tk-seek__coin is-1">$</span>
+                            <span class="tk-seek__coin is-2">$</span>
+                            <span class="tk-seek__coin is-3">$</span>
+                        </div>
+                    </div>
+
+                    <!-- The 15-minute promise is the tripwire for a silent write failure.
+                         If the sheet write fails, no row is created and no notification
+                         email is sent either — so without a stated expectation the
+                         customer waits for a cleaner who was never booked, and finds out
+                         on the day. A precise window turns silence into something they
+                         notice and act on.
+
+                         THE EMAIL THIS PROMISES IS webhook.gs r58, and it did not exist
+                         until 2026-09-19 — the promise sat here unkept, because every
+                         send in that script goes to the operator. If this line is ever
+                         live against a script older than r58, it is a lie. The consent
+                         block above depends on the same send.
+                         TODO(twilio): add the Serve number here once provisioned, so the
+                         fallback is a text rather than an email. Contact details must
+                         match the footer exactly — see tests/static-checks. -->
+                    <p class="flow-confirm__promise">
+                        You'll get a confirmation email within 15 minutes, and we'll be in touch
+                        shortly after. It carries a link to your own booking page &mdash; your
+                        personal portal, where you can check your visit, see who's coming, add
+                        entry instructions and make any changes. If it doesn't arrive, email
+                        <a href="mailto:management@servecos.com">management@servecos.com</a>
+                        and we'll sort it out.
+                    </p>
+
+                    <!-- The question that used to sit in the reserve step, asked here instead.
+                         Same words, different moment: before the spot is claimed a textarea is
+                         a reason to hesitate, and after it is claimed hesitating costs nothing.
+                         Nothing here can fail the booking — the row is already written and this
+                         screen already says so. A failed send tells them to text instead. -->
+                    <div class="postbook" id="postbook">
+                        <h3 class="postbook__title">Anything we should know before we come?</h3>
+                        <p class="postbook__sub">
+                            Pets, any special instructions, parking, how to get in, rooms to skip.
+                            Optional &mdash; your booking is already confirmed either way.
+                        </p>
+                        <label class="sr-only" for="pb-notes">Notes for your cleaner</label>
+                        <textarea class="flow-input postbook__box" id="pb-notes" rows="3" maxlength="600"
+                                  placeholder="We have a friendly dog, park in the driveway, please skip the office&hellip;"></textarea>
+                        <button type="button" class="btn btn--primary btn--full" id="pb-send">Send to my cleaner</button>
+                        <p class="postbook__status" id="pb-status" role="status" aria-live="polite"></p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Booking could NOT be confirmed.
+                 Shown only when the write genuinely failed. Previously this state
+                 did not exist and a failed booking rendered the confirmation
+                 above — which is how corporate-network visitors were told a
+                 cleaner was coming when nothing had been recorded. The mailto is
+                 built in script.js and carries everything they already typed, so
+                 recovering costs one tap rather than starting again. -->
+            <div class="quote-step step-hidden" id="state-failed" data-progress="3">
+                <div class="flow-failed">
+                    <div class="flow-failed__mark" aria-hidden="true">!</div>
+                    <h2>We couldn't confirm your booking.</h2>
+                    <p>
+                        Your details are safe — nothing was lost — but the booking did
+                        <strong>not</strong> go through, so you are not on the schedule yet.
+                        This is usually a network on your side blocking us.
+                    </p>
+                    <p class="flow-failed__action">
+                        <a class="btn btn--primary" id="failed-mailto"
+                           href="mailto:management@servecos.com">Send us your booking by email</a>
+                    </p>
+                    <p class="flow-failed__alt">
+                        That opens an email with everything you just entered — just hit send.
+                        Or call <a href="tel:+16178047201">(617) 804-7201</a>.
+                    </p>
+                    <p class="flow-failed__ref">Reference: <span id="failed-ref"></span></p>
+                </div>
+            </div>
+
+        </div>
+    </section>
+
+    <!-- FOOTER -->
+    <footer class="footer">
+        <div class="footer__inner">
+            <div class="footer__brand">
+                <span class="footer__logo">Serve</span>
+                <p>One place to take care of your home. Greater Boston.</p>
+            </div>
+            <div class="footer__contact">
+                <p>Questions? Reach us at:</p>
+                <a href="mailto:management@servecos.com">management@servecos.com</a>
+                <a href="tel:+16178047201">(617) 804-7201</a>
+            </div>
+        </div>
+        <div class="footer__copy">
+            <!-- Required on every page for A2P 10DLC registration. -->
+            <p class="footer__legal">
+                <a href="/terms">Terms of Service</a> &middot;
+                <a href="/privacy">Privacy Policy</a> &middot;
+                <a href="/sms-terms">SMS Terms</a>
+            </p>
+            <p>&copy; 2026 Serve Cleaning. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <!-- serve-geo-data.js MUST load before script.js: it supplies the ZIP zone
+         and parking tables the pricing engine reads. Classic scripts run in
+         order, so the tag order is the whole guarantee. If it is missing, every
+         home prices as the neutral case rather than breaking. -->
+    <script src="serve-geo-data.js"></script>
+    <script src="pricing-engine.js"></script>
+    <!-- The service catalogue. Read by the booking flow to decide whether a
+         category chooser is needed at all — with one live service it is a
+         screen with one button on it, so it stays out of the way until a
+         second category goes live. -->
+    <script src="serve-services.js"></script>
+    <!-- What each service includes. Also read by /h and /j, which is why
+         it is its own file rather than part of script.js. -->
+    <script src="serve-scope.js"></script>
+    <script src="serve-slots.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>

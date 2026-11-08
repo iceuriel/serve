@@ -94,7 +94,7 @@ t('build-site.sh stages sms-terms.html', /cp\s+[^\n]*\bsms-terms\.html\b/.test(b
   const block = headers.split(/\n(?=\/)/).find(b => b.trim().startsWith(p + '\n'));
   t('_headers declares charset for ' + p, !!block && /charset=utf-8/i.test(block));
 });
-t('_redirects sends /book to the booking form', /^\/book\s+\/#quote/m.test(redirects));
+t('_redirects sends /book to the booking form (/instant)', /^\/book\s+\/instant\s/m.test(redirects));
 
 console.log('\n=== 4. the consent block — where campaigns get rejected ===');
 const blockStart = html.indexOf('<div class="sms-consent">');

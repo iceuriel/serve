@@ -70,7 +70,9 @@ mkdir -p "$OUT"
 # openapi.json URL is what was submitted to a connector programme — so a file
 # advertised in three places and staged in none would 404 for exactly the
 # audience it was written for, while working perfectly on a local file open.
-cp index.html pricing.html services.html privacy.html terms.html sms-terms.html api-docs.html openapi.json serve-geo-data.js pricing-engine.js serve-services.js serve-scope.js serve-slots.js script.js style.css "$OUT"/
+# instant.html is served at /instant: the stand-alone Instant Booking page
+# (handset + Build -> Price -> Reserve). The marketplace links here.
+cp index.html instant.html pricing.html services.html privacy.html terms.html sms-terms.html api-docs.html openapi.json serve-geo-data.js pricing-engine.js serve-services.js serve-scope.js serve-slots.js script.js style.css "$OUT"/
 
 # j.html is served at /j and renders ONE job from an id in the query string.
 # It is not in the sitemap and carries noindex both in the markup and as an

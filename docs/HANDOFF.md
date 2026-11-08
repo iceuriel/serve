@@ -14,6 +14,47 @@ accurate except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-11-07, Claude Code: marketplace is the main page; Instant Booking → /instant
+
+Founder: the marketplace becomes the main page. Instant Booking stays an option
+but opens a page of its own: the handset animation above the 1-2-3 steps, then
+"Build your clean" with "Tell us about your home — we'll price and coordinate
+the booking for you." The old ZIP-code hero and the rest of the old homepage
+are not on it.
+- **`instant.html` → `/instant`** (staged in `build-site.sh`, in `sitemap.xml`).
+  It has a short nav, the handset, and the `#quote` section copied from
+  `index.html`. Two changes from the copy: the new step-1 sub-line, and the
+  "See how the day runs" link is removed because its target section isn't on
+  this page. It uses the same scripts in the same order, and `script.js`
+  already null-guards everything it lacks. **The flow now exists twice:** change
+  both until `index.html` is retired. A test pins steps 2 onward as identical.
+- **Every marketplace "Instant Booking" link** (nav, hero, footer, empty state,
+  the "No time to compare?" band, the profile sidebar) points to `/instant`
+  instead of `/#quote`.
+- **`/` is the marketplace in the preview:** `/?preview=<key>` renders the
+  marketplace home (uncached, noindex), and the hero's Serve wordmark keeps the
+  key. **The public `/` is unchanged**: it is still `index.html`, as the
+  2026-11-06 decision says ("not swapped until enough owners approved"). With 0
+  companies listed, the public home would be an empty directory.
+- **Short links now land on `/instant`, with their tags kept.** That covers
+  `_redirects` (`/q`, `/friend`, `/book`, `/movein`, `/clean`, `/bu`) and the
+  Worker's `/newhome`. The `#quote` fragments are dropped, because `/instant`
+  is only the form.
+  - `/book` is the Twilio A2P opt-in URL and still lands on the form, with
+    the consent checkbox in step 3.
+  - Side effect: `/movein` no longer shows the move-in hero headline, because
+    `/instant` has no hero. Attribution (src, segment) is still recorded.
+  - Tests updated: `sms-consent`, `campaign-links`.
+- **To make the marketplace public:** set `MARKETPLACE_IS_HOME = true` in
+  `src/worker.js`. Nothing else is needed.
+- Checked:
+  - 45 test files pass. `tests/marketplace.test.js` §4 gains the `/` preview
+    and switch cases, §6 the Worker switch, and §6b the `/instant` page.
+  - The switch check was mutation-tested: flipping it to `true` turns it red.
+  - Headless Chrome of `_site/instant.html`: 1280px, and a real 390px
+    viewport, where scrollWidth is 375 so nothing scrolls sideways.
+- Local only: nothing is committed or pushed.
+
 ## Current work — 2026-11-07, Claude Code: marketplace home rebuilt to HOME_SPEC.md
 
 Founder supplied `HOME_SPEC.md` and `reference/home.html` (now in `design/serve/`,

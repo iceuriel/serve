@@ -2,8 +2,9 @@
 #
 # Read from the publish directory by both Cloudflare and Netlify.
 #
-# Each lands on the index page carrying a src tag, so the hero skin and the
-# attribution both come from the ONE normal first-touch path — there is no
+# Each lands on /instant (the Instant Booking page, since 2026-11-07; it used
+# to be the index page) carrying a src tag, so the attribution comes from the
+# ONE normal first-touch path — there is no
 # second mechanism that could disagree with the sheet. The prefix is what
 # selects the segment, per SRC_SEGMENTS in script.js:
 #
@@ -25,11 +26,11 @@
 # PATH where these tests cannot see it. That is how /q first shipped untagged.
 # Any other rule you find in the console is a bug until proven otherwise.
 
-/movein   /?src=deed-movein   302
-/clean    /?src=dh-clean      302
+/movein   /instant?src=deed-movein   302
+/clean    /instant?src=dh-clean      302
 
 # One shared BU alumni email link; tags stay out of the email body.
-/bu       /?src=email-bu-alumni-01&utm_source=bu_alumni&utm_medium=email&utm_campaign=bu_alumni_launch    302
+/bu       /instant?src=email-bu-alumni-01&utm_source=bu_alumni&utm_medium=email&utm_campaign=bu_alumni_launch    302
 
 # Business cards.
 #
@@ -47,16 +48,15 @@
 #   qr-  -> pro       the founder card, consumer
 #   ref- -> direct    a real person sent them, but we do not know why
 #
-# Both land on #quote rather than the top of the page. A card is handed over in
-# person, so the recipient already had the pitch — what they need is the form.
-# The tradeoff is that the segment hero never gets seen; drop the fragment to
-# land them on it instead. Attribution is recorded either way.
-/q        /?src=qr-card-founder-01&utm_source=card&utm_medium=print&utm_campaign=founder#quote    302
-/friend   /?src=ref-card-friend-01&utm_source=card&utm_medium=print&utm_campaign=referral#quote   302
+# A card is handed over in person, so the recipient already had the pitch —
+# what they need is the form, and /instant is only the form. (They used to land
+# on /#quote; that homepage is becoming the marketplace.)
+/q        /instant?src=qr-card-founder-01&utm_source=card&utm_medium=print&utm_campaign=founder    302
+/friend   /instant?src=ref-card-friend-01&utm_source=card&utm_medium=print&utm_campaign=referral   302
 
 # /book is the opt-in URL named in Twilio's A2P 10DLC campaign registration.
 # A reviewer follows it by hand to confirm the consent checkbox is really there
-# and really unchecked, so it has to land ON the booking form, not the homepage
-# top. Untagged on purpose: this is a compliance URL, not a marketing one, and
+# and really unchecked, so it has to land ON the booking form: /instant, which
+# is nothing but the form. Untagged on purpose: this is a compliance URL, not a marketing one, and
 # it must not pollute attribution with a src that no campaign ever printed.
-/book     /#quote             302
+/book     /instant            302
