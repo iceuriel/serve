@@ -53,7 +53,7 @@ are not on it.
   - The switch check was mutation-tested: flipping it to `true` turns it red.
   - Headless Chrome of `_site/instant.html`: 1280px, and a real 390px
     viewport, where scrollWidth is 375 so nothing scrolls sideways.
-- Local only: nothing is committed or pushed.
+- Committed c35696b and pushed 2026-11-07. Live check: /instant 200 with the new sub-line; /q, /book, /newhome, /movein land on /instant; /providers Instant Booking -> /instant; public / still index.html. Not checked live: /?preview=<key> (no key on this machine).
 
 ## Current work — 2026-11-07, Claude Code: marketplace home rebuilt to HOME_SPEC.md
 
