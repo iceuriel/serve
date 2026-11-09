@@ -206,19 +206,21 @@ export async function handleMarketplace(request, env, ctx, url, opts) {
   /* "/" — the marketplace is the homepage (founder, 2026-11-07). Until the
      Worker's MARKETPLACE_IS_HOME is flipped, only the founder preview sees it
      there: null hands the public "/" back to the static index.html. */
-  if (p === "/") {
+  /* An OWNER preview (?owner=<slug>&k=<token>) is private in the same way, so
+     it is checked before cached() too. */
+  if (p === "/" || p === "/providers") {
     if (previewAllowed(url, env)) return directoryPage(env, previewKeyOf(env));
-    if (opts && opts.home) return cached(request, ctx, () => directoryPage(env, ""));
-    return null;
-  }
-  if (p === "/providers") {
-    if (previewAllowed(url, env)) return directoryPage(env, previewKeyOf(env));
+    const owner = await ownerPreviewOf(url, env);
+    if (owner) return directoryPage(env, "", owner);
+    if (p === "/" && !(opts && opts.home)) return null;
     return cached(request, ctx, () => directoryPage(env, ""));
   }
   const m = p.match(/^\/providers\/([^\/]+)$/);
   if (m) {
     const slug = m[1].toLowerCase();
     if (previewAllowed(url, env)) return profilePage(env, slug, previewKeyOf(env));
+    const owner = await ownerPreviewOf(url, env);
+    if (owner && owner.slug === slug) return profilePage(env, slug, "", owner);
     return cached(request, ctx, () => profilePage(env, slug, ""));
   }
   return null;
@@ -228,23 +230,55 @@ function previewKeyOf(env) {
   return String((env && env.MARKET_PREVIEW_KEY) || "").trim();
 }
 
-/* Carries the preview key onto a link, so the founder can move between
-   drafts. Only ever rendered into a page that was itself opened with the key. */
-function withPreview(href, key) {
-  if (!key) return href;
+/* The query a private page carries onto its own links, so the viewer can move
+   around without losing it. Only ever rendered into a page that was itself
+   opened with it. */
+function previewQ(key) {
+  return key ? "preview=" + encodeURIComponent(key) : "";
+}
+function ownerQ(owner) {
+  return owner ? "owner=" + encodeURIComponent(owner.slug) + "&k=" + encodeURIComponent(owner.token) : "";
+}
+function withQuery(href, q) {
+  if (!q) return href;
   const i = href.indexOf("#");
   const base = i === -1 ? href : href.slice(0, i);
   const hash = i === -1 ? "" : href.slice(i);
-  return base + (base.includes("?") ? "&" : "?") + "preview=" + encodeURIComponent(key) + hash;
+  return base + (base.includes("?") ? "&" : "?") + q + hash;
+}
+
+function sameString(a, b) {
+  if (!a || !b || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
 }
 
 function previewAllowed(url, env) {
-  const offered = url.searchParams.get("preview") || "";
-  const key = String((env && env.MARKET_PREVIEW_KEY) || "").trim();
-  if (!key || !offered || offered.length !== key.length) return false;
-  let diff = 0;
-  for (let i = 0; i < key.length; i++) diff |= key.charCodeAt(i) ^ offered.charCodeAt(i);
-  return diff === 0;
+  return sameString(previewKeyOf(env), url.searchParams.get("preview") || "");
+}
+
+/* OWNER PREVIEW LINKS (founder, 2026-11-08): one link per company, to send to
+   its owner. The page shows that company in full and every other company as
+   an anonymous card. The token is an HMAC of the slug under MARKET_PREVIEW_KEY,
+   so no new secret and no table: a link opens only its own company, cannot be
+   turned into the founder key, and rotating the key kills every link at once.
+   A removed company's link is a 404. */
+async function ownerToken(env, slug) {
+  const key = previewKeyOf(env);
+  if (!key || !SLUG_RE.test(slug)) return "";
+  const enc = new TextEncoder();
+  const k = await crypto.subtle.importKey("raw", enc.encode(key), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", k, enc.encode("owner-preview:" + slug));
+  return [...new Uint8Array(sig)].slice(0, 16).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function ownerPreviewOf(url, env) {
+  const slug = String(url.searchParams.get("owner") || "").toLowerCase();
+  const offered = url.searchParams.get("k") || "";
+  if (!slug || !offered) return null;
+  const token = await ownerToken(env, slug);
+  return sameString(token, offered) ? { slug, token } : null;
 }
 
 /* Public GETs only, keyed on the URL without its query string so a campaign
@@ -286,6 +320,15 @@ async function allProvidersForPreview(db) {
     "SELECT * FROM providers WHERE status <> 'removed' ORDER BY sort_rank, name").all();
   return (results || []).map((r) => Object.assign(publicProvider(r, [], []),
     { isDraft: !(Number(r.listed) === 1 && r.status === "approved") }));
+}
+
+/* Another company, as an owner preview shows it: built fresh, never filtered
+   down from the real object, so no name, logo, slug, text or price can come
+   along. It keeps only what the filters need (areas, regions, service tags),
+   so searching the preview still behaves like the real page. */
+function anonymousProvider(p, i) {
+  return { anon: true, slug: "hidden-" + (i + 1), name: "",
+    serviceAreas: p.serviceAreas.slice(), regions: p.regions.slice(), serviceTags: p.serviceTags.slice() };
 }
 
 /* The neighborhoods and ZIPs the Area search matches against (migration 0002).
@@ -497,29 +540,41 @@ function estimateAnswer(wantsHtml, payload, status, slug) {
 
 /* ---------- pages ---------- */
 
-async function directoryPage(env, previewKey) {
+async function directoryPage(env, previewKey, owner) {
   if (!env || !env.MARKET_DB) return htmlRes(comingSoon(), 200);
   let providers;
   try {
-    providers = previewKey ? await allProvidersForPreview(env.MARKET_DB) : await listedProviders(env.MARKET_DB);
+    providers = (previewKey || owner) ? await allProvidersForPreview(env.MARKET_DB) : await listedProviders(env.MARKET_DB);
   } catch (err) {
     console.error("directory read failed: " + err);
     return htmlRes(comingSoon(), 503, "no-store");
   }
   const { areas, zips } = await areaTables(env.MARKET_DB);
-  if (previewKey) return previewRes(renderDirectory(providers, { previewKey, areas, zips }));
+  if (owner) {
+    /* Their own card first, so they find it without scrolling on a phone. */
+    const own = providers.find((p) => p.slug === owner.slug);
+    if (!own) return htmlRes(notFound(), 404, "no-store");
+    const list = [own].concat(providers.filter((p) => p !== own).map(anonymousProvider));
+    return previewRes(renderDirectory(list, { ownerName: own.name, carry: ownerQ(owner), areas, zips }));
+  }
+  if (previewKey) {
+    const ownerLinks = await Promise.all(providers.map(async (p) => ({ name: p.name,
+      href: withQuery("/providers", ownerQ({ slug: p.slug, token: await ownerToken(env, p.slug) })) })));
+    return previewRes(renderDirectory(providers, { previewKey, ownerLinks, areas, zips }));
+  }
   return htmlRes(renderDirectory(providers, { areas, zips }), 200, "public, max-age=" + PAGE_TTL_S);
 }
 
-async function profilePage(env, slug, previewKey) {
+async function profilePage(env, slug, previewKey, owner) {
   if (!env || !env.MARKET_DB) return htmlRes(comingSoon(), 404, "no-store");
   let found;
-  try { found = await providerBySlug(env.MARKET_DB, slug, !!previewKey); }
+  try { found = await providerBySlug(env.MARKET_DB, slug, !!(previewKey || owner)); }
   catch (err) {
     console.error("profile read failed: " + err);
     return htmlRes(comingSoon(), 503, "no-store");
   }
-  if (!found) return htmlRes(notFound(), 404, previewKey ? "no-store" : "public, max-age=60");
+  if (!found) return htmlRes(notFound(), 404, (previewKey || owner) ? "no-store" : "public, max-age=60");
+  if (owner) return previewRes(renderProfile(found.pub, { owner: true, carry: ownerQ(owner) }));
   if (previewKey) return previewRes(renderProfile(found.pub, { preview: !found.isPublic, previewKey }));
   return htmlRes(renderProfile(found.pub, {}), 200, "public, max-age=" + PAGE_TTL_S);
 }
@@ -608,7 +663,7 @@ export function renderBostonNightHero(opts) {
   const raw = Number(o.speed);
   const speed = raw > 0 ? Math.min(Math.max(raw, 0.25), 4) : 1;
   const sec = (n) => (Math.round(n * 100) / 100) + "s";
-  const partners = (o.partners || []).filter((p) => p && p.name);
+  const partners = (o.partners || []).filter((p) => p && (p.name || p.anon));
   const sameSite = (h) => /^(\/|#)[^\s"'<>]*$/.test(String(h || "")) ? String(h) : "";
 
   let stars = "";
@@ -623,7 +678,10 @@ export function renderBostonNightHero(opts) {
     const frac = ((i * 0.618) + (i % 2 ? 0.5 : 0)) % 1;
     const bg = safeHex(p.logoBg, "#ffffff");
     const src = safeImagePath(p.logo);
-    const inner = src
+    /* An anonymous company (owner preview) drifts as a blank plate. */
+    const inner = p.anon
+      ? `<span class="bn-lc__blank" style="width:${Math.round(L.h * 1.8)}px"></span>`
+      : src
       ? `<img src="${esc(src)}" alt="" loading="lazy" style="height:${L.h - S.logoInset}px;max-width:${Math.round(L.h * 2.6)}px">`
       : `<span class="bn-logo-name${bg.toLowerCase() === "#ffffff" ? "" : " bn-logo-name--on-dark"}">${esc(p.name)}</span>`;
     const cardAttrs = home
@@ -729,9 +787,10 @@ export function renderServiceChips() {
 /** One company. data-* carry what the page script filters on: neighborhood
     slugs, regions and service tags, all already whitelisted by publicProvider. */
 export function renderProviderCard(p, opts) {
-  const key = (opts && opts.previewKey) || "";
-  const href = esc(withPreview("/providers/" + p.slug, key));
-  const estimate = esc(withPreview("/providers/" + p.slug + "#estimate", key));
+  const o = opts || {};
+  const q = o.carry || previewQ(o.previewKey);
+  const href = esc(withQuery("/providers/" + p.slug, q));
+  const estimate = esc(withQuery("/providers/" + p.slug + "#estimate", q));
   const tags = p.serviceTags.length ? p.serviceTags.slice(0, 3) : p.services.slice(0, 3);
   const meta = (p.rating ? `<b>&#9733; ${esc(p.rating.toFixed(1))}</b><span>${esc(p.reviewCount)} ${esc(p.ratingSource)} reviews</span>` : "") +
     (p.yearsLabel ? `<span>${p.rating ? "&middot; " : ""}${esc(p.yearsLabel)}</span>` : "");
@@ -749,11 +808,24 @@ ${tags.length ? `<div class="pc__tags">${tags.map((t) => `<span class="pc__tag">
 </article>`;
 }
 
+/** Another company in an owner preview (see anonymousProvider): the same
+    data-* the filters read, no name, no logo and no links. */
+function renderAnonCard(p) {
+  const tags = p.serviceTags.slice(0, 3);
+  return `<article class="pc pc--anon" data-slug="${esc(p.slug)}" data-areas="${esc(p.serviceAreas.join(" "))}" data-regions="${esc(p.regions.join(" "))}" data-tags="${esc(p.serviceTags.join("|"))}">
+<div class="pc__plate" aria-hidden="true"></div>
+<div class="pc__body">
+<div class="pc__head"><h3 class="pc__name">Another local company</h3><div class="pc__area">Hidden in this preview</div></div>
+${tags.length ? `<div class="pc__tags">${tags.map((t) => `<span class="pc__tag">${esc(t)}</span>`).join("")}</div>` : ""}
+</div>
+</article>`;
+}
+
 /** The grid, plus the empty state the page script shows when nothing matches.
     Never a dead end: Instant Booking is always offered. */
 export function renderProviderGrid(list, opts) {
   const none = !list.length;
-  return `<div class="pc-grid" data-cards>${list.map((p) => renderProviderCard(p, opts)).join("\n")}</div>
+  return `<div class="pc-grid" data-cards>${list.map((p) => p.anon ? renderAnonCard(p) : renderProviderCard(p, opts)).join("\n")}</div>
 <div class="mk-empty" data-empty${none ? "" : " hidden"}>
 <div class="mk-empty__title" data-empty-title>${none ? "Book instantly in the meantime." : ""}</div>
 <p>Serve opens neighborhood by neighborhood. Book instantly and we'll find a trusted company for you${WAITLIST_HREF ? ", or join the list for your area" : ""}.</p>
@@ -841,20 +913,32 @@ function notFound() {
     scripts; marketplace-client.js adds the live filtering on top.
 
     opts.areas / opts.zips come from the neighborhoods tables (migration 0002)
-    and are handed to the page script as JSON for matching and the dropdown. */
+    and are handed to the page script as JSON for matching and the dropdown.
+
+    opts.previewKey   the founder preview; opts.ownerLinks lists each
+                      company's owner preview link in its banner.
+    opts.ownerName    an owner preview: the list is that company plus
+                      anonymousProvider() cards. opts.carry is its query. */
 export function renderDirectory(providers, opts) {
   const o = opts || {};
   const list = providers || [];
   const key = o.previewKey || "";
+  const carry = o.carry || previewQ(key);
+  const isPrivate = !!(key || o.ownerName);
   const n = list.length;
   const drafts = list.filter((p) => p.isDraft).length;
   const companies = (k) => k + " trusted " + (k === 1 ? "company" : "companies");
 
-  const banner = key ? `<div class="mk-preview" role="note"><strong>Preview.</strong> Showing every company, including ${drafts} ${drafts === 1 ? "draft" : "drafts"} the public cannot see. This page is not indexed and not cached. Don't share this link.</div>` : "";
+  const links = (o.ownerLinks || []).length ? `<details class="mk-owner-links"><summary>Owner preview links</summary>
+<p>Each link shows that one company, with every other company hidden. Send each link only to its own owner.</p>
+<ul>${o.ownerLinks.map((l) => `<li><span>${esc(l.name)}</span><a href="${esc(l.href)}">${esc(l.href)}</a></li>`).join("")}</ul></details>` : "";
+  const banner = o.ownerName
+    ? `<div class="mk-preview" role="note"><strong>Preview for ${esc(o.ownerName)}.</strong> This is how your company will appear on Serve. Other companies are hidden, and this page isn't public.</div>`
+    : key ? `<div class="mk-preview" role="note"><strong>Preview.</strong> Showing every company, including ${drafts} ${drafts === 1 ? "draft" : "drafts"} the public cannot see. This page is not indexed and not cached. Don't share this link.${links}</div>` : "";
   const hero = renderBostonNightHero({
     variant: "home",
     partners: list,
-    homeHref: withPreview("/", key),
+    homeHref: withQuery("/", carry),
     eyebrow: "Greater Boston",
     title: "Boston's most trusted home cleaners.",
     navLinks: [{ href: "#providers", label: "Find a Provider" }, { href: "/instant", label: "Instant Booking", ghost: true }],
@@ -872,7 +956,7 @@ export function renderDirectory(providers, opts) {
 <button class="mk-linkbtn" type="button" data-clear hidden>Show all of Greater Boston</button></div>
 ${n ? `<span class="mk-live" data-live aria-live="polite">${companies(n)}, live now</span>` : ""}
 </div>
-${renderProviderGrid(list, { previewKey: key })}
+${renderProviderGrid(list, { carry })}
 </div></section>
 <section class="mk-instant" aria-labelledby="mk-instant-h">
 <div class="mk-instant__eyebrow">Instant Booking</div>
@@ -885,11 +969,11 @@ ${renderProviderGrid(list, { previewKey: key })}
   return shell({
     title: "Boston's Most Trusted Home Cleaners — Serve",
     description: "Compare local, owner-run cleaning companies across Greater Boston by neighborhood or ZIP, and request a free estimate by phone or walkthrough through Serve.",
-    canonical: key ? "" : "https://servecleaning.com/providers",
-    noindex: !!key,
+    canonical: isPrivate ? "" : "https://servecleaning.com/providers",
+    noindex: isPrivate,
     night: true,
     body,
-    jsonLd: key ? null : {
+    jsonLd: isPrivate ? null : {
       "@context": "https://schema.org", "@type": "ItemList",
       itemListElement: list.map((p, i) => ({ "@type": "ListItem", position: i + 1,
         url: "https://servecleaning.com/providers/" + p.slug, name: p.name })),
@@ -909,9 +993,13 @@ export function renderProfile(p, opts) {
   const methods = [p.estimatePhone && ["phone", "Over the phone", "They call you and quote."],
     p.estimateWalkthrough && ["walkthrough", "Walkthrough", "They visit and quote in person."]].filter(Boolean);
 
-  const body = `${o.preview ? `<div class="mk-preview" role="note"><strong>Preview.</strong> This profile is not public. Only people with the preview link can see it.</div>` : ""}
+  const isPrivate = !!(o.preview || o.previewKey || o.owner);
+  const banner = o.owner
+    ? `<div class="mk-preview" role="note"><strong>Preview.</strong> This is your profile as customers will see it. It isn't public yet.</div>`
+    : o.preview ? `<div class="mk-preview" role="note"><strong>Preview.</strong> This profile is not public. Only people with the preview link can see it.</div>` : "";
+  const body = `${banner}
 <header class="mk-phead" style="border-bottom-color:${p.brandColor}"><div class="mk-wrap">
-<a class="mk-phead__back" href="${esc(withPreview("/providers", o.previewKey || ""))}">&larr; All providers</a>
+<a class="mk-phead__back" href="${esc(withQuery("/providers", o.carry || previewQ(o.previewKey)))}">&larr; All providers</a>
 <div class="mk-phead__row">
 <div class="mk-phead__logo" style="background:${p.logoBg}">${p.logo ? `<img src="${esc(p.logo)}" alt="${esc(p.name)} logo">` : `<span class="mk-card__mono">${esc(p.name.charAt(0))}</span>`}</div>
 <div class="mk-phead__text">
@@ -970,9 +1058,9 @@ ${methods.map(([v, label, hint], i) => `<label class="mk-choice"><input type="ra
     title: p.name + " — Home Cleaning in Greater Boston | Serve",
     description: (p.tagline || p.about).slice(0, 155),
     canonical: "https://servecleaning.com/providers/" + p.slug,
-    noindex: !!(o.preview || o.previewKey),
+    noindex: isPrivate,
     body,
-    jsonLd: (o.preview || o.previewKey) ? null : Object.assign({
+    jsonLd: isPrivate ? null : Object.assign({
       "@context": "https://schema.org", "@type": "HouseCleaningService",
       name: p.name, description: p.about, areaServed: p.serviceArea || "Greater Boston, MA",
       url: "https://servecleaning.com/providers/" + p.slug,

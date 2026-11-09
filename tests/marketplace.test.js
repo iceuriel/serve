@@ -334,6 +334,70 @@ console.log('\n=== 4b. a preview can never reach the public cache ===');
   t('a previewed draft profile is still a 404 to the public', res.status === 404);
 }
 
+console.log('\n=== 4b2. owner preview links: one company, every other anonymous ===');
+{
+  const store = new Map();
+  const fakeCaches = { default: {
+    match: async (req) => { const r = store.get(req.url); return r ? r.clone() : undefined; },
+    put: async (req, res) => { store.set(req.url, res.clone()); },
+  } };
+  const M = loadMarket(async () => new Response('{}'), [], fakeCaches);
+  const d1 = makeD1();
+  plantInternals(d1.raw);
+  const env = { MARKET_DB: d1.binding, MARKET_PREVIEW_KEY: PREVIEW };
+  const u = (p) => new URL('https://servecleaning.com' + p);
+  const open = async (p, e) => {
+    const res = await M.handleMarketplace(get(p), e || env, null, u(p));
+    return { res, html: res ? await res.text() : '' };
+  };
+
+  /* The founder preview hands out the links. */
+  let { html } = await open('/providers?preview=' + PREVIEW);
+  const links = {};
+  for (const m of html.matchAll(/href="\/providers\?owner=([a-z0-9-]+)&amp;k=([0-9a-f]+)"/g)) links[m[1]] = m[2];
+  t('the founder preview lists an owner link for every company', Object.keys(links).length === N_PARTNERS, Object.keys(links).length);
+  const bh = '/providers?owner=blue-house-cleaning&k=' + links['blue-house-cleaning'];
+
+  let r = await open(bh);
+  html = r.html;
+  t('an owner link opens, private: noindex, uncached, no canonical, no structured data',
+    r.res.status === 200 && html.includes('<meta name="robots" content="noindex">') &&
+    (r.res.headers.get('X-Robots-Tag') || '').includes('noindex') && r.res.headers.get('Cache-Control') === 'no-store' &&
+    !html.includes('rel="canonical"') && !html.includes('application/ld+json'));
+  t('…opening it stored nothing in the public cache', store.size === 0, [...store.keys()]);
+  t('…banner names the owner\'s company', html.includes('Preview for Blue House Cleaning.'));
+  t('…their own card is full and first', (html.match(/<article class="pc"/g) || []).length === 1 &&
+    html.indexOf('<article class="pc"') < html.indexOf('pc--anon') && html.includes('/images/providers/blue-house-cleaning/logo.png'));
+  t('…every other company is an anonymous card', (html.match(/<article class="pc pc--anon"/g) || []).length === N_PARTNERS - 1);
+  const others = PARTNERS.filter((p) => p.slug !== 'blue-house-cleaning');
+  const shown = others.filter((p) => html.includes(M.esc(p.name)) || html.includes(p.slug) || html.includes(p.logo_path) ||
+    (p.tagline && html.includes(M.esc(p.tagline))));
+  t('…and no other company\'s name, slug, logo or tagline is anywhere on the page', shown.length === 0, shown.map((p) => p.slug));
+  t('…the sky drifts blank plates for them', (html.match(/bn-lc__blank/g) || []).length === N_PARTNERS - 1);
+  t('…links carry the owner link, not the founder key', html.includes('href="/providers/blue-house-cleaning?owner=blue-house-cleaning&amp;k=') &&
+    !html.includes(PREVIEW) && !html.includes('Owner preview links'));
+  t('…no internal field', !html.includes('555-0177') && !html.includes('SECRET-NOTE') && !html.includes('owner@example.com'));
+
+  r = await open('/providers/blue-house-cleaning?owner=blue-house-cleaning&k=' + links['blue-house-cleaning']);
+  t('the owner opens their own unlisted profile', r.res.status === 200 && r.html.includes('This is your profile as customers will see it') &&
+    r.res.headers.get('Cache-Control') === 'no-store' && r.html.includes('href="/providers?owner=blue-house-cleaning&amp;k='));
+  r = await open('/providers/taskforce-cleaning-services?owner=blue-house-cleaning&k=' + links['blue-house-cleaning']);
+  t('…but their link opens no other company\'s profile', r.res.status === 404, r.res.status);
+  r = await open('/providers?owner=taskforce-cleaning-services&k=' + links['blue-house-cleaning']);
+  t('one company\'s token does not open another company\'s preview', !r.html.includes('Preview for') && !r.html.includes('Taskforce'));
+  r = await open('/providers?owner=blue-house-cleaning&k=' + '0'.repeat(32));
+  t('a wrong token gets the public page', !r.html.includes('Preview for') && !r.html.includes('Blue House'));
+  r = await open(bh, { MARKET_DB: d1.binding, MARKET_PREVIEW_KEY: 'a-rotated-key-0123456789' });
+  t('rotating MARKET_PREVIEW_KEY kills every owner link', !r.html.includes('Preview for'));
+  r = await open(bh, { MARKET_DB: d1.binding });
+  t('no key configured means no owner preview', !r.html.includes('Preview for'));
+  r = await open('/?owner=blue-house-cleaning&k=' + links['blue-house-cleaning']);
+  t('"/" opens the owner preview too', r.res && r.html.includes('Preview for Blue House Cleaning.'));
+  d1.raw.prepare("UPDATE providers SET status = 'removed' WHERE slug = 'blue-house-cleaning'").run();
+  r = await open(bh);
+  t('a removed company\'s link is a 404', r.res.status === 404 && r.res.headers.get('Cache-Control') === 'no-store', r.res.status);
+}
+
 console.log('\n=== 4c. the Boston Night hero (design/serve/DESIGN.md §5) ===');
 {
   const M = loadMarket(async () => new Response('{}'), []);

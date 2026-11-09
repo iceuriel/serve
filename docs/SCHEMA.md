@@ -1437,6 +1437,16 @@ Every preview response is `no-store` with `X-Robots-Tag: noindex, nofollow`
 and a noindex meta, no canonical, no JSON-LD. Anyone holding the link sees
 every draft.
 
+Owner preview links (2026-11-08): `/providers?owner=<slug>&k=<token>` (also
+`/` and that company's own `/providers/<slug>`), where token = first 16 bytes,
+hex, of HMAC-SHA256(`MARKET_PREVIEW_KEY`, `"owner-preview:" + slug`). The page
+shows that company in full and first; every other non-removed company is an
+`anonymousProvider()` card built fresh with only serviceAreas, regions and
+serviceTags (no name, slug, logo, text or price). The founder preview lists
+every company's link in a "Owner preview links" panel in its banner. Same
+private-response rules as above; never through `cached()`. Rotating
+`MARKET_PREVIEW_KEY` kills every owner link; a `removed` company's link 404s.
+
 > **A PREVIEW MUST NEVER GO THROUGH `cached()`.** The public cache key drops
 > the query string, so a preview answered through it would be stored as the
 > public `/providers` and served to everyone. `tests/marketplace.test.js` §4b

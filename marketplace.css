@@ -83,6 +83,7 @@
 .bn-lc { display: flex; align-items: center; justify-content: center; border-radius: 10px; padding: 6px 12px; border: 1px solid rgba(255,255,255,.14); box-shadow: 0 12px 28px rgba(0,0,0,.45); transition: opacity .4s, box-shadow .4s, border-color .4s, filter .4s; }
 .bn-lc.is-hit { border-color: #fff; box-shadow: 0 0 0 3px rgba(255,255,255,.45), 0 12px 28px rgba(0,0,0,.45); }
 .bn-lc .bn-logo-name { font-size: 13px; padding: 0 4px; }
+.bn-lc__blank { display: block; height: 55%; border-radius: 6px; background: var(--serve-gray-200); }
 .bn-home { position: relative; z-index: 7; padding: 0 20px 128px; text-align: center; }
 .bn-home__eyebrow, .mk-instant__eyebrow { display: inline-flex; align-items: center; gap: 14px; font: 700 12px var(--serve-font-body); letter-spacing: .32em; text-transform: uppercase; color: var(--serve-gray-200); }
 .bn-home__eyebrow::before, .bn-home__eyebrow::after, .mk-instant__eyebrow::before, .mk-instant__eyebrow::after { content: ""; width: 32px; height: 1px; background: #fff; opacity: .6; }
@@ -167,6 +168,18 @@
 .pc__note { font-size: 12.5px; font-weight: 600; color: #166534; text-align: right; }
 .pc__actions { display: flex; gap: 10px; }
 .pc__actions .mk-btn { flex: 1; padding: 0 14px; }
+/* owner preview: every other company, anonymous */
+.pc--anon { background: var(--serve-gray-50); box-shadow: none; }
+.pc--anon:hover { transform: none; box-shadow: none; }
+.pc--anon .pc__plate { background: var(--serve-gray-200); border-top-color: var(--serve-gray-300); }
+.pc--anon .pc__name { color: var(--serve-gray-400); }
+.mk-owner-links { max-width: 760px; margin: 8px auto 0; text-align: left; }
+.mk-owner-links summary { cursor: pointer; font-weight: 600; text-align: center; }
+.mk-owner-links p { margin: 8px 0; }
+.mk-owner-links ul { margin: 0; padding: 0; list-style: none; }
+.mk-owner-links li { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 6px 0; border-top: 1px solid #fcd34d; }
+.mk-owner-links li span { min-width: 200px; font-weight: 600; }
+.mk-owner-links a { color: #78350f; font-size: 13px; word-break: break-all; }
 
 /* Instant Booking band (§1.3) */
 .mk-instant { padding: 56px 20px; background: var(--serve-night-900); color: #fff; text-align: center; }

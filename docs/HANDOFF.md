@@ -14,6 +14,26 @@ accurate except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-11-08, Claude Code: owner preview links
+
+The founder wants one preview link per company, to show each owner their
+listing on the main page with every other company anonymous.
+- `src/marketplace.js`: `ownerToken()` / `ownerPreviewOf()` (HMAC of the slug
+  under `MARKET_PREVIEW_KEY`, no new secret), `anonymousProvider()`,
+  `renderAnonCard()`, blank sky plates in the hero, owner banners on the
+  directory and profile. `withPreview()` became `withQuery()` + `previewQ()` /
+  `ownerQ()`. The founder preview banner has an "Owner preview links" panel.
+- `marketplace.css`: `.pc--anon`, `.bn-lc__blank`, `.mk-owner-links`.
+- Contract in SCHEMA.md (Secrets and keys).
+- Checked: `tests/marketplace.test.js` §4b2, 18 checks. Three deliberate
+  breaks made it fail: an anonymous card keeping the real slug, an owner link
+  opening another company's profile, and a token that ignores the slug. All
+  45 files pass. Headless screenshot of Blue House's owner page at 1440px
+  looks right.
+- Known: the estimate form on an unlisted owner profile answers
+  "isn't taking requests" (same as the founder preview).
+- **Local only: not committed, not deployed.**
+
 ## Current work — 2026-11-07, Claude Code: marketplace is the main page; Instant Booking → /instant
 
 Founder: the marketplace becomes the main page. Instant Booking stays an option
@@ -135,10 +155,10 @@ The founder added Blue House Cleaning (Quincy, owner Tiago Camara) as PRV-0014.
   The owner should OK the crop. No photos: the site's photos look AI-generated.
 - `tests/marketplace.test.js` now takes provider and photo counts from the
   JSON instead of hardcoding 13 and 20.
-- **NOT YET IN LIVE D1.** The founder runs once:
-  `npx.cmd wrangler d1 execute serve-marketplace --remote --file db/seed-first-partners.sql`
-  INSERT OR IGNORE, so the 13 existing rows are untouched; only Blue House
-  is added, unlisted.
+- **In live D1 as of 2026-11-08** (founder ran 0002 + the seed; founder
+  confirmed Blue House shows in the /providers preview as a draft; not
+  verified by an agent query, since wrangler here lacked account access).
+  Still unlisted; the public page does not show it.
 
 ## Current work — 2026-11-07, Claude Code: /providers on phones + ZIP search
 
