@@ -129,6 +129,46 @@ console.log('=== 1. routing ===');
   t('asset paths never reach the relay', res2.status === 200 && calls.length === 0);
 }
 
+console.log('\n=== 1b. the waitlist homepage (WAITLIST_IS_HOME) ===');
+{
+  const seen = [];
+  const WAITLIST = { fetch: async (req) => { seen.push(req); return new Response('waitlist', { status: 200 }); } };
+  const assetHits = [];
+  const assets = { fetch: async (req) => { assetHits.push(new URL(req.url).pathname); return new Response('site', { status: 200 }); } };
+  const env = Object.assign({}, ENV, { WAITLIST, ASSETS: assets });
+  const { worker, box } = loadWorker(ok('{}'));
+  const marketCalls = [];
+  box.Market = { handleMarketplace: async (req) => { marketCalls.push(new URL(req.url).pathname); return null; } };
+
+  for (const p of ['/', '/?src=ig-bio', '/?ref=ABC234', '/_astro/index.abc.js', '/logos/roses.svg', '/og.png']) {
+    seen.length = 0;
+    const res = await worker.fetch(get(p), env);
+    t(`${p} is served by the waitlist`, seen.length === 1 && (await res.text()) === 'waitlist');
+  }
+
+  seen.length = 0;
+  const signup = new Request('https://servecleaning.com/api/waitlist', { method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '203.0.113.9' }, body: '{"area":"Somerville"}' });
+  await worker.fetch(signup, env);
+  t('POST /api/waitlist reaches the waitlist with method, body and visitor IP intact',
+    seen.length === 1 && seen[0].method === 'POST' && seen[0].headers.get('CF-Connecting-IP') === '203.0.113.9' &&
+    (await seen[0].text()) === '{"area":"Somerville"}');
+
+  seen.length = 0;
+  await worker.fetch(get('/?preview=some-key'), env);
+  t('/?preview= still goes to the marketplace, not the waitlist', seen.length === 0 && marketCalls.includes('/'));
+
+  seen.length = 0;
+  for (const p of ['/instant', '/index.html', '/terms', '/privacy', '/sms-terms', '/h', '/j', '/v', '/pricing', '/images/logo.svg', '/logos', '/og.png.bak', '/api/waitlistx'])
+    await worker.fetch(get(p), env);
+  t('booking, portal, legal and look-alike paths never reach the waitlist', seen.length === 0, seen.map(r => r.url));
+
+  const { worker: w2 } = loadWorker(ok('{}'));
+  assetHits.length = 0;
+  const res = await w2.fetch(get('/'), Object.assign({}, ENV, { ASSETS: assets }));
+  t('without the WAITLIST binding, / falls back to index.html', (await res.text()) === 'site' && assetHits[0] === '/');
+}
+
 console.log('\n=== 2. POST /api/submit relays and passes the reply through ===');
 {
   const upstream = '{"status":"ok","job_id":"SRV-1","duplicate":false,"slot_action":"booked"}';

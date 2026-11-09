@@ -258,6 +258,11 @@ export default {
     if (url.pathname === "/api/vendor")   return handleVendor(request, env);
     if (url.pathname === "/api/health")   return handleHealth(env);
 
+    /* The waitlist homepage. A separate Worker (repo iceuriel/serve-waitlist)
+       renders it; only its own paths are handed over. Without the binding the
+       request falls through, so "/" goes back to being index.html. */
+    if (env.WAITLIST && isWaitlistPath(url)) return env.WAITLIST.fetch(request);
+
     /* The marketplace. Only its own paths are handed over, so a fault in it can
        never reach a booking route above or the static site below. */
     if (isMarketplacePath(url.pathname) || isMarketplaceHome(url)) {
@@ -999,6 +1004,25 @@ async function handleVendor(request, env) {
    directory. The short links (_redirects and SHORT_LINKS above) already land
    on /instant, so flipping this does not move any printed card. */
 const MARKETPLACE_IS_HOME = false;
+
+/* THE WAITLIST SWITCH (founder, 2026-11-09: servecleaning.com shows the
+   waitlist until the marketplace opens to everyone who signed up and to the
+   public).
+   true: the public "/" is the waitlist, served by the serve-waitlist Worker
+   through the WAITLIST service binding, along with the files that page needs.
+   "/?preview=<key>" still reaches the marketplace preview, and /instant,
+   every short link (/book is the A2P opt-in URL), the portals and the legal
+   pages are untouched. The waitlist page links to none of the booking pages.
+   When the marketplace opens: set this to false and MARKETPLACE_IS_HOME to
+   true in the same commit. */
+const WAITLIST_IS_HOME = true;
+
+function isWaitlistPath(url) {
+  const p = url.pathname;
+  if (p === "/") return WAITLIST_IS_HOME && !MARKETPLACE_IS_HOME && !url.searchParams.has("preview");
+  return WAITLIST_IS_HOME && (p === "/api/waitlist" || p === "/og.png" ||
+         p.startsWith("/_astro/") || p.startsWith("/logos/"));
+}
 
 function isMarketplaceHome(url) {
   return url.pathname === "/" && (MARKETPLACE_IS_HOME || url.searchParams.has("preview"));

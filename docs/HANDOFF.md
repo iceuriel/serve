@@ -14,6 +14,34 @@ accurate except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-11-09, Claude Code: the waitlist is the homepage, branch `waitlist-home`
+
+Founder (2026-11-09): servecleaning.com shows the waitlist design for now; the
+marketplace and preview designs wait until there are enough signups, then
+open to everyone who signed up and to the public. Founder also chose: keep
+/instant and every short link live but unlinked; the waitlist footer uses the
+existing /terms and /privacy.
+- The waitlist is its own repo and Worker: **iceuriel/serve-waitlist**
+  (Astro static page + `POST /api/waitlist`, D1 `serve-waitlist`, previews on
+  D1 `serve-waitlist-preview`). Its copy lives in its `site.config.json`.
+- Here: `WAITLIST_IS_HOME = true` in `src/worker.js` hands `/` (not
+  `/?preview=`), `/api/waitlist`, `/_astro/*`, `/logos/*`, `/og.png` to the
+  `WAITLIST` service binding. `wrangler.jsonc`: the binding, plus
+  `run_worker_first: ["/"]`, because `/` matched `_site/index.html` and never
+  reached the Worker (which is also why `/?preview=` was never seen live).
+  Without the binding, `/` falls back to index.html.
+- Branched from origin/master; `portals-1-db` (portals PR 1) is untouched.
+- Checked: `tests/worker-proxy.test.js` §1b, 10 checks; two deliberate breaks
+  (preview exclusion removed; `/logos` without its slash) each failed it.
+  All 45 files pass.
+- **Not deployed.** Order matters: deploy serve-waitlist FIRST (a service
+  binding to a missing Worker fails this deploy), then merge this branch.
+- Blockers: the Turnstile widget (site key + `TURNSTILE_SECRET` on
+  serve-waitlist), and the founder's call on showing the 14 partner logos
+  and the "14 trusted local companies" line publicly while 0 are listed.
+- Open before launch: /privacy and /terms need a waitlist + referral section;
+  the 10DLC campaign should cover the homepage as an opt-in surface.
+
 ## Current work — 2026-11-08, Claude Code: owner preview links
 
 The founder wants one preview link per company, to show each owner their

@@ -81,8 +81,20 @@
 	"assets": {
 		"directory": "./_site",
 		// Lets the Worker hand non-API requests back to the static asset server.
-		"binding": "ASSETS"
+		"binding": "ASSETS",
+		// "/" matches _site/index.html, which the asset server would answer
+		// without ever running the Worker. Running the Worker first for "/"
+		// lets it serve the waitlist (WAITLIST_IS_HOME) or the marketplace
+		// preview (?preview=). Exact match: every other page stays static.
+		"run_worker_first": ["/"]
 	},
+	// THE WAITLIST HOMEPAGE (2026-11-09). The serve-waitlist Worker (repo
+	// iceuriel/serve-waitlist) has no domain of its own; this binding is how
+	// servecleaning.com reaches it. See WAITLIST_IS_HOME in src/worker.js.
+	// serve-waitlist must be deployed before this Worker, or this deploy fails.
+	"services": [
+		{ "binding": "WAITLIST", "service": "serve-waitlist" }
+	],
 	// SECRETS ARE NOT LISTED HERE, AND MUST NOT BE.
 	//
 	// Set as Cloudflare SECRETS rather than vars:
