@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Serve client portal</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#fcfcfc}
+*{box-sizing:border-box}
+a{color:#1f2937}a:hover{color:#4b5563}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 18px;border-radius:10px;font:600 15px 'Inter',sans-serif;cursor:pointer;border:none;text-decoration:none;white-space:nowrap}
+.btn-s{background:#1f2937;color:#fff}.btn-s:hover{background:#111827;color:#fff}
+.btn-o{background:#fff;color:#1f2937;border:1px solid #d1d5db}.btn-o:hover{border-color:#6b7280;color:#1f2937}
+.btn-w{background:#fff;color:#111827}.btn-w:hover{background:#f3f4f6;color:#111827}
+.card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+.lbl{display:block;font:700 11.5px 'Inter',sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#6b7280}
+.val{font-size:15px;font-weight:600;color:#1f2937}
+.h2{margin:0;font:800 28px/1.15 'Times New Roman',Times,serif;color:#1f2937}
+.fld{width:100%;min-width:0;min-height:44px;border:1px solid #d1d5db;border-radius:10px;padding:10px 12px;font:500 15px 'Inter',sans-serif;color:#111827;background:#fff}
+.fld:focus,.bare:focus,.note:focus{outline:3px solid rgba(31,41,55,.18);outline-offset:1px;border-color:#6b7280}
+.bare{min-width:0;flex:1 1 auto;min-height:36px;border:1px solid transparent;border-radius:8px;padding:4px 8px;font:700 16px 'Inter',sans-serif;color:#1f2937;background:transparent}
+.bare:hover{border-color:#e5e7eb}
+.note{width:100%;min-height:64px;resize:vertical;border:1px solid #e5e7eb;border-radius:10px;padding:10px 12px;font:400 14px/1.5 'Inter',sans-serif;color:#374151;background:#fafafa}
+.x{flex:0 0 36px;width:36px;height:36px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;font-size:18px;line-height:1;cursor:pointer}
+.x:hover{border-color:#9ca3af;color:#111827}
+.tabs a,.tabs button{font-family:inherit}
+@media (max-width:760px){.hide-sm{display:none !important}.h2{font-size:24px}}
+</style>
+</helmet>
+<div style="font-family:'Inter',sans-serif;color:#374151;background:#fcfcfc;line-height:1.6;min-height:100%">
+
+<div role="note" style="background:#fef3c7;border-bottom:1px solid #f59e0b;color:#78350f;font-size:14px;padding:8px 20px;text-align:center"><strong>Draft, sample data.</strong> The client, requests and quotes here are made up; companies are real partners.</div>
+
+<header style="position:relative;overflow:hidden;background:linear-gradient(180deg,#0b1220 0%,#1a2338 100%)">
+<svg aria-hidden="true" viewBox="0 0 1200 300" preserveAspectRatio="none" style="position:absolute;left:0;right:0;bottom:0;width:100%;height:70px;color:#000;opacity:.35" fill="currentColor"><path d="M0,300 V240 H36 V222 H78 V255 H108 V196 H126 V150 H162 V196 H186 V244 H214 V120 H236 V96 H262 V88 H300 V132 H322 V174 H344 V150 H372 V210 H396 V250 H430 V168 H448 V120 L458,92 L468,120 H486 V168 H500 V236 H540 V206 H612 A28,28 0 0 1 668,206 H690 V240 H720 V214 H744 V150 L754,110 L764,150 H784 V214 H800 V246 H840 V190 H878 V210 H906 V160 H944 V128 H980 V186 H1010 V232 H1046 V204 H1080 V226 H1120 V246 H1160 V236 H1200 V300 Z"></path></svg>
+<div style="position:relative;max-width:1200px;margin:0 auto;padding:14px 24px 0;display:flex;align-items:center;gap:20px;flex-wrap:wrap">
+<a href="HomeFlow.dc.html" aria-label="Serve home" style="display:inline-flex;align-items:center;gap:10px;text-decoration:none"><svg aria-hidden="true" width="30" height="26" viewBox="80 22 130 104"><path d="M 88 120 L 88 78 L 145 30 L 202 78 L 202 118" fill="none" stroke="#ffffff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"></path></svg><span style="font:800 26px 'Times New Roman',Times,serif;color:#fff;letter-spacing:-.5px">Serve</span></a>
+<div style="margin-left:auto;display:flex;align-items:center;gap:14px">
+<a class="btn btn-w hide-sm" href="HomeFlow.dc.html" style="min-height:40px">Find a company</a>
+<span aria-label="Signed in as Alex Rivera" style="width:38px;height:38px;border-radius:50%;background:#374151;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700">AR</span>
+</div>
+</div>
+<div style="position:relative;max-width:1200px;margin:0 auto;padding:18px 24px 0">
+<div style="font:700 12px 'Inter',sans-serif;letter-spacing:.28em;text-transform:uppercase;color:#d1d5db">Your account</div>
+<h1 style="margin:4px 0 0;font:800 34px/1.15 'Times New Roman',Times,serif;color:#f9fafb">Welcome back, Alex.</h1>
+<nav class="tabs" aria-label="Account" style="margin-top:14px;display:flex;gap:26px;flex-wrap:wrap">
+<sc-for list="{{tabs}}" as="t" hint-placeholder-count="3"><button type="button" onClick="{{t.go}}" aria-current="{{t.current}}" style="{{t.style}}">{{t.label}}</button></sc-for>
+</nav>
+</div>
+</header>
+
+<main style="max-width:1200px;margin:0 auto;padding:28px 24px 72px">
+
+<sc-if value="{{onReq}}" hint-placeholder-val="{{false}}">
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px">
+<div class="card" style="padding:18px 20px"><span class="lbl">Open requests</span><div style="font:800 34px/1.1 'Times New Roman',Times,serif;color:#1f2937;margin-top:4px">{{openCount}}</div><div style="font-size:13.5px;color:#6b7280">Waiting on a call or quote</div></div>
+<div class="card" style="padding:18px 20px"><span class="lbl">Quotes received</span><div style="font:800 34px/1.1 'Times New Roman',Times,serif;color:#1f2937;margin-top:4px">{{quotedCount}}</div><div style="font-size:13.5px;color:#6b7280">Kept on record by Serve</div></div>
+<button type="button" class="card" onClick="{{goHome}}" style="padding:18px 20px;text-align:left;cursor:pointer;font-family:inherit"><span class="lbl">My Home</span><div style="font:800 22px/1.25 'Times New Roman',Times,serif;color:#1f2937;margin-top:8px">{{homeLine}}</div><div style="font-size:13.5px;color:#6b7280;text-decoration:underline;text-underline-offset:3px">Shared with every company you contact</div></button>
+</div>
+
+<div style="margin:30px 0 14px;display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap">
+<h2 class="h2">Quote requests</h2>
+<a class="btn btn-s" href="HomeFlow.dc.html">Request another estimate</a>
+</div>
+
+<ol style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:14px">
+<sc-for list="{{requests}}" as="r" hint-placeholder-count="3">
+<li class="card" style="overflow:hidden">
+<div style="padding:16px 20px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;border-bottom:1px solid #f0f0f0">
+<a href="{{r.href}}" aria-label="{{r.name}} profile" style="{{r.plate}}"><img src="{{r.logo}}" alt="" style="max-width:100%;max-height:100%;object-fit:contain;display:block"></a>
+<div style="flex:1 1 220px;min-width:0"><h3 style="margin:0;font:800 21px/1.2 'Times New Roman',Times,serif;color:#1f2937">{{r.name}}</h3><div style="font-size:13.5px;color:#6b7280">Sent {{r.sent}} · {{r.method}}</div></div>
+<span style="{{r.pill}}">{{r.status}}</span>
+</div>
+<div style="padding:16px 20px 18px;display:flex;gap:18px 32px;flex-wrap:wrap;align-items:flex-start">
+<ol aria-label="Progress" style="list-style:none;margin:0;padding:0;display:flex;gap:0;flex:1 1 360px;min-width:0">
+<sc-for list="{{r.steps}}" as="s" hint-placeholder-count="3">
+<li style="flex:1;min-width:0"><div style="display:flex;align-items:center"><span style="{{s.dot}}"></span><span style="{{s.line}}"></span></div><div style="{{s.text}}">{{s.label}}</div><div style="font-size:12.5px;color:#6b7280">{{s.when}}</div></li>
+</sc-for>
+</ol>
+<div style="flex:0 1 300px;min-width:0">
+<sc-if value="{{r.hasQuote}}" hint-placeholder-val="{{false}}">
+<div style="padding:12px 14px;border-radius:12px;background:#f0fdf4;border:1px solid #bbf7d0"><span class="lbl" style="color:#166534">Their quote</span><div style="font:800 26px/1.15 'Times New Roman',Times,serif;color:#14532d">{{r.quote}}</div><div style="font-size:13px;color:#166534">{{r.quoteFor}}</div></div>
+</sc-if>
+<sc-if value="{{r.noQuote}}" hint-placeholder-val="{{true}}">
+<div style="font-size:14px;color:#4b5563"><span class="lbl">Preferred time</span><div class="val">{{r.time}}</div><div style="font-size:13px;color:#6b7280">{{r.window}}</div></div>
+</sc-if>
+</div>
+</div>
+<div style="padding:0 20px 16px;display:flex;gap:10px;flex-wrap:wrap">
+<sc-if value="{{r.hasQuote}}" hint-placeholder-val="{{false}}"><a class="btn btn-s" href="#">Book at this price</a></sc-if>
+<a class="btn btn-o" href="#">Call {{r.short}}</a>
+<a class="btn btn-o hide-sm" href="{{r.href}}">View profile</a>
+</div>
+</li>
+</sc-for>
+</ol>
+</sc-if>
+
+<sc-if value="{{onHome}}" hint-placeholder-val="{{true}}">
+<div style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px 24px;flex-wrap:wrap">
+<div>
+<h2 class="h2">My Home</h2>
+<p style="margin:4px 0 0;font-size:15px;color:#4b5563;max-width:620px">Lay out your home once, with notes for any room. Every company you contact sees it, so you never explain it twice.</p>
+</div>
+<div aria-live="polite" style="display:flex;gap:8px;flex-wrap:wrap">
+<sc-for list="{{stats}}" as="s" hint-placeholder-count="4"><span style="display:inline-flex;align-items:center;min-height:34px;padding:0 12px;border-radius:999px;background:#f3f4f6;border:1px solid #e5e7eb;font-size:14px;font-weight:600;color:#1f2937">{{s}}</span></sc-for>
+</div>
+</div>
+
+<section class="card" aria-labelledby="whole-h" style="margin-top:20px;padding:16px 20px">
+<label id="whole-h" class="lbl" for="whole">Notes for every visit</label>
+<textarea id="whole" class="note" style="margin-top:8px;min-height:56px" placeholder="Pets, parking, how to get in, products you prefer…" value="{{whole}}" onChange="{{setWhole}}"></textarea>
+</section>
+
+<sc-for list="{{floors}}" as="f" hint-placeholder-count="2">
+<section aria-label="{{f.name}}" style="margin-top:22px">
+<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding-bottom:10px;border-bottom:2px solid #1f2937">
+<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1f2937" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2 8l10 5 10-5-10-5z"></path><path d="M2 16l10 5 10-5"></path></svg>
+<label class="sr" for="{{f.inputId}}" style="position:absolute;left:-9999px">Floor name</label>
+<input id="{{f.inputId}}" class="bare" style="flex:0 1 280px;font:800 22px 'Times New Roman',Times,serif" value="{{f.name}}" onChange="{{f.rename}}">
+<span style="font-size:14px;color:#6b7280">{{f.count}}</span>
+<span style="margin-left:auto"></span>
+<sc-if value="{{f.canRemove}}" hint-placeholder-val="{{true}}"><button type="button" class="btn btn-o" onClick="{{f.remove}}" style="min-height:36px;padding:0 12px;font-size:14px">Remove level</button></sc-if>
+</div>
+
+<div style="margin-top:14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px">
+<sc-for list="{{f.rooms}}" as="m" hint-placeholder-count="3">
+<div class="card" style="{{m.cardStyle}}">
+<div style="display:flex;align-items:center;gap:8px">
+<span style="{{m.tag}}">{{m.type}}</span>
+<label class="sr" for="{{m.id}}" style="position:absolute;left:-9999px">Room name</label>
+<input id="{{m.id}}" class="bare" value="{{m.name}}" onChange="{{m.rename}}">
+<button type="button" class="x" onClick="{{m.remove}}" aria-label="Remove {{m.name}}">×</button>
+</div>
+<label class="sr" for="{{m.noteId}}" style="position:absolute;left:-9999px">Notes for {{m.name}}</label>
+<textarea id="{{m.noteId}}" class="note" style="margin-top:10px" placeholder="Preferences for this room: surfaces, products, things to skip" value="{{m.note}}" onChange="{{m.setNote}}"></textarea>
+</div>
+</sc-for>
+<div style="display:flex;flex-direction:column;gap:8px;justify-content:center;padding:14px 16px;border:1.5px dashed #d1d5db;border-radius:14px;background:#fff">
+<label class="lbl" for="{{f.selId}}">Add a room</label>
+<div style="display:flex;gap:8px">
+<select id="{{f.selId}}" class="fld" value="{{f.addType}}" onChange="{{f.setType}}" style="flex:1 1 auto">
+<sc-for list="{{types}}" as="t" hint-placeholder-count="6"><option value="{{t}}">{{t}}</option></sc-for>
+</select>
+<button type="button" class="btn btn-s" onClick="{{f.add}}">Add</button>
+</div>
+</div>
+</div>
+</section>
+</sc-for>
+
+<div style="margin-top:22px;display:flex;gap:10px;flex-wrap:wrap">
+<button type="button" class="btn btn-o" onClick="{{addFloor}}">+ Add a floor</button>
+<button type="button" class="btn btn-o" onClick="{{addBasement}}">+ Add a basement</button>
+<span style="margin-left:auto;align-self:center;font-size:13.5px;color:#6b7280">Changes save automatically.</span>
+</div>
+</sc-if>
+
+<sc-if value="{{onProfile}}" hint-placeholder-val="{{false}}">
+<h2 class="h2">Profile</h2>
+<p style="margin:4px 0 18px;font-size:15px;color:#4b5563">Companies see your name, phone and neighborhood when you request an estimate. Your street address is shared only for walkthroughs.</p>
+<form class="card" style="padding:22px;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px 20px;max-width:860px">
+<sc-for list="{{fields}}" as="x" hint-placeholder-count="6">
+<div><label class="lbl" for="{{x.id}}" style="margin-bottom:6px">{{x.label}}</label><input id="{{x.id}}" class="fld" type="{{x.type}}" autocomplete="{{x.ac}}" value="{{x.value}}" onChange="{{x.set}}"></div>
+</sc-for>
+<fieldset style="border:0;margin:0;padding:0;grid-column:1/-1">
+<legend class="lbl" style="margin-bottom:8px">How should companies reach you?</legend>
+<div style="display:flex;gap:8px;flex-wrap:wrap">
+<sc-for list="{{contact}}" as="c" hint-placeholder-count="3"><button type="button" onClick="{{c.pick}}" aria-pressed="{{c.on}}" style="{{c.style}}">{{c.label}}</button></sc-for>
+</div>
+</fieldset>
+<div style="grid-column:1/-1;display:flex;align-items:center;gap:14px;padding-top:6px;border-top:1px solid #f0f0f0">
+<button type="button" class="btn btn-s" onClick="{{save}}">Save changes</button>
+<span aria-live="polite" style="font-size:14px;font-weight:600;color:#166534">{{savedText}}</span>
+</div>
+</form>
+</sc-if>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1700}}'>
+class Component extends DCLogic {
+constructor(props) {
+super(props);
+this.n = 100;
+const R = (type, name, note) => ({ id: this.n++, type, name: name || type, note: note || '' });
+this.state = {
+tab: 'home',
+whole: 'One cat (Miso): please keep the basement door closed. Lockbox code is texted the morning of.',
+addType: {},
+floors: [
+{ id: 1, name: 'First floor', rooms: [R('Kitchen', 'Kitchen', 'Gas stove: please degrease the hood. Butcher-block counter, no bleach.'), R('Living room'), R('Dining room'), R('Half bath')] },
+{ id: 2, name: 'Second floor', rooms: [R('Bedroom', 'Primary bedroom', 'Hardwood floors: dry mop only, no wet mop.'), R('Bedroom', "Kids' room", 'Skip the desk and art table.'), R('Bathroom', 'Hall bathroom', 'Glass shower door: squeegee, nothing abrasive.'), R('Office')] }
+],
+profile: { name: 'Alex Rivera', phone: '(617) 555-0123', email: 'alex@example.com', address: '[Street], Somerville, MA 02143', hood: 'Union Square, Somerville', unit: 'Unit 2' },
+contactBy: 'Text',
+saved: false
+};
+}
+upFloors(fn) { this.setState({ floors: fn(this.state.floors.map((f) => Object.assign({}, f, { rooms: f.rooms.slice() }))) }); }
+renderVals() {
+const { tab, floors, whole, addType, profile, contactBy, saved } = this.state;
+const TYPES = ['Bedroom', 'Bathroom', 'Half bath', 'Kitchen', 'Living room', 'Dining room', 'Office', 'Laundry', 'Entryway', 'Other'];
+const TONE = { Bedroom: '#dbeafe;color:#1e3a8a', Bathroom: '#e0f2fe;color:#075985', 'Half bath': '#e0f2fe;color:#075985', Kitchen: '#ffedd5;color:#9a3412', 'Living room': '#dcfce7;color:#166534', 'Dining room': '#fef9c3;color:#854d0e', Office: '#ede9fe;color:#5b21b6', Laundry: '#f3f4f6;color:#374151', Entryway: '#f3f4f6;color:#374151', Other: '#f3f4f6;color:#374151' };
+
+// ---- tabs ----
+const tabStyle = (on) => "display:inline-flex;align-items:center;min-height:46px;padding:0 2px;background:none;border:0;border-bottom:3px solid " + (on ? '#ffffff;color:#fff;font-weight:700' : 'transparent;color:#cbd5e1;font-weight:500') + ";font-size:15px;cursor:pointer";
+const tabs = [['requests', 'Quote requests'], ['home', 'My Home'], ['profile', 'Profile']].map(([k, label]) => ({ label, current: tab === k ? 'page' : 'false', style: tabStyle(tab === k), go: () => this.setState({ tab: k }) }));
+
+// ---- My Home ----
+const all = [].concat(...floors.map((f) => f.rooms));
+const count = (t) => all.filter((r) => r.type === t).length;
+const baths = count('Bathroom') + count('Half bath') * 0.5;
+const notes = all.filter((r) => r.note.trim()).length;
+const pl = (n, a, b) => n + ' ' + (n === 1 ? a : b);
+const stats = [pl(floors.length, 'level', 'levels'), pl(count('Bedroom'), 'bed', 'beds'), pl(baths, 'bath', 'baths'), pl(all.length, 'room', 'rooms'), pl(notes, 'note', 'notes')];
+const floorVals = floors.map((f) => ({
+name: f.name,
+inputId: 'floor-' + f.id,
+selId: 'add-' + f.id,
+count: pl(f.rooms.length, 'room', 'rooms'),
+canRemove: floors.length > 1,
+addType: addType[f.id] || 'Bedroom',
+rename: (e) => { const v = e.target.value; this.upFloors((fs) => fs.map((x) => x.id === f.id ? Object.assign(x, { name: v }) : x)); },
+remove: () => this.upFloors((fs) => fs.filter((x) => x.id !== f.id)),
+setType: (e) => this.setState({ addType: Object.assign({}, addType, { [f.id]: e.target.value }) }),
+add: () => { const t = addType[f.id] || 'Bedroom'; const nr = { id: this.n++, type: t, name: t, note: '' }; this.upFloors((fs) => fs.map((x) => x.id === f.id ? Object.assign(x, { rooms: x.rooms.concat(nr) }) : x)); },
+rooms: f.rooms.map((m) => ({
+id: 'room-' + m.id, noteId: 'note-' + m.id,
+type: m.type, name: m.name, note: m.note,
+tag: 'flex:0 0 auto;font-size:11.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:4px 8px;border-radius:6px;background:' + (TONE[m.type] || TONE.Other),
+cardStyle: 'padding:12px 12px 14px 14px' + (m.note.trim() ? ';border-left:3px solid #1f2937' : ''),
+rename: (e) => { const v = e.target.value; this.upFloors((fs) => fs.map((x) => x.id === f.id ? Object.assign(x, { rooms: x.rooms.map((r) => r.id === m.id ? Object.assign({}, r, { name: v }) : r) }) : x)); },
+setNote: (e) => { const v = e.target.value; this.upFloors((fs) => fs.map((x) => x.id === f.id ? Object.assign(x, { rooms: x.rooms.map((r) => r.id === m.id ? Object.assign({}, r, { note: v }) : r) }) : x)); },
+remove: () => this.upFloors((fs) => fs.map((x) => x.id === f.id ? Object.assign(x, { rooms: x.rooms.filter((r) => r.id !== m.id) }) : x))
+}))
+}));
+const ordinal = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth'];
+const aboveGround = floors.filter((f) => !/basement/i.test(f.name)).length;
+
+// ---- Requests (sample) ----
+const B = (id) => '/_blob/' + id;
+const STEP = ['Request sent', 'Company reached out', 'Quote received'];
+const reqs = [
+{ slug: 'taskforce', name: 'Taskforce Cleaning Services', short: 'Taskforce', logo: B('31c82e9d2067336c1ade97dd367952b1'), bg: '#ffffff', brand: '#1f3c88', sent: 'Nov 5', method: 'Walkthrough', stage: 3, when: ['Nov 5', 'Nov 5', 'Nov 6'], quote: '$185 / visit', quoteFor: 'Biweekly · 2 levels, 2 bed, 1.5 bath · after walkthrough', time: 'Earlier in the day', window: '8:00 AM – 12:00 PM' },
+{ slug: 'cambridge', name: 'Cambridge Clean Co', short: 'Cambridge Clean Co', logo: B('d4a74e7c1cb7245b9df5eee531755f41'), bg: '#0ca9bb', brand: '#0ca9bb', sent: 'Nov 7', method: 'Over the phone', stage: 2, when: ['Nov 7', 'Nov 7', ''], time: 'Later in the day', window: '12:00 PM – 5:00 PM' },
+{ slug: 'jma', name: 'JMA Cleaning Services', short: 'JMA', logo: B('3dda3a22ed7132c72a4b97c3a51eae90'), bg: '#000000', brand: '#1fb5c1', sent: 'today, 9:14 AM', method: 'Over the phone', stage: 1, when: ['Today', '', ''], time: 'Earlier in the day', window: '8:00 AM – 12:00 PM' }
+];
+const pill = (s) => 'font-size:13px;font-weight:700;padding:5px 12px;border-radius:999px;' + (s === 3 ? 'background:#dcfce7;color:#166534' : s === 2 ? 'background:#fef3c7;color:#92400e' : 'background:#eff6ff;color:#1e40af');
+const requests = reqs.map((r) => ({
+name: r.name, short: r.short, logo: r.logo, sent: r.sent, method: r.method, time: r.time, window: r.window,
+href: 'p-' + r.slug + '.dc.html',
+plate: 'flex:0 0 120px;height:56px;border-radius:10px;padding:8px 12px;display:flex;align-items:center;justify-content:center;background:' + r.bg + ';border:1px solid #e5e7eb;border-top:3px solid ' + r.brand,
+status: STEP[r.stage - 1], pill: pill(r.stage),
+hasQuote: r.stage === 3, noQuote: r.stage !== 3, quote: r.quote || '', quoteFor: r.quoteFor || '',
+steps: STEP.map((label, i) => {
+const done = i < r.stage, last = i === STEP.length - 1;
+return { label, when: r.when[i] || '',
+dot: 'flex:0 0 14px;width:14px;height:14px;border-radius:50%;' + (done ? 'background:#1f2937' : 'background:#fff;border:2px solid #d1d5db'),
+line: last ? 'flex:1' : 'flex:1;height:2px;margin:0 6px;background:' + (i < r.stage - 1 ? '#1f2937' : '#e5e7eb'),
+text: 'margin-top:6px;font-size:13.5px;font-weight:' + (done ? '700;color:#1f2937' : '500;color:#9ca3af') + ';padding-right:8px' };
+})
+}));
+
+// ---- Profile ----
+const F = [['name', 'Full name', 'text', 'name'], ['phone', 'Mobile number', 'tel', 'tel'], ['email', 'Email', 'email', 'email'], ['hood', 'Neighborhood', 'text', 'off'], ['address', 'Street address (walkthroughs only)', 'text', 'street-address'], ['unit', 'Unit / apartment', 'text', 'off']];
+const fields = F.map(([k, label, type, ac]) => ({ id: 'pf-' + k, label, type, ac, value: profile[k], set: (e) => this.setState({ profile: Object.assign({}, this.state.profile, { [k]: e.target.value }), saved: false }) }));
+const chip = (on) => "display:inline-flex;align-items:center;min-height:40px;padding:0 16px;border-radius:999px;font:500 14px 'Inter',sans-serif;cursor:pointer;border:1px solid " + (on ? '#1f2937;background:#1f2937;color:#fff' : '#d1d5db;background:#fff;color:#374151');
+const contact = ['Text', 'Call', 'Either'].map((c) => ({ label: c, on: contactBy === c, style: chip(contactBy === c), pick: () => this.setState({ contactBy: c, saved: false }) }));
+
+return {
+tabs,
+onReq: tab === 'requests', onHome: tab === 'home', onProfile: tab === 'profile',
+goHome: () => this.setState({ tab: 'home' }),
+openCount: reqs.filter((r) => r.stage < 3).length,
+quotedCount: reqs.filter((r) => r.stage === 3).length,
+homeLine: pl(floors.length, 'level', 'levels') + ' · ' + pl(count('Bedroom'), 'bed', 'beds') + ' · ' + pl(baths, 'bath', 'baths'),
+requests,
+stats, floors: floorVals, types: TYPES, whole,
+setWhole: (e) => this.setState({ whole: e.target.value }),
+addFloor: () => this.setState({ floors: floors.concat({ id: this.n++, name: (ordinal[aboveGround] || 'New') + ' floor', rooms: [] }) }),
+addBasement: () => this.setState({ floors: [{ id: this.n++, name: 'Basement', rooms: [] }].concat(floors) }),
+fields, contact,
+save: () => this.setState({ saved: true }),
+savedText: saved ? 'Saved' : ''
+};
+}
+}
+</script>
+</body>
+</html>

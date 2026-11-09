@@ -64,6 +64,11 @@ The components are already ported, in `src/marketplace.js`:
 `renderServiceChips()`, `renderProviderCard()` and `renderProviderGrid()`, with the
 live filtering in `marketplace-client.js`. Use them; don't build second ones.
 
+The client and business portals follow `design/serve/PORTALS_SPEC.md`. Its
+`db/portals_schema.sql` is a Supabase draft: Serve's version is D1 migration
+0003, and every portal read or write goes through `src/portals.js`, which
+stands in for row-level security (docs/SCHEMA.md, "The portals").
+
 Rules that matter most:
 - Hero/landing screens use the Boston Night hero. App screens (portals,
   booking, settings) use the slate nav + white workspace, with no ambient motion.

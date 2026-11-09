@@ -14,6 +14,28 @@ accurate except where a later section supersedes them.
 
 ---
 
+## Current work — 2026-11-09, Claude Code: portals PR 1 (database), branch `portals-1-db`
+
+The founder supplied a second design kit (`serve-design-kit (2).zip`) with
+client and business portals. Decisions (founder, 2026-11-09): build them on
+**D1 + the Worker, not Supabase**, and for now as **private links with no
+sign-in**, like the owner preview links.
+- Installed `design/serve/PORTALS_SPEC.md`, `db/portals_schema.sql`,
+  `reference/portals/*.dc.html` and the kit's updated README.
+- `migrations/0003_portals.sql`: the kit's schema adapted to D1, reusing
+  `providers`, `clients`, `estimate_requests`, `homes`, `home_rooms`. Mapping
+  in SCHEMA.md, "The portals".
+- `src/portals.js`: the access rules RLS would have enforced, written as functions.
+  No routes yet.
+- `db/dev-seed-portals.sql`: the design's sample (4 requests to Taskforce,
+  Cambridge Clean Co with none). Local only.
+- `tests/portals.test.js`, 70 checks. Six deliberate breaks, one per rule,
+  each made it fail. All 46 files pass. Also applied to a LOCAL wrangler
+  D1: 0001–0003 apply, the dev seed runs twice without duplicating, and an
+  UPDATE on quotes is refused by the trigger.
+- **NOT applied to live D1.** Next: founder review, then PR 2 (owner-link
+  shells for /business and the founder's /admin/edits; /account preview).
+
 ## Current work — 2026-11-08, Claude Code: owner preview links
 
 The founder wants one preview link per company, to show each owner their
