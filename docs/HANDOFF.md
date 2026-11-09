@@ -33,8 +33,12 @@ sign-in**, like the owner preview links.
   each made it fail. All 46 files pass. Also applied to a LOCAL wrangler
   D1: 0001–0003 apply, the dev seed runs twice without duplicating, and an
   UPDATE on quotes is refused by the trigger.
-- **NOT applied to live D1.** Next: founder review, then PR 2 (owner-link
-  shells for /business and the founder's /admin/edits; /account preview).
+- **0003 applied to LIVE D1 2026-11-09** (founder said "apply"; wrangler
+  reported 23 commands, ✅). Checked after: 4 new tables, 2 quote triggers,
+  14 providers / 0 listed unchanged, no DEV rows, /providers answers 200.
+  The dev seed was NOT run remotely. PR #1 itself is still unmerged.
+  Next: PR 2 (owner-link shells for /business and the founder's
+  /admin/edits; /account preview).
 
 ## Current work — 2026-11-08, Claude Code: owner preview links
 
