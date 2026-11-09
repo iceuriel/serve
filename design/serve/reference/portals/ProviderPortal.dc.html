@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Serve business portal</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#fcfcfc}
+*{box-sizing:border-box}
+a{color:#1f2937}a:hover{color:#4b5563}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 18px;border-radius:10px;font:600 15px 'Inter',sans-serif;cursor:pointer;border:none;text-decoration:none;white-space:nowrap}
+.btn-s{background:#1f2937;color:#fff}.btn-s:hover{background:#111827;color:#fff}
+.btn-o{background:#fff;color:#1f2937;border:1px solid #d1d5db}.btn-o:hover{border-color:#6b7280;color:#1f2937}
+.btn-w{background:#fff;color:#111827}.btn-w:hover{background:#f3f4f6;color:#111827}
+.card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+.lbl{display:block;font:700 11.5px 'Inter',sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#6b7280}
+.val{font-size:15px;font-weight:600;color:#1f2937}
+.h2{margin:0;font:800 28px/1.15 'Times New Roman',Times,serif;color:#1f2937}
+.fld{width:100%;min-width:0;min-height:44px;border:1px solid #d1d5db;border-radius:10px;padding:10px 12px;font:500 15px 'Inter',sans-serif;color:#111827;background:#fff}
+textarea.fld{resize:vertical;line-height:1.5;font-weight:400}
+.fld:focus{outline:3px solid rgba(31,41,55,.18);outline-offset:1px;border-color:#6b7280}
+.pc{background:#fff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+@media (max-width:760px){.hide-sm{display:none !important}.h2{font-size:24px}}
+</style>
+</helmet>
+<div style="font-family:'Inter',sans-serif;color:#374151;background:#fcfcfc;line-height:1.6;min-height:100%">
+
+<div role="note" style="background:#fef3c7;border-bottom:1px solid #f59e0b;color:#78350f;font-size:14px;padding:8px 20px;text-align:center"><strong>Draft, sample data.</strong> Taskforce is a real partner; the clients, requests and quotes are made up.</div>
+
+<header style="position:relative;overflow:hidden;background:linear-gradient(180deg,#0b1220 0%,#1a2338 100%)">
+<svg aria-hidden="true" viewBox="0 0 1200 300" preserveAspectRatio="none" style="position:absolute;left:0;right:0;bottom:0;width:100%;height:70px;color:#000;opacity:.35" fill="currentColor"><path d="M0,300 V240 H36 V222 H78 V255 H108 V196 H126 V150 H162 V196 H186 V244 H214 V120 H236 V96 H262 V88 H300 V132 H322 V174 H344 V150 H372 V210 H396 V250 H430 V168 H448 V120 L458,92 L468,120 H486 V168 H500 V236 H540 V206 H612 A28,28 0 0 1 668,206 H690 V240 H720 V214 H744 V150 L754,110 L764,150 H784 V214 H800 V246 H840 V190 H878 V210 H906 V160 H944 V128 H980 V186 H1010 V232 H1046 V204 H1080 V226 H1120 V246 H1160 V236 H1200 V300 Z"></path></svg>
+<div style="position:relative;max-width:1200px;margin:0 auto;padding:14px 24px 0;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+<a href="HomeFlow.dc.html" aria-label="Serve home" style="display:inline-flex;align-items:center;gap:10px;text-decoration:none"><svg aria-hidden="true" width="30" height="26" viewBox="80 22 130 104"><path d="M 88 120 L 88 78 L 145 30 L 202 78 L 202 118" fill="none" stroke="#ffffff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"></path></svg><span style="font:800 26px 'Times New Roman',Times,serif;color:#fff;letter-spacing:-.5px">Serve</span></a>
+<span style="font:700 11px 'Inter',sans-serif;letter-spacing:.2em;text-transform:uppercase;color:#d1d5db;border:1px solid rgba(255,255,255,.3);border-radius:999px;padding:3px 10px">For businesses</span>
+<div style="margin-left:auto;display:flex;align-items:center;gap:12px">
+<a class="btn btn-w hide-sm" href="p-taskforce.dc.html" style="min-height:40px">View public profile</a>
+<span style="height:40px;padding:4px 10px;border-radius:8px;background:#fff;display:flex;align-items:center"><img src="/_blob/31c82e9d2067336c1ade97dd367952b1" alt="Taskforce Cleaning Services" style="height:30px;width:auto;display:block"></span>
+</div>
+</div>
+<div style="position:relative;max-width:1200px;margin:0 auto;padding:18px 24px 0">
+<div style="font:700 12px 'Inter',sans-serif;letter-spacing:.28em;text-transform:uppercase;color:#d1d5db">Business portal</div>
+<h1 style="margin:4px 0 0;font:800 34px/1.15 'Times New Roman',Times,serif;color:#f9fafb">{{biz}}</h1>
+<nav aria-label="Business portal" style="margin-top:14px;display:flex;gap:26px;flex-wrap:wrap">
+<sc-for list="{{tabs}}" as="t" hint-placeholder-count="2"><button type="button" onClick="{{t.go}}" aria-current="{{t.current}}" style="{{t.style}}">{{t.label}}</button></sc-for>
+</nav>
+</div>
+</header>
+
+<main style="max-width:1200px;margin:0 auto;padding:28px 24px 72px">
+
+<sc-if value="{{onReq}}" hint-placeholder-val="{{true}}">
+<div role="group" aria-label="Filter by status" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px">
+<sc-for list="{{tiles}}" as="t" hint-placeholder-count="4">
+<button type="button" onClick="{{t.pick}}" aria-pressed="{{t.on}}" style="{{t.style}}"><span class="lbl">{{t.label}}</span><span style="display:block;font:800 34px/1.1 'Times New Roman',Times,serif;color:#1f2937;margin-top:4px">{{t.n}}</span><span style="display:block;font-size:13.5px;color:#6b7280">{{t.sub}}</span></button>
+</sc-for>
+</div>
+
+<div style="margin:28px 0 14px;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
+<h2 class="h2">{{listTitle}}</h2>
+<span style="font-size:14px;color:#6b7280">Newest first</span>
+</div>
+
+<ol style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:14px">
+<sc-for list="{{reqs}}" as="r" hint-placeholder-count="3">
+<li class="card" style="{{r.cardStyle}}">
+<div style="padding:16px 20px;display:flex;gap:14px;align-items:center;flex-wrap:wrap;border-bottom:1px solid #f0f0f0">
+<span style="flex:0 0 44px;width:44px;height:44px;border-radius:50%;background:#374151;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700">{{r.initials}}</span>
+<div style="flex:1 1 220px;min-width:0"><h3 style="margin:0;font:800 21px/1.2 'Times New Roman',Times,serif;color:#1f2937">{{r.client}}</h3><div style="font-size:13.5px;color:#6b7280">{{r.hood}} · received {{r.received}}</div></div>
+<span style="{{r.pill}}">{{r.statusLabel}}</span>
+</div>
+
+<div style="padding:16px 20px;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px 24px">
+<div><span class="lbl">Estimate</span><div class="val">{{r.method}}</div></div>
+<div><span class="lbl">Preferred time</span><div class="val">{{r.time}}</div><div style="font-size:13px;color:#6b7280">{{r.window}}</div></div>
+<div><span class="lbl">Phone · prefers {{r.contact}}</span><div class="val"><a href="#">{{r.phone}}</a></div></div>
+<div><span class="lbl">Address</span><div class="val">{{r.address}}</div></div>
+</div>
+
+<div style="margin:0 20px;padding:12px 14px;border-radius:12px;background:#f9fafb;border:1px solid #f0f0f0;display:flex;gap:10px 16px;align-items:center;flex-wrap:wrap">
+<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1f2937" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"></path><path d="M5 10v10h14V10"></path></svg>
+<span style="font-size:14.5px;font-weight:700;color:#1f2937">Their home</span>
+<span style="font-size:14.5px;color:#374151">{{r.homeLine}}</span>
+<button type="button" onClick="{{r.toggle}}" aria-expanded="{{r.open}}" style="margin-left:auto;min-height:36px;padding:0 4px;background:none;border:0;font:600 14px 'Inter',sans-serif;color:#1f2937;text-decoration:underline;text-underline-offset:3px;cursor:pointer">{{r.toggleLabel}}</button>
+</div>
+<sc-if value="{{r.open}}" hint-placeholder-val="{{false}}">
+<div style="margin:10px 20px 0;display:flex;flex-direction:column;gap:10px">
+<sc-if value="{{r.hasWhole}}" hint-placeholder-val="{{true}}"><p style="margin:0;padding:10px 12px;border-left:3px solid #1f2937;background:#fff;font-size:14px;color:#374151"><strong style="color:#1f2937">Every visit:</strong> {{r.whole}}</p></sc-if>
+<sc-for list="{{r.floors}}" as="f" hint-placeholder-count="2">
+<div><div style="font:800 16px 'Times New Roman',Times,serif;color:#1f2937;margin-bottom:6px">{{f.name}}</div>
+<ul style="list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px">
+<sc-for list="{{f.rooms}}" as="m" hint-placeholder-count="3"><li style="{{m.style}}"><div style="font-size:14px;font-weight:700;color:#1f2937">{{m.name}}</div><sc-if value="{{m.hasNote}}" hint-placeholder-val="{{false}}"><div style="font-size:13.5px;color:#4b5563">{{m.note}}</div></sc-if></li></sc-for>
+</ul></div>
+</sc-for>
+</div>
+</sc-if>
+
+<div style="padding:16px 20px 18px">
+<sc-if value="{{r.isNew}}" hint-placeholder-val="{{true}}">
+<div style="display:flex;gap:10px;flex-wrap:wrap"><a class="btn btn-o" href="#">Call {{r.first}}</a><button type="button" class="btn btn-s" onClick="{{r.contacted}}">Mark as contacted</button></div>
+</sc-if>
+<sc-if value="{{r.isContacted}}" hint-placeholder-val="{{false}}">
+<form style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+<div style="flex:0 1 160px"><label class="lbl" for="{{r.amtId}}" style="margin-bottom:6px">Your quote ($)</label><input id="{{r.amtId}}" class="fld" inputmode="numeric" placeholder="185" value="{{r.amt}}" onChange="{{r.setAmt}}"></div>
+<div style="flex:0 1 200px"><label class="lbl" for="{{r.freqId}}" style="margin-bottom:6px">For</label><select id="{{r.freqId}}" class="fld" value="{{r.freq}}" onChange="{{r.setFreq}}"><sc-for list="{{freqs}}" as="q" hint-placeholder-count="4"><option value="{{q}}">{{q}}</option></sc-for></select></div>
+<button type="button" class="btn btn-s" onClick="{{r.sendQuote}}">Send quote</button>
+<a class="btn btn-o" href="#">Call {{r.first}}</a>
+<sc-if value="{{r.err}}" hint-placeholder-val="{{false}}"><span role="alert" style="flex-basis:100%;font-size:13.5px;font-weight:600;color:#b91c1c">Enter a dollar amount.</span></sc-if>
+</form>
+<p style="margin:8px 0 0;font-size:13px;color:#6b7280">Serve keeps every quote on record for you and the client.</p>
+</sc-if>
+<sc-if value="{{r.isQuoted}}" hint-placeholder-val="{{false}}">
+<div style="display:flex;gap:12px 20px;align-items:center;flex-wrap:wrap">
+<div style="padding:10px 14px;border-radius:12px;background:#f0fdf4;border:1px solid #bbf7d0"><span class="lbl" style="color:#166534">Quote sent {{r.quotedOn}}</span><span style="font:800 22px 'Times New Roman',Times,serif;color:#14532d">{{r.quoteText}}</span></div>
+<button type="button" class="btn btn-o" onClick="{{r.editQuote}}">Edit quote</button>
+<span style="font-size:13.5px;color:#6b7280">Waiting for {{r.first}} to book.</span>
+</div>
+</sc-if>
+</div>
+</li>
+</sc-for>
+</ol>
+<sc-if value="{{none}}" hint-placeholder-val="{{false}}"><p style="margin:0;padding:28px;text-align:center;border:1.5px dashed #d1d5db;border-radius:14px;color:#6b7280">No requests in this stage.</p></sc-if>
+</sc-if>
+
+<sc-if value="{{onProfile}}" hint-placeholder-val="{{false}}">
+<div style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap">
+<div><h2 class="h2">Business profile</h2><p style="margin:4px 0 0;font-size:15px;color:#4b5563">This is what clients see on Serve. Edit it here and watch the preview update.</p></div>
+<span aria-live="polite" style="{{saveStyle}}">{{saveText}}</span>
+</div>
+
+<div style="margin-top:20px;display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start">
+<form class="card" style="flex:999 1 560px;min-width:0;padding:22px;display:flex;flex-direction:column;gap:18px">
+<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+<div style="flex:0 0 180px;height:84px;border-radius:12px;border:1px solid #e5e7eb;border-top:4px solid #1f3c88;display:flex;align-items:center;justify-content:center;padding:10px 16px;background:#fff"><img src="/_blob/31c82e9d2067336c1ade97dd367952b1" alt="Current logo" style="max-width:100%;max-height:100%;object-fit:contain"></div>
+<div><span class="lbl">Logo</span><button type="button" class="btn btn-o" style="margin-top:6px;min-height:38px">Replace logo</button></div>
+</div>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px">
+<div><label class="lbl" for="pp-name" style="margin-bottom:6px">Company name</label><input id="pp-name" class="fld" value="{{p.name}}" onChange="{{set.name}}"></div>
+<div><label class="lbl" for="pp-phone" style="margin-bottom:6px">Business phone</label><input id="pp-phone" class="fld" type="tel" value="{{p.phone}}" onChange="{{set.phone}}"></div>
+</div>
+<div><div style="display:flex;justify-content:space-between"><label class="lbl" for="pp-tag" style="margin-bottom:6px">Tagline</label><span style="font-size:12.5px;color:#6b7280">{{tagCount}}/120</span></div><textarea id="pp-tag" class="fld" rows="2" maxlength="120" value="{{p.tagline}}" onChange="{{set.tagline}}"></textarea></div>
+<div><label class="lbl" for="pp-about" style="margin-bottom:6px">About</label><textarea id="pp-about" class="fld" rows="3" value="{{p.about}}" onChange="{{set.about}}"></textarea></div>
+
+<fieldset style="border:0;margin:0;padding:0">
+<legend class="lbl" style="margin-bottom:8px">Service areas</legend>
+<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+<sc-for list="{{areas}}" as="a" hint-placeholder-count="3"><span style="display:inline-flex;align-items:center;gap:4px;min-height:36px;padding:0 4px 0 12px;border-radius:999px;background:#f3f4f6;border:1px solid #e5e7eb;font-size:14px;font-weight:600;color:#1f2937">{{a.label}}<button type="button" onClick="{{a.remove}}" aria-label="Remove {{a.label}}" style="width:28px;height:28px;border:0;border-radius:50%;background:transparent;color:#6b7280;font-size:16px;cursor:pointer">×</button></span></sc-for>
+<label for="pp-area" style="position:absolute;left:-9999px">Add a neighborhood</label>
+<input id="pp-area" class="fld" style="width:200px;min-height:36px;padding:6px 10px" placeholder="Add a neighborhood" value="{{newArea}}" onChange="{{setNewArea}}">
+<button type="button" class="btn btn-o" onClick="{{addArea}}" style="min-height:36px;padding:0 12px">Add</button>
+</div>
+</fieldset>
+
+<fieldset style="border:0;margin:0;padding:0">
+<legend class="lbl" style="margin-bottom:8px">Services you offer</legend>
+<div style="display:flex;gap:8px;flex-wrap:wrap">
+<sc-for list="{{svcs}}" as="s" hint-placeholder-count="6"><button type="button" onClick="{{s.toggle}}" aria-pressed="{{s.on}}" style="{{s.style}}">{{s.label}}</button></sc-for>
+</div>
+</fieldset>
+
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px">
+<div><label class="lbl" for="pp-pl" style="margin-bottom:6px">Pricing label</label><select id="pp-pl" class="fld" value="{{p.priceLabel}}" onChange="{{set.priceLabel}}"><sc-for list="{{priceLabels}}" as="o" hint-placeholder-count="3"><option value="{{o}}">{{o}}</option></sc-for></select></div>
+<div><label class="lbl" for="pp-price" style="margin-bottom:6px">Price or offer</label><input id="pp-price" class="fld" value="{{p.price}}" onChange="{{set.price}}"></div>
+<div><label class="lbl" for="pp-note" style="margin-bottom:6px">Highlight</label><input id="pp-note" class="fld" value="{{p.note}}" onChange="{{set.note}}"></div>
+</div>
+
+<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding-top:14px;border-top:1px solid #f0f0f0">
+<button type="button" class="btn btn-s" onClick="{{submit}}">Submit changes</button>
+<button type="button" class="btn btn-o" onClick="{{reset}}">Discard</button>
+<span style="font-size:13.5px;color:#6b7280">Changes go live after a quick Serve review.</span>
+</div>
+</form>
+
+<aside aria-label="Live preview" style="flex:1 1 340px;min-width:0;display:flex;flex-direction:column;gap:10px">
+<span class="lbl">Live preview · how clients see you</span>
+<article class="pc">
+<div style="display:flex;align-items:center;justify-content:center;height:108px;padding:16px 24px;background:#fff;border-top:4px solid #1f3c88;border-bottom:1px solid #f0f0f0"><img src="/_blob/31c82e9d2067336c1ade97dd367952b1" alt="" style="max-width:100%;max-height:100%;object-fit:contain"></div>
+<div style="padding:16px 20px 20px;display:flex;flex-direction:column;gap:8px">
+<div><h3 style="margin:0;font:800 22px/1.2 'Times New Roman',Times,serif;color:#1f2937">{{p.name}}</h3><div style="margin-top:2px;font-size:13.5px;color:#6b7280">{{areaLine}}</div></div>
+<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:14px"><span style="font-weight:700;color:#1f2937">★ 5.0</span><span style="color:#6b7280">67 Google reviews · 14+ yrs experience</span></div>
+<p style="margin:0;font-size:15px;line-height:1.5;color:#4b5563">{{p.tagline}}</p>
+<div style="display:flex;gap:6px;flex-wrap:wrap"><sc-for list="{{previewTags}}" as="t" hint-placeholder-count="3"><span style="font-size:12px;font-weight:500;padding:3px 10px;border-radius:999px;background:#f3f4f6;border:1px solid #e5e7eb;color:#374151">{{t}}</span></sc-for></div>
+<div style="margin-top:4px;padding-top:10px;border-top:1px solid #f0f0f0;display:flex;align-items:flex-end;justify-content:space-between;gap:12px">
+<div><div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#6b7280">{{p.priceLabel}}</div><div style="font-size:16px;font-weight:800;color:#1f2937">{{p.price}}</div></div>
+<div style="font-size:12.5px;color:#166534;font-weight:600;text-align:right">✓ {{p.note}}</div>
+</div>
+<div style="display:flex;gap:10px"><span class="btn btn-o" style="flex:1">View Profile</span><span class="btn btn-s" style="flex:1">Get Estimate</span></div>
+</div>
+</article>
+<p style="margin:0;font-size:13px;color:#6b7280">Ratings and review counts come from your verified listings and can't be edited here.</p>
+</aside>
+</div>
+</sc-if>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1700}}'>
+class Component extends DCLogic {
+constructor(props) {
+super(props);
+this.base = {
+name: 'Taskforce Cleaning Services', phone: '(617) 555-0190',
+tagline: 'Recurring house cleaning from a vetted crew, with more than 16,000 cleanings done.',
+about: 'A vetted, IICRC-certified team serving Everett, Somerville and Cambridge with recurring, deep and move-out cleaning.',
+areas: ['Everett', 'Somerville', 'Cambridge'],
+svcs: ['Recurring', 'Deep clean', 'Move in / out', 'Post-construction'],
+priceLabel: 'Current offer', price: '25% off first deep clean', note: 'IICRC certified'
+};
+const S = (name, note) => ({ name, note: note || '' });
+this.state = {
+tab: 'requests', filter: 'all', openId: 1, newArea: '', saved: 'idle',
+p: JSON.parse(JSON.stringify(this.base)),
+reqs: [
+{ id: 1, client: 'Alex R.', hood: 'Union Square, Somerville', received: 'today, 9:14 AM', method: 'Walkthrough', time: 'Earlier in the day', window: '8:00 AM – 12:00 PM', phone: '(617) 555-0123', contact: 'text', address: '[Street], Somerville 02143', status: 'new', amt: '', freq: 'Biweekly',
+whole: 'One cat (Miso): please keep the basement door closed. Lockbox code is texted the morning of.',
+floors: [{ name: 'First floor', rooms: [S('Kitchen', 'Gas stove: please degrease the hood. Butcher-block counter, no bleach.'), S('Living room'), S('Dining room'), S('Half bath')] }, { name: 'Second floor', rooms: [S('Primary bedroom', 'Hardwood floors: dry mop only, no wet mop.'), S("Kids' room", 'Skip the desk and art table.'), S('Hall bathroom', 'Glass shower door: squeegee, nothing abrasive.'), S('Office')] }],
+beds: 2, baths: 1.5 },
+{ id: 2, client: 'Priya S.', hood: 'Inman Square, Cambridge', received: 'yesterday, 6:40 PM', method: 'Over the phone', time: 'Later in the day', window: '12:00 PM – 5:00 PM', phone: '(617) 555-0147', contact: 'call', address: 'Shared for walkthroughs only', status: 'contacted', amt: '', freq: 'One-time deep clean',
+whole: '', floors: [{ name: 'Apartment', rooms: [S('Kitchen'), S('Living room', 'Velvet sofa: vacuum only.'), S('Bedroom'), S('Bathroom')] }], beds: 1, baths: 1 },
+{ id: 3, client: 'Marcus T.', hood: 'Everett', received: 'Nov 5', method: 'Walkthrough', time: 'Later in the day', window: '12:00 PM – 5:00 PM', phone: '(857) 555-0189', contact: 'text', address: '[Street], Everett 02149', status: 'quoted', amt: '240', freq: 'One-time deep clean', quotedOn: 'Nov 6',
+whole: 'Moving out Nov 30: inside of oven and fridge too.', floors: [{ name: 'First floor', rooms: [S('Kitchen', 'Inside oven and fridge.'), S('Living room'), S('Bathroom')] }, { name: 'Second floor', rooms: [S('Bedroom'), S('Bedroom'), S('Bathroom')] }], beds: 2, baths: 2 },
+{ id: 4, client: 'Dana R.', hood: 'Ball Square, Somerville', received: 'Nov 4', method: 'Over the phone', time: 'Earlier in the day', window: '8:00 AM – 12:00 PM', phone: '(781) 555-0162', contact: 'either', address: 'Shared for walkthroughs only', status: 'new', amt: '', freq: 'Weekly',
+whole: '', floors: [{ name: 'Basement', rooms: [S('Laundry')] }, { name: 'First floor', rooms: [S('Kitchen'), S('Living room'), S('Half bath')] }, { name: 'Second floor', rooms: [S('Bedroom'), S('Bedroom'), S('Bedroom', 'Nursery: fragrance-free products only.'), S('Bathroom')] }], beds: 3, baths: 1.5 }
+],
+err: {}
+};
+}
+upReq(id, patch) { this.setState({ reqs: this.state.reqs.map((r) => r.id === id ? Object.assign({}, r, patch) : r) }); }
+renderVals() {
+const { tab, filter, reqs, openId, p, newArea, saved, err } = this.state;
+const pl = (n, a, b) => n + ' ' + (n === 1 ? a : b);
+const tabStyle = (on) => "display:inline-flex;align-items:center;min-height:46px;padding:0 2px;background:none;border:0;border-bottom:3px solid " + (on ? '#ffffff;color:#fff;font-weight:700' : 'transparent;color:#cbd5e1;font-weight:500') + ";font:inherit;font-size:15px;cursor:pointer";
+const newCount = reqs.filter((r) => r.status === 'new').length;
+const tabs = [['requests', 'Requests' + (newCount ? ' (' + newCount + ' new)' : '')], ['profile', 'Business profile']].map(([k, label]) => ({ label, current: tab === k ? 'page' : 'false', style: tabStyle(tab === k), go: () => this.setState({ tab: k }) }));
+
+// ---- dashboard tiles (also filters) ----
+const LABEL = { new: 'New', contacted: 'Contacted', quoted: 'Quoted' };
+const PILL = { new: 'background:#eff6ff;color:#1e40af', contacted: 'background:#fef3c7;color:#92400e', quoted: 'background:#dcfce7;color:#166534' };
+const tileDefs = [['all', 'All requests', reqs.length, 'Since you joined Serve'], ['new', 'New', newCount, 'Reach out to these first'], ['contacted', 'Contacted', reqs.filter((r) => r.status === 'contacted').length, 'Waiting on your quote'], ['quoted', 'Quoted', reqs.filter((r) => r.status === 'quoted').length, 'Waiting on the client']];
+const tiles = tileDefs.map(([k, label, n, sub]) => ({ label, n, sub, on: filter === k,
+style: 'text-align:left;cursor:pointer;font-family:inherit;padding:16px 18px;border-radius:14px;background:#fff;border:' + (filter === k ? '2px solid #1f2937;box-shadow:0 0 0 3px rgba(31,41,55,.1)' : '1px solid #e5e7eb'),
+pick: () => this.setState({ filter: k }) }));
+
+const shown = reqs.filter((r) => filter === 'all' || r.status === filter).map((r) => {
+const rooms = [].concat(...r.floors.map((f) => f.rooms));
+const notes = rooms.filter((m) => m.note).length + (r.whole ? 1 : 0);
+const open = openId === r.id;
+const first = r.client.split(' ')[0];
+return {
+client: r.client, first, hood: r.hood, received: r.received, method: r.method, time: r.time, window: r.window, phone: r.phone, contact: r.contact, address: r.address,
+initials: r.client.replace(/[^A-Z]/g, '').slice(0, 2),
+statusLabel: LABEL[r.status], pill: 'font-size:13px;font-weight:700;padding:5px 12px;border-radius:999px;' + PILL[r.status],
+cardStyle: 'overflow:hidden' + (r.status === 'new' ? ';border-left:4px solid #1e40af' : ''),
+homeLine: [pl(r.floors.length, 'level', 'levels'), pl(r.beds, 'bed', 'beds'), pl(r.baths, 'bath', 'baths'), pl(rooms.length, 'room', 'rooms'), pl(notes, 'note', 'notes')].join(' · '),
+open, toggleLabel: open ? 'Hide rooms & notes' : 'View rooms & notes',
+toggle: () => this.setState({ openId: open ? null : r.id }),
+hasWhole: !!r.whole, whole: r.whole,
+floors: r.floors.map((f) => ({ name: f.name, rooms: f.rooms.map((m) => ({ name: m.name, note: m.note, hasNote: !!m.note,
+style: 'padding:8px 12px;border-radius:10px;background:#fff;border:1px solid #e5e7eb' + (m.note ? ';border-left:3px solid #1f2937' : '') })) })),
+isNew: r.status === 'new', isContacted: r.status === 'contacted', isQuoted: r.status === 'quoted',
+contacted: () => this.upReq(r.id, { status: 'contacted' }),
+amtId: 'amt-' + r.id, freqId: 'freq-' + r.id, amt: r.amt, freq: r.freq,
+setAmt: (e) => { this.setState({ err: Object.assign({}, err, { [r.id]: false }) }); this.upReq(r.id, { amt: e.target.value.replace(/[^0-9]/g, '') }); },
+setFreq: (e) => this.upReq(r.id, { freq: e.target.value }),
+err: !!err[r.id],
+sendQuote: () => { if (!r.amt) { this.setState({ err: Object.assign({}, err, { [r.id]: true }) }); return; } this.upReq(r.id, { status: 'quoted', quotedOn: 'today' }); },
+quotedOn: r.quotedOn || 'today',
+quoteText: '$' + r.amt + (/one-time/i.test(r.freq) ? ' · ' + r.freq.toLowerCase() : ' / visit · ' + r.freq.toLowerCase()),
+editQuote: () => this.upReq(r.id, { status: 'contacted' })
+};
+});
+
+// ---- business profile ----
+const setField = (k) => (e) => this.setState({ p: Object.assign({}, this.state.p, { [k]: e.target.value }), saved: 'dirty' });
+const SVC = ['Recurring', 'Deep clean', 'Move in / out', 'Post-construction', 'Airbnb', 'Organizing', 'Commercial'];
+const chip = (on) => "display:inline-flex;align-items:center;min-height:38px;padding:0 15px;border-radius:999px;font:500 14px 'Inter',sans-serif;cursor:pointer;border:1px solid " + (on ? '#1f2937;background:#1f2937;color:#fff' : '#d1d5db;background:#fff;color:#374151');
+const svcs = SVC.map((s) => { const on = p.svcs.includes(s); return { label: s, on, style: chip(on), toggle: () => this.setState({ p: Object.assign({}, p, { svcs: on ? p.svcs.filter((x) => x !== s) : p.svcs.concat(s) }), saved: 'dirty' }) }; });
+const areas = p.areas.map((a) => ({ label: a, remove: () => this.setState({ p: Object.assign({}, p, { areas: p.areas.filter((x) => x !== a) }), saved: 'dirty' }) }));
+const SAVE = { idle: ['', ''], dirty: ['Unsaved changes', 'background:#fef3c7;color:#92400e'], sent: ['Sent to Serve for review', 'background:#dcfce7;color:#166534'] };
+
+return {
+biz: p.name,
+tabs, onReq: tab === 'requests', onProfile: tab === 'profile',
+tiles, reqs: shown, none: shown.length === 0,
+listTitle: filter === 'all' ? 'Estimate requests' : LABEL[filter] + ' requests',
+freqs: ['One-time clean', 'One-time deep clean', 'Move in / out', 'Weekly', 'Biweekly', 'Monthly'],
+p, set: { name: setField('name'), phone: setField('phone'), tagline: setField('tagline'), about: setField('about'), priceLabel: setField('priceLabel'), price: setField('price'), note: setField('note') },
+tagCount: p.tagline.length,
+areas, newArea,
+setNewArea: (e) => this.setState({ newArea: e.target.value }),
+addArea: () => { const v = newArea.trim(); if (!v || p.areas.includes(v)) return; this.setState({ p: Object.assign({}, p, { areas: p.areas.concat(v.replace(/\b\w/g, (c) => c.toUpperCase())) }), newArea: '', saved: 'dirty' }); },
+svcs, previewTags: p.svcs.slice(0, 3),
+areaLine: p.areas.slice(0, 3).join(' · ') + (p.areas.length > 3 ? ' +' + (p.areas.length - 3) : ''),
+priceLabels: ['Pricing', 'Starts at', 'Current offer', 'New clients', 'Recurring plans'],
+submit: () => this.setState({ saved: 'sent' }),
+reset: () => this.setState({ p: JSON.parse(JSON.stringify(this.base)), saved: 'idle' }),
+saveText: SAVE[saved][0],
+saveStyle: saved === 'idle' ? 'display:none' : 'font-size:13.5px;font-weight:700;padding:6px 12px;border-radius:999px;' + SAVE[saved][1]
+};
+}
+}
+</script>
+</body>
+</html>

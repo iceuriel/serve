@@ -19,6 +19,7 @@ Before building or changing any UI:
 3. Match the reference implementation `design/serve/reference/waitlist.html` for look, motion and voice.
    It is framework-free on purpose: port it into our components; don't paste raw HTML.
 
+The client and business portals follow `design/serve/PORTALS_SPEC.md` and `design/serve/db/portals_schema.sql`.
 The marketplace home follows `design/serve/HOME_SPEC.md` exactly (reference: `design/serve/reference/home.html`).
 HOME_SPEC.md wins wherever it disagrees with DESIGN.md: the marketplace uses white accents and no gold.
 
@@ -49,6 +50,9 @@ When asked to build a new screen, first state which DESIGN.md §8 treatment appl
 | `tokens.css` | CSS variables, keyframes, component classes (`.serve-glass`, `.serve-btn-gold`, ...) |
 | `tailwind.preset.js` | The same tokens for Tailwind |
 | `HOME_SPEC.md` | Exact build spec + acceptance checklist for the marketplace home |
+| `PORTALS_SPEC.md` | Client + business portals: routes, auth, screens, build order, checklist |
+| `db/portals_schema.sql` | Supabase tables, row-level security and RPCs for the portals |
+| `reference/portals/*.dc.html` | Portal design source (template markup + logic; port, don't run) |
 | `reference/home.html` | Working marketplace home (search flows into providers) |
 | `reference/waitlist.html` | Working waitlist page (vanilla HTML/JS) |
 | `logos/` | Partner logo files go here |

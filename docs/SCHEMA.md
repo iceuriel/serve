@@ -1417,6 +1417,42 @@ number the marketplace exists to keep**; nothing writes them yet (phase 2).
 `notified_at` is stamped when webhook r63 confirms the founder email: **a blank
 `notified_at` is a request nobody was told about.**
 
+### The portals (migration 0003, 2026-11-09; PORTALS_SPEC.md)
+
+`design/serve/db/portals_schema.sql` is a Supabase draft. 0003 adapts it to
+D1 instead of copying it; the kit's name → ours:
+
+| Kit | Here |
+|---|---|
+| `partners` | `providers`. phone = `internal_phone`, price = `price_value`, highlight = `card_note`, services = `services` (+ `service_tags`, the filter subset), published = `listed` + `status` |
+| `partner_members` | `provider_members` (provider_id, email, role owner/staff). No sign-in reads it yet |
+| `admins` | none: the founder's `MARKET_PREVIEW_KEY` |
+| `clients` | `clients` + `full_name`, `email`, `neighborhood`, `street_address`, `unit`, `contact_pref` (text/call/either) |
+| `homes` | `homes` + `whole_notes`; unique `client_id` |
+| `home_floors` | `home_floors` (FLR-, `position`); deleting a floor deletes its rooms |
+| `home_rooms` | `home_rooms` + `floor_id`, `notes`. type = `room_type` (bedroom, bathroom, half_bath, kitchen, living_room, dining_room, office, laundry, entryway, other), name = `label`, position = `sort` |
+| `quote_requests` | `estimate_requests` + `contacted_at`. `quoted_*` hold the LATEST quote |
+| `quotes` | `quotes` (QTE-). **Append-only: triggers refuse UPDATE and DELETE.** Frequencies: one_time, one_time_deep, move_in_out, weekly, biweekly, monthly |
+| `partner_profile_edits` | `provider_profile_edits` (EDT-). `changes` is a JSON object of only the changed keys |
+
+**There is no row-level security in D1. `src/portals.js` is the policy:**
+every portal read and write goes through it, each function takes the actor
+(client / provider / admin) first, and `tests/portals.test.js` holds it to
+the kit's policies:
+- a company reads a client's home only once that client has sent it a request;
+- a company sees the street address only on a walkthrough request (the
+  request's own `address`, else the client's `street_address` + `unit`), and
+  the client's name only as first name + last initial;
+- a company changes a request only through `markContacted` (new → contacted)
+  and `sendQuote` (a new `quotes` row), on its own requests;
+- a company changes its profile only by filing an edit; only
+  `approveProfileEdit` (founder) writes `providers`, and it re-checks every
+  key against `EDITABLE`, so ratings, reviews, listing, logos and internal
+  fields cannot be changed through an edit.
+
+`db/dev-seed-portals.sql` is sample data (DEV ids, 555-01xx phones) for local
+databases only. **Never run it with `--remote`.**
+
 ### Leads MASTER: `ESTIMATE_REQUESTS_LOG` (r63, auto-created)
 
 `request_id · created_at · provider_id · provider_name · method · time_pref ·
